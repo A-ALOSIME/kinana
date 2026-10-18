@@ -1,0 +1,32 @@
+# Rust & Tauri build outputs
+/src-tauri/target/
+**/*.rs.bk
+
+# Node & Frontend dependencies and builds
+/ui/node_modules/
+/ui/dist/
+/ui/dist-ssr/
+*.local
+
+# Compiled binaries and installers
+*.exe
+*.pdb
+*.msi
+*.dll
+
+# User vaults, backups, secrets and temporary files
+*.dat
+*.bak
+*.log
+*.tmp
+*.lnk
+vault.dat
+vault.dat.bak
+
+# Operating System & Editor caches
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
