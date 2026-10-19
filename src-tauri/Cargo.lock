@@ -2098,7 +2098,7 @@ dependencies = [
 name = "kinana"
 version = "0.1.0"
 dependencies = [
- "portvault-core",
+ "kinana-core",
  "rand 0.8.8",
  "rfd",
  "serde",
@@ -2108,6 +2108,20 @@ dependencies = [
  "tokio",
  "uuid",
  "windows-sys 0.59.0",
+ "zeroize",
+]
+
+[[package]]
+name = "kinana-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-normalization",
  "zeroize",
 ]
 
@@ -2814,20 +2828,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715"
 dependencies = [
  "portable-atomic",
-]
-
-[[package]]
-name = "portvault-core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "argon2",
- "rand 0.8.8",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "unicode-normalization",
- "zeroize",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use portvault_core::{
+use kinana_core::{
     models::{Account, SecretString, Service, VaultSummary},
     storage::{VaultSession, VaultStorage},
 };
@@ -704,10 +704,10 @@ fn update_recovery_file_internal(app: &AppHandle, master_password: &str) -> Resu
     }
     let code = format!("KN-{}", code_parts.join("-"));
 
-    let params = portvault_core::crypto::Argon2Parameters::default();
-    let header = portvault_core::crypto::VaultHeader::new_with_fresh_salts(params).map_err(|e| e.to_string())?;
-    let key = portvault_core::crypto::derive_key(&code, &header.salt, &header.argon2_params).map_err(|e| e.to_string())?;
-    let encrypted_payload = portvault_core::crypto::encrypt_payload(master_password.as_bytes(), &key, &header)
+    let params = kinana_core::crypto::Argon2Parameters::default();
+    let header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(params).map_err(|e| e.to_string())?;
+    let key = kinana_core::crypto::derive_key(&code, &header.salt, &header.argon2_params).map_err(|e| e.to_string())?;
+    let encrypted_payload = kinana_core::crypto::encrypt_payload(master_password.as_bytes(), &key, &header)
         .map_err(|e| e.to_string())?;
 
     // Write ONLY raw encrypted binary payload directly (Starts with PORTVLT1 header + AES-256-GCM ciphertext)
@@ -791,8 +791,8 @@ async fn change_master_password(
         .ok_or_else(|| "الخزنة مقفلة. يرجى فتح الخزنة أولاً لتغيير كلمة المرور.".to_string())?;
 
     // 1. احفظ المفتاح القديم والهيدر مؤقتاً
-    let old_key = portvault_core::crypto::DerivedKey::new(*session.key.as_bytes());
-    let old_header = portvault_core::crypto::VaultHeader {
+    let old_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    let old_header = kinana_core::crypto::VaultHeader {
         magic: session.header.magic,
         version: session.header.version,
         argon2_params: session.header.argon2_params,
@@ -804,11 +804,11 @@ async fn change_master_password(
     let backup_path = vault_path.with_extension("dat.bak");
     if vault_path.exists() {
         let existing_bytes = std::fs::read(&vault_path).map_err(|e| e.to_string())?;
-        if existing_bytes.len() < portvault_core::crypto::MIN_VAULT_FILE_SIZE {
+        if existing_bytes.len() < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
             return Err("ملف الخزنة الحالي تالف أو غير صالح".to_string());
         }
 
-        portvault_core::crypto::decrypt_payload(&existing_bytes, &old_key)
+        kinana_core::crypto::decrypt_payload(&existing_bytes, &old_key)
             .map_err(|_| "فشل التحقق من صحة الخزنة بالمفتاح الحالي".to_string())?;
 
         std::fs::copy(&vault_path, &backup_path)
@@ -819,14 +819,14 @@ async fn change_master_password(
     }
 
     // 3. ثم بدّل المفتاح والهيدر
-    let new_header = portvault_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
+    let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
         .map_err(|e| {
             if backup_path.exists() && !vault_path.exists() {
                 let _ = std::fs::copy(&backup_path, &vault_path);
             }
             e.to_string()
         })?;
-    let new_key = portvault_core::crypto::derive_key(&new_password, &new_header.salt, &new_header.argon2_params)
+    let new_key = kinana_core::crypto::derive_key(&new_password, &new_header.salt, &new_header.argon2_params)
         .map_err(|e| {
             if backup_path.exists() && !vault_path.exists() {
                 let _ = std::fs::copy(&backup_path, &vault_path);
@@ -926,7 +926,7 @@ async fn recover_vault_with_key(
     let bytes = std::fs::read(&recovery_path).map_err(|e| e.to_string())?;
     
     // Support pure encrypted binary payload (standard) or legacy JSON migration
-    let payload = if bytes.starts_with(portvault_core::crypto::MAGIC_BYTES) {
+    let payload = if bytes.starts_with(kinana_core::crypto::MAGIC_BYTES) {
         bytes
     } else if let Ok(file_data) = serde_json::from_slice::<RecoveryDataFile>(&bytes) {
         file_data.encrypted_payload
@@ -934,17 +934,17 @@ async fn recover_vault_with_key(
         bytes
     };
 
-    if payload.len() < portvault_core::crypto::MIN_VAULT_FILE_SIZE {
+    if payload.len() < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
         return Err("بيانات الاسترداد تالفة أو قصيرة جداً".to_string());
     }
 
-    let header = portvault_core::crypto::VaultHeader::from_bytes(&payload[0..portvault_core::crypto::HEADER_SIZE])
+    let header = kinana_core::crypto::VaultHeader::from_bytes(&payload[0..kinana_core::crypto::HEADER_SIZE])
         .map_err(|_| "بيانات ترويسة الاسترداد غير صالحة".to_string())?;
 
-    let key = portvault_core::crypto::derive_key(&clean_code, &header.salt, &header.argon2_params)
+    let key = kinana_core::crypto::derive_key(&clean_code, &header.salt, &header.argon2_params)
         .map_err(|_| "مفتاح الاسترداد غير صحيح".to_string())?;
 
-    let (_header, plaintext) = portvault_core::crypto::decrypt_payload(&payload, &key)
+    let (_header, plaintext) = kinana_core::crypto::decrypt_payload(&payload, &key)
         .map_err(|_| "مفتاح الاسترداد المدخل غير مطابق أو غير صحيح!".to_string())?;
 
     let master_pwd = String::from_utf8(plaintext.to_vec()).map_err(|_| "فشل فك تشفير كلمة المرور".to_string())?;
@@ -1413,11 +1413,11 @@ async fn import_vault_backup(
         let source_path = file_handle.path();
         let bytes = std::fs::read(source_path).map_err(|e| format!("فشل قراءة الملف المختار: {}", e))?;
 
-        if bytes.len() < portvault_core::crypto::MIN_VAULT_FILE_SIZE {
+        if bytes.len() < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
             return Err("الملف المختار تالف أو ليس ملف خزنة كنانة صالح.".to_string());
         }
 
-        let _header = portvault_core::crypto::VaultHeader::from_bytes(&bytes[0..portvault_core::crypto::HEADER_SIZE])
+        let _header = kinana_core::crypto::VaultHeader::from_bytes(&bytes[0..kinana_core::crypto::HEADER_SIZE])
             .map_err(|_| "ترويسة ملف الخزنة غير صالحة أو غير متوافقة مع هذا الإصدار.".to_string())?;
 
         let vault_path = get_vault_path(&app)?;
