@@ -66,7 +66,12 @@ import {
   Pin,
   PinOff,
 } from "lucide-react";
-import { POPULAR_SERVICES, generateCinematicCoverSvg } from "@/data/popularServices";
+import {
+  POPULAR_SERVICES,
+  generateCinematicCoverSvg,
+  getServiceCoverAsync,
+  loadServiceCovers,
+} from "@/data/popularServices";
 
 interface AccountSummary {
   id: string;
@@ -463,6 +468,13 @@ export default function App() {
   const [presetCategory, setPresetCategory] = useState<string>("all");
   const [presetViewMode, setPresetViewMode] = useState<"grid" | "list">("grid");
 
+  // Lazy-load studio covers in background only when Add/Edit service dialog opens
+  useEffect(() => {
+    if (showAddService || showEditService) {
+      loadServiceCovers();
+    }
+  }, [showAddService, showEditService]);
+
   const filteredPresets = useMemo(() => {
     const rawQ = presetSearch.trim();
     let list = POPULAR_SERVICES.slice();
@@ -665,6 +677,7 @@ export default function App() {
       setSummary(null);
       setSelectedServiceId(null);
       setPassword("");
+      invoke("trim_app_memory").catch(() => {});
       setShowAddService(false);
       setShowEditService(false);
       setShowAddAccount(false);
@@ -1229,6 +1242,7 @@ export default function App() {
     try {
       await invoke("lock_vault");
       setUnlocked(false);
+      invoke("trim_app_memory").catch(() => {});
       setSummary(null);
       setSelectedServiceId(null);
       setPassword("");
@@ -3671,10 +3685,12 @@ export default function App() {
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setNewServiceName(preset.name);
                           setNewServiceIcon(generateCinematicCoverSvg(preset));
                           setAddServiceError(null);
+                          const cover = await getServiceCoverAsync(preset.id);
+                          if (cover) setNewServiceIcon(cover);
                         }}
                         className={`h-12 flex items-center gap-3 px-4 rounded-xl text-sm font-bold transition-all border text-right cursor-pointer ${
                           isSelected
@@ -3705,10 +3721,12 @@ export default function App() {
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setNewServiceName(preset.name);
                           setNewServiceIcon(generateCinematicCoverSvg(preset));
                           setAddServiceError(null);
+                          const cover = await getServiceCoverAsync(preset.id);
+                          if (cover) setNewServiceIcon(cover);
                         }}
                         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all border cursor-pointer ${
                           isSelected
@@ -3954,10 +3972,12 @@ export default function App() {
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setEditServiceName(preset.name);
                           setEditServiceIcon(generateCinematicCoverSvg(preset));
                           setEditServiceError(null);
+                          const cover = await getServiceCoverAsync(preset.id);
+                          if (cover) setEditServiceIcon(cover);
                         }}
                         className={`h-12 flex items-center gap-3 px-4 rounded-xl text-sm font-bold transition-all border text-right cursor-pointer ${
                           isSelected
@@ -3988,10 +4008,12 @@ export default function App() {
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setEditServiceName(preset.name);
                           setEditServiceIcon(generateCinematicCoverSvg(preset));
                           setEditServiceError(null);
+                          const cover = await getServiceCoverAsync(preset.id);
+                          if (cover) setEditServiceIcon(cover);
                         }}
                         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all border cursor-pointer ${
                           isSelected

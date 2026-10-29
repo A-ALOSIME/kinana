@@ -4,42 +4,20 @@
 
 @font-face {
   font-family: 'Thamaniah';
-  src: url('./assets/fonts/thmanyahsans-Black.otf') format('opentype'),
-       local('thmanyah sans Black'), local('thmanyah sans'), local('Thmanyah Sans'), local('Thamaniah'), local('ثمانية');
-  font-weight: 900;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'Thamaniah';
-  src: url('./assets/fonts/thmanyahsans-Bold.otf') format('opentype'),
+  src: url('./assets/fonts/thmanyahsans-Bold.woff2') format('woff2'),
        local('thmanyah sans Bold'), local('thmanyah sans'), local('Thmanyah Sans'), local('Thamaniah'), local('ثمانية');
   font-weight: 700;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
   font-family: 'Thamaniah';
-  src: url('./assets/fonts/thmanyahsans-Medium.otf') format('opentype'),
-       local('thmanyah sans Medium'), local('thmanyah sans'), local('Thmanyah Sans'), local('Thamaniah');
-  font-weight: 500;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'Thamaniah';
-  src: url('./assets/fonts/thmanyahsans-Regular.otf') format('opentype'),
+  src: url('./assets/fonts/thmanyahsans-Regular.woff2') format('woff2'),
        local('thmanyah sans Regular'), local('thmanyah sans'), local('Thmanyah Sans'), local('Thamaniah'), local('ثمانية');
   font-weight: 400;
   font-style: normal;
-}
-
-@font-face {
-  font-family: 'Thamaniah';
-  src: url('./assets/fonts/thmanyahsans-Light.otf') format('opentype'),
-       local('thmanyah sans Light'), local('thmanyah sans'), local('Thmanyah Sans'), local('Thamaniah');
-  font-weight: 300;
-  font-style: normal;
+  font-display: swap;
 }
 
 @layer base {

@@ -2096,7 +2096,7 @@ dependencies = [
 
 [[package]]
 name = "kinana"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "kinana-core",
  "rand 0.8.8",

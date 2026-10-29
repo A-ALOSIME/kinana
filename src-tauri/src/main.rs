@@ -1484,7 +1484,83 @@ async fn open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+
+#[cfg(windows)]
+pub fn trim_working_set_tree() {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, GetCurrentProcessId, OpenProcess, SetProcessWorkingSetSize,
+        PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA,
+    };
+
+    unsafe {
+        // 1. Trim own host process working set
+        SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+
+        // 2. Discover WebView2 child processes
+        let my_pid = GetCurrentProcessId();
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot != INVALID_HANDLE_VALUE {
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+            let mut direct_children = Vec::new();
+            if Process32FirstW(snapshot, &mut entry) != 0 {
+                loop {
+                    if entry.th32ParentProcessID == my_pid {
+                        direct_children.push(entry.th32ProcessID);
+                    }
+                    if Process32NextW(snapshot, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+
+            let mut all_pids = direct_children.clone();
+            for parent_pid in direct_children {
+                if Process32FirstW(snapshot, &mut entry) != 0 {
+                    loop {
+                        if entry.th32ParentProcessID == parent_pid {
+                            all_pids.push(entry.th32ProcessID);
+                        }
+                        if Process32NextW(snapshot, &mut entry) == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            CloseHandle(snapshot);
+
+            // 3. Trim each child process
+            for pid in all_pids {
+                let h_proc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, 0, pid);
+                if !h_proc.is_null() {
+                    SetProcessWorkingSetSize(h_proc, usize::MAX, usize::MAX);
+                    CloseHandle(h_proc);
+                }
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn trim_app_memory() -> Result<(), String> {
+    #[cfg(windows)]
+    trim_working_set_tree();
+    Ok(())
+}
+
 fn main() {
+    #[cfg(windows)]
+    {
+        let flags = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
+        std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
+    }
+
     #[cfg(windows)]
     let _single_instance_mutex = {
         use windows_sys::Win32::Foundation::{GetLastError, SetLastError, ERROR_ALREADY_EXISTS};
@@ -1528,6 +1604,12 @@ fn main() {
                 }
                 tauri::WindowEvent::Destroyed => {
                     std::process::exit(0);
+                }
+                tauri::WindowEvent::Focused(focused) => {
+                    if !focused {
+                        #[cfg(windows)]
+                        trim_working_set_tree();
+                    }
                 }
                 _ => {}
             }
@@ -1617,8 +1699,18 @@ fn main() {
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                let mut ticks: u32 = 0;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    ticks = ticks.wrapping_add(1);
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let is_min = window.is_minimized().unwrap_or(false);
+                        let is_vis = window.is_visible().unwrap_or(true);
+                        if is_min || !is_vis || (ticks % 15 == 0) {
+                            #[cfg(windows)]
+                            trim_working_set_tree();
+                        }
+                    }
                     let state = app_handle.state::<AppState>();
                     let should_lock = {
                         let timeout_secs = state
@@ -1688,6 +1780,7 @@ fn main() {
             import_vault_backup,
             open_vault_folder,
             open_url,
+            trim_app_memory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
