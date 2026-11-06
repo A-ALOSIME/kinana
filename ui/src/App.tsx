@@ -555,65 +555,105 @@ export default function App() {
 
   const toggleRevealAccountPassword = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
+    const epoch = sessionEpochRef.current;
     if (revealedAccountPasswords[accId]) {
       setRevealedAccountPasswords((prev) => ({ ...prev, [accId]: false }));
+      // Wipe decrypted password from memory on hide
+      setServiceAccounts((prev) =>
+        prev.map((a) => (a.id === accId ? { ...a, password: null } : a))
+      );
     } else {
-      if (!account.password) {
-        try {
-          const pwd = await invoke<string>("get_account_password", {
-            serviceId,
-            accountId: accId,
-          });
-          setServiceAccounts((prev) =>
-            prev.map((a) => (a.id === accId ? { ...a, password: pwd } : a))
-          );
-        } catch (err) {
-          console.error("Failed to fetch account password:", err);
-        }
+      try {
+        const pwd = await invoke<string>("get_account_password", {
+          serviceId,
+          accountId: accId,
+        });
+        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        setServiceAccounts((prev) =>
+          prev.map((a) => (a.id === accId ? { ...a, password: pwd } : a))
+        );
+        setRevealedAccountPasswords((prev) => ({ ...prev, [accId]: true }));
+      } catch (err) {
+        console.error("Failed to fetch account password:", err);
       }
-      setRevealedAccountPasswords((prev) => ({ ...prev, [accId]: true }));
     }
   };
 
   const toggleRevealAccountRecoveryKey = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
+    const epoch = sessionEpochRef.current;
     if (revealedAccountRecoveryKeys[accId]) {
       setRevealedAccountRecoveryKeys((prev) => ({ ...prev, [accId]: false }));
+      // Wipe recovery key from memory on hide
+      setServiceAccounts((prev) =>
+        prev.map((a) => (a.id === accId ? { ...a, recovery_key: null } : a))
+      );
     } else {
-      if (!account.recovery_key) {
-        try {
-          const key = await invoke<string>("get_account_recovery_key", {
-            serviceId,
-            accountId: accId,
-          });
-          setServiceAccounts((prev) =>
-            prev.map((a) => (a.id === accId ? { ...a, recovery_key: key } : a))
-          );
-        } catch (err) {
-          console.error("Failed to fetch account recovery key:", err);
-        }
+      try {
+        const key = await invoke<string>("get_account_recovery_key", {
+          serviceId,
+          accountId: accId,
+        });
+        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        setServiceAccounts((prev) =>
+          prev.map((a) => (a.id === accId ? { ...a, recovery_key: key } : a))
+        );
+        setRevealedAccountRecoveryKeys((prev) => ({ ...prev, [accId]: true }));
+      } catch (err) {
+        console.error("Failed to fetch account recovery key:", err);
       }
-      setRevealedAccountRecoveryKeys((prev) => ({ ...prev, [accId]: true }));
+    }
+  };
+
+  const toggleRevealCardCvv = async (serviceId: string, account: AccountDetail) => {
+    const accId = account.id;
+    const epoch = sessionEpochRef.current;
+    if (revealedCardCvvs[accId]) {
+      setRevealedCardCvvs((prev) => ({ ...prev, [accId]: false }));
+      // Wipe card CVV from memory on hide
+      setServiceAccounts((prev) =>
+        prev.map((a) => (a.id === accId ? { ...a, recovery_key: null } : a))
+      );
+    } else {
+      try {
+        const cvv = await invoke<string>("get_account_recovery_key", {
+          serviceId,
+          accountId: accId,
+        });
+        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        setServiceAccounts((prev) =>
+          prev.map((a) => (a.id === accId ? { ...a, recovery_key: cvv } : a))
+        );
+        setRevealedCardCvvs((prev) => ({ ...prev, [accId]: true }));
+      } catch (err) {
+        console.error("Failed to fetch card CVV:", err);
+      }
     }
   };
 
   const toggleRevealCardPin = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
+    const epoch = sessionEpochRef.current;
     if (revealedCardPins[accId]) {
       setRevealedCardPins((prev) => ({ ...prev, [accId]: false }));
+      // Wipe card PIN from memory on hide
+      setRevealedCardPinValues((prev) => {
+        const copy = { ...prev };
+        delete copy[accId];
+        return copy;
+      });
     } else {
-      if (!revealedCardPinValues[accId]) {
-        try {
-          const pin = await invoke<string>("get_account_pin", {
-            serviceId,
-            accountId: accId,
-          });
-          setRevealedCardPinValues((prev) => ({ ...prev, [accId]: pin }));
-        } catch (err) {
-          console.error("Failed to fetch card pin:", err);
-        }
+      try {
+        const pin = await invoke<string>("get_account_pin", {
+          serviceId,
+          accountId: accId,
+        });
+        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        setRevealedCardPinValues((prev) => ({ ...prev, [accId]: pin }));
+        setRevealedCardPins((prev) => ({ ...prev, [accId]: true }));
+      } catch (err) {
+        console.error("Failed to fetch card pin:", err);
       }
-      setRevealedCardPins((prev) => ({ ...prev, [accId]: true }));
     }
   };
 
@@ -3277,7 +3317,7 @@ export default function App() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => toggleRevealAccountRecoveryKey(selectedService.id, acc)}
+                                    onClick={() => toggleRevealCardCvv(selectedService.id, acc)}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
                                     title={isCvvRevealed ? "إخفاء" : "إظهار"}
                                   >
@@ -4825,7 +4865,7 @@ export default function App() {
                     <div className="relative">
                       <Input
                         type={showCardCvv ? "text" : "password"}
-                        placeholder="123"
+                        placeholder="اتركه فارغاً للإبقاء على رمز الأمان الحالي"
                         value={cardCvv}
                         onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
                         className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest pl-12"
@@ -4849,7 +4889,7 @@ export default function App() {
                   </label>
                   <Input
                     type="password"
-                    placeholder="رمز الصراف المكون من 4 أرقام"
+                    placeholder="اتركه فارغاً للإبقاء على الرمز السري الحالي"
                     value={cardPin}
                     onChange={(e) => setCardPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest"
@@ -4950,7 +4990,7 @@ export default function App() {
                   <div className="relative">
                     <Input
                       type={showEditRecoveryKey ? "text" : "password"}
-                      placeholder="مفتاح استرجاع الحساب"
+                      placeholder="اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"
                       value={editRecoveryKey}
                       onChange={(e) => setEditRecoveryKey(e.target.value)}
                       className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12"

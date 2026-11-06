@@ -298,10 +298,13 @@ async fn create_vault(
         .create_new_vault(&password, None)
         .map_err(|e| e.to_string())?;
 
+    // Create fresh recovery code, embed into encrypted vault data, and save vault
+    let code = generate_emergency_recovery_code();
+    session.data.recovery_code = Some(code.clone());
     storage.save(&mut session).map_err(|e| e.to_string())?;
 
-    // Create emergency recovery file and hold the recovery key in memory for this session
-    let code = update_recovery_file_internal(&app, &password)?;
+    // Create emergency recovery file with this exact recovery key
+    write_recovery_file(&app, &password, &code)?;
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(code));
     }
@@ -326,16 +329,33 @@ async fn unlock_vault(
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
 
-    let session = storage.unlock(&password).map_err(|e| e.to_string())?;
+    let mut session = storage.unlock(&password).map_err(|e| e.to_string())?;
+
+    // Synchronize recovery key: if vault has code, load it; if legacy, generate and persist
+    let rec_code = if let Some(ref code) = session.data.recovery_code {
+        let c = code.clone();
+        let recovery_path = get_recovery_file_path(&app)?;
+        if !recovery_path.exists() {
+            let _ = write_recovery_file(&app, &password, &c);
+        }
+        c
+    } else {
+        let new_code = generate_emergency_recovery_code();
+        session.data.recovery_code = Some(new_code.clone());
+        let _ = storage.save(&mut session);
+        let _ = write_recovery_file(&app, &password, &new_code);
+        new_code
+    };
+
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = Some(SecretString::new(rec_code));
+    }
 
     // Zeroize password immediately after use
     password.zeroize();
 
     let mut lock = state.session.lock().map_err(|e| e.to_string())?;
     *lock = Some(session);
-    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
-        *rec_lock = None;
-    }
     update_activity(&state);
 
     Ok(())
@@ -648,12 +668,9 @@ struct RecoveryDataFile {
     encrypted_payload: Vec<u8>,
 }
 
-fn update_recovery_file_internal(app: &AppHandle, master_password: &str) -> Result<String, String> {
+fn generate_emergency_recovery_code() -> String {
     use rand::RngCore;
     use rand::rngs::OsRng;
-    let recovery_path = get_recovery_file_path(app)?;
-    
-    // Generate fresh recovery code: KN-XXXX-XXXX-XXXX-XXXX
     let chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = OsRng;
     let mut code_parts = Vec::new();
@@ -664,11 +681,16 @@ fn update_recovery_file_internal(app: &AppHandle, master_password: &str) -> Resu
         }).collect();
         code_parts.push(part);
     }
-    let code = format!("KN-{}", code_parts.join("-"));
+    format!("KN-{}", code_parts.join("-"))
+}
+
+fn write_recovery_file(app: &AppHandle, master_password: &str, recovery_code: &str) -> Result<(), String> {
+    let recovery_path = get_recovery_file_path(app)?;
+    let clean_code = recovery_code.trim().to_uppercase();
 
     let params = kinana_core::crypto::Argon2Parameters::default();
     let header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(params).map_err(|e| e.to_string())?;
-    let key = kinana_core::crypto::derive_key(&code, &header.salt, &header.argon2_params).map_err(|e| e.to_string())?;
+    let key = kinana_core::crypto::derive_key(&clean_code, &header.salt, &header.argon2_params).map_err(|e| e.to_string())?;
     let encrypted_payload = kinana_core::crypto::encrypt_payload(master_password.as_bytes(), &key, &header)
         .map_err(|e| e.to_string())?;
 
@@ -680,7 +702,7 @@ fn update_recovery_file_internal(app: &AppHandle, master_password: &str) -> Resu
     // Ensure NO recovery code is stored in Windows Credential Store (strictly offline user recovery key)
     unsafe { delete_recovery_code_wincred(); }
 
-    Ok(code)
+    Ok(())
 }
 
 #[tauri::command]
@@ -784,7 +806,15 @@ async fn change_master_password(
     }
 
     // 4. تحديث ملف الاسترداد والتحقق من عدم حدوث أخطاء صامتة
-    let recovery_code = update_recovery_file_internal(&app, &new_password)
+    let recovery_code = if let Some(ref c) = session.data.recovery_code {
+        c.clone()
+    } else {
+        let fresh = generate_emergency_recovery_code();
+        session.data.recovery_code = Some(fresh.clone());
+        fresh
+    };
+
+    write_recovery_file(&app, &new_password, &recovery_code)
         .map_err(|e| format!("تم تشفير الخزنة بالمفتاح الجديد لكن تعذر تحديث ملف الاسترداد: {}", e))?;
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
@@ -824,9 +854,9 @@ async fn get_or_generate_recovery_key(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let lock = state.session.lock().map_err(|e| e.to_string())?;
-    if lock.is_none() {
-        return Err("الخزنة مقفلة. يرجى فتح الخزنة أولاً لعرض مفتاح الاسترداد.".to_string());
-    }
+    let session = lock
+        .as_ref()
+        .ok_or_else(|| "الخزنة مقفلة. يرجى فتح الخزنة أولاً لعرض مفتاح الاسترداد.".to_string())?;
 
     if let Ok(rec_lock) = state.current_recovery_key.lock() {
         if let Some(ref key) = *rec_lock {
@@ -834,7 +864,14 @@ async fn get_or_generate_recovery_key(
         }
     }
 
-    Err("مفتاح الاسترداد تم توليده عند إنشاء الخزنة ومتاح دون تخزين محلي لضمان الأمان.".to_string())
+    if let Some(ref code) = session.data.recovery_code {
+        if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+            *rec_lock = Some(SecretString::new(code.clone()));
+        }
+        return Ok(code.clone());
+    }
+
+    Err("لم يتم العثور على مفتاح استرداد للخزنة.".to_string())
 }
 
 #[tauri::command]
@@ -877,11 +914,16 @@ async fn recover_vault_with_key(
 
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
-    let session = storage.unlock(&master_pwd).map_err(|e| e.to_string())?;
+    let mut session = storage.unlock(&master_pwd).map_err(|e| e.to_string())?;
+
+    // Ensure session data recovery code matches the key used
+    if session.data.recovery_code.as_deref() != Some(&clean_code) {
+        session.data.recovery_code = Some(clean_code.clone());
+        let _ = storage.save(&mut session);
+    }
 
     // Keep recovery key in memory for this session and delete any old unencrypted WinCred entry
     unsafe { delete_recovery_code_wincred(); }
-    let _ = update_recovery_file_internal(&app, &master_pwd);
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(clean_code));
@@ -1312,11 +1354,58 @@ async fn update_account(
             )
         })?;
 
-    let packed_notes = pack_account_notes(
-        email.as_deref().unwrap_or(""),
-        recovery_key.as_deref().unwrap_or(""),
-        notes.as_deref().unwrap_or(""),
-    );
+    let (existing_email, existing_recovery_key, existing_notes) = unpack_account_notes(account.notes.as_deref());
+
+    let final_email = email.unwrap_or(existing_email);
+
+    // If recovery_key is None or empty in partial update, preserve existing secret (CVV or recovery key)
+    let final_recovery_key = match recovery_key {
+        Some(r) => {
+            let trimmed = r.trim().to_string();
+            if trimmed.is_empty() {
+                existing_recovery_key
+            } else {
+                trimmed
+            }
+        }
+        None => existing_recovery_key,
+    };
+
+    // If account has an existing PIN in notes and the new update does not provide a new PIN, preserve existing PIN
+    let existing_pin_line = existing_notes
+        .lines()
+        .find(|l| l.trim().starts_with("PIN:"))
+        .map(|l| l.trim().to_string());
+
+    let final_notes = match notes {
+        Some(n) => {
+            let trimmed = n.trim().to_string();
+            if trimmed.is_empty() {
+                if let Some(pin) = existing_pin_line {
+                    pin
+                } else {
+                    String::new()
+                }
+            } else if !trimmed.contains("PIN:") && existing_pin_line.is_some() {
+                let pin = existing_pin_line.unwrap();
+                if trimmed.starts_with("[CARD]") {
+                    let rest = trimmed["[CARD]".len()..].trim();
+                    if rest.is_empty() {
+                        format!("[CARD]\n{}", pin)
+                    } else {
+                        format!("[CARD]\n{}\n{}", pin, rest)
+                    }
+                } else {
+                    format!("{}\n{}", pin, trimmed)
+                }
+            } else {
+                trimmed
+            }
+        }
+        None => existing_notes,
+    };
+
+    let packed_notes = pack_account_notes(&final_email, &final_recovery_key, &final_notes);
 
     let clean_url = url.and_then(|u| {
         let trimmed = u.trim();
@@ -1476,8 +1565,16 @@ async fn import_vault_backup(
             .map_err(|_| "كلمة المرور غير صحيحة، أو ملف الخزنة المستورد تالف وغير قابل لفك التشفير.".to_string())?;
 
         // 4. التحقق من صحة بنية JSON الداخلية
-        let _data: kinana_core::models::VaultData = serde_json::from_slice(payload_bytes.as_slice())
+        let mut imported_data: kinana_core::models::VaultData = serde_json::from_slice(payload_bytes.as_slice())
             .map_err(|_| "بنية بيانات الخزنة المستوردة تالفة أو غير متوافقة.".to_string())?;
+
+        let rec_code = if let Some(ref code) = imported_data.recovery_code {
+            code.clone()
+        } else {
+            let code = generate_emergency_recovery_code();
+            imported_data.recovery_code = Some(code.clone());
+            code
+        };
 
         let vault_path = get_vault_path(&app)?;
         let backup_safety = vault_path.with_extension("dat.bak");
@@ -1499,8 +1596,8 @@ async fn import_vault_backup(
             return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
         }
 
-        // 8. تحديث ملف الاسترداد للخزنة المستوردة بكلمة مرورها المحققة
-        let _ = update_recovery_file_internal(&app, &password);
+        // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها
+        let _ = write_recovery_file(&app, &password, &rec_code);
 
         if let Ok(mut lock) = state.session.lock() {
             *lock = None;

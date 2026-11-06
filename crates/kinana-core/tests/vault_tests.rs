@@ -376,3 +376,96 @@ fn test_emergency_recovery_flow() {
     let failed = kinana_core::crypto::decrypt_payload(&ciphertext, &wrong_key);
     assert!(failed.is_err(), "Wrong recovery code must fail decryption");
 }
+
+/// 10. اختبار حفظ مفتاح الاسترداد في بيانات الخزنة واستمرار صلاحيته في عمليات استرداد متتالية
+#[test]
+fn test_recovery_code_persists_in_vault_data_and_supports_consecutive_recoveries() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let password = "MainMasterPassword123#";
+    let recovery_code = "KN-RECO-VERY-TEST-2026";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let mut session = storage
+        .create_new_vault(password, Some(fast_params))
+        .unwrap();
+
+    // 1. تثبيت مفتاح الاسترداد داخل بيانات الخزنة المشفرة
+    session.data.recovery_code = Some(recovery_code.to_string());
+    storage.save(&mut session).unwrap();
+
+    // 2. محاكاة إنشاء ملف recovery.dat المشفر برمز الاسترداد
+    let rec_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(recovery_code, &rec_header.salt, &rec_header.argon2_params).unwrap();
+    let recovery_dat = kinana_core::crypto::encrypt_payload(password.as_bytes(), &rec_key, &rec_header).unwrap();
+
+    // 3. إعادة فتح الخزنة بكلمة المرور الرئيسية والتأكد من استرجاع مفتاح الاسترداد من القرص
+    let reloaded_session = storage.unlock(password).unwrap();
+    assert_eq!(
+        reloaded_session.data.recovery_code.as_deref(),
+        Some(recovery_code),
+        "Recovery code must be loaded from decrypted vault data"
+    );
+
+    // 4. استرداد الخزنة أول مرة عبر مفتاح الاسترداد
+    let (_hdr1, plain1) = kinana_core::crypto::decrypt_payload(&recovery_dat, &rec_key).unwrap();
+    let recovered_pwd1 = std::str::from_utf8(plain1.as_slice()).unwrap();
+    let unlocked_1 = storage.unlock(recovered_pwd1).unwrap();
+    assert_eq!(unlocked_1.data.recovery_code.as_deref(), Some(recovery_code));
+
+    // 5. استرداد الخزنة مرة ثانية متتالية بنفس المفتاح دون أن يتلف أو يتغير
+    let (_hdr2, plain2) = kinana_core::crypto::decrypt_payload(&recovery_dat, &rec_key).unwrap();
+    let recovered_pwd2 = std::str::from_utf8(plain2.as_slice()).unwrap();
+    let unlocked_2 = storage.unlock(recovered_pwd2).unwrap();
+    assert_eq!(unlocked_2.data.recovery_code.as_deref(), Some(recovery_code));
+}
+
+/// 11. اختبار استمرار صلاحية مفتاح الاسترداد بعد تدوير كلمة المرور الرئيسية (Rekey)
+#[test]
+fn test_recovery_key_retained_across_password_rekey() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let old_pwd = "InitialPassword123#";
+    let new_pwd = "NewRotatedPassword456$";
+    let recovery_code = "KN-SAME-RECO-VERY-CODE";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let mut session = storage
+        .create_new_vault(old_pwd, Some(fast_params))
+        .unwrap();
+    session.data.recovery_code = Some(recovery_code.to_string());
+    storage.save(&mut session).unwrap();
+
+    // Rekey vault to new password
+    let old_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let new_key = kinana_core::crypto::derive_key(new_pwd, &new_header.salt, &new_header.argon2_params).unwrap();
+    session.header = new_header;
+    session.key = new_key;
+    storage.save_rekey(&mut session, &old_key).unwrap();
+
+    // Re-encrypt recovery file with the same recovery code and the new password
+    let rec_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(recovery_code, &rec_header.salt, &rec_header.argon2_params).unwrap();
+    let updated_recovery_dat = kinana_core::crypto::encrypt_payload(new_pwd.as_bytes(), &rec_key, &rec_header).unwrap();
+
+    // Unlock using recovery code
+    let (_h, plain) = kinana_core::crypto::decrypt_payload(&updated_recovery_dat, &rec_key).unwrap();
+    let recovered_pwd = std::str::from_utf8(plain.as_slice()).unwrap();
+    assert_eq!(recovered_pwd, new_pwd);
+
+    let session_recovered = storage.unlock(recovered_pwd).unwrap();
+    assert_eq!(session_recovered.data.recovery_code.as_deref(), Some(recovery_code));
+}

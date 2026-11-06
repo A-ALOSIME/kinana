@@ -72,6 +72,8 @@ pub struct VaultData {
     pub version: u32,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub recovery_code: Option<String>,
     pub services: Vec<Service>,
 }
 
