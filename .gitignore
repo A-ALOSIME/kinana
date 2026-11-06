@@ -1,5 +1,7 @@
 # Rust & Tauri build outputs
+target/
 /src-tauri/target/
+/crates/*/target/
 **/*.rs.bk
 
 # Node & Frontend dependencies and builds

@@ -668,24 +668,43 @@ export default function App() {
     }
   };
 
+  const purgeAllSensitiveState = () => {
+    setUnlocked(false);
+    setSummary(null);
+    setSelectedServiceId(null);
+    setServiceAccounts([]);
+    setPassword("");
+    setSavedPasswordHint(null);
+    setShowSavedPassword(false);
+    setRecoveryKey("");
+    setRevealedAccountPasswords({});
+    setRevealedAccountRecoveryKeys({});
+    setRevealedCardNumbers({});
+    setRevealedCardCvvs({});
+    setRevealedCardPins({});
+    setAccPassword("");
+    setAccRecoveryKey("");
+    setCardCvv("");
+    setCardPin("");
+    setNewMasterPassword("");
+    setConfirmMasterPassword("");
+    setShowAddService(false);
+    setShowEditService(false);
+    setShowAddAccount(false);
+    setEditingAccount(null);
+    setShowSettings(false);
+    setShowRecoveryModal(false);
+    setServiceToDelete(null);
+    setAccountToDelete(null);
+  };
+
   useEffect(() => {
     initApp();
 
     // Listen to auto-lock event from backend
     const unlistenPromise = listen("vault-auto-locked", () => {
-      setUnlocked(false);
-      setSummary(null);
-      setSelectedServiceId(null);
-      setPassword("");
+      purgeAllSensitiveState();
       invoke("trim_app_memory").catch(() => {});
-      setShowAddService(false);
-      setShowEditService(false);
-      setShowAddAccount(false);
-      setEditingAccount(null);
-      setShowSettings(false);
-      setShowRecoveryModal(false);
-      setServiceToDelete(null);
-      setAccountToDelete(null);
       setError("تم إقفال كنانة تلقائياً بسبب الخمول لحماية بياناتك.");
     });
 
@@ -837,7 +856,7 @@ export default function App() {
     };
   }, [unlocked]);
 
-  // Prevent auto-lock while any modal with user inputs is open so unsaved input is never lost
+  // Ping activity once when a modal opens to ensure a fresh timeout window without infinite lock suppression
   const isAnyModalActive =
     showAddAccount ||
     Boolean(editingAccount) ||
@@ -848,13 +867,7 @@ export default function App() {
 
   useEffect(() => {
     if (!unlocked || !isAnyModalActive) return;
-
     invoke("ping_activity").catch(() => {});
-    const interval = setInterval(() => {
-      invoke("ping_activity").catch(() => {});
-    }, 10000);
-
-    return () => clearInterval(interval);
   }, [unlocked, isAnyModalActive]);
 
   const handleSetAutoLockTimeout = async (secs: number | null) => {
@@ -1241,18 +1254,8 @@ export default function App() {
   const handleLock = async () => {
     try {
       await invoke("lock_vault");
-      setUnlocked(false);
+      purgeAllSensitiveState();
       invoke("trim_app_memory").catch(() => {});
-      setSummary(null);
-      setSelectedServiceId(null);
-      setPassword("");
-      setShowAddService(false);
-      setShowEditService(false);
-      setShowAddAccount(false);
-      setEditingAccount(null);
-      setShowSettings(false);
-      setServiceToDelete(null);
-      setAccountToDelete(null);
       setError(null);
     } catch (err: any) {
       setError(err?.toString() || "فشل قفل الخزنة");
@@ -1715,7 +1718,7 @@ export default function App() {
   const copyFieldValue = async (accountId: string, field: string, value: string) => {
     if (!value) return;
     try {
-      if (field === "password" || field === "recovery_key") {
+      if (field === "password" || field === "recovery_key" || field === "pin" || field === "cvv" || field === "number") {
         await invoke("copy_secure_text", { text: value });
       } else {
         await navigator.clipboard.writeText(value);
@@ -5224,7 +5227,7 @@ export default function App() {
                     type="button"
                     variant="secondary"
                     onClick={() => {
-                      navigator.clipboard.writeText(recoveryKey);
+                      invoke("copy_secure_text", { text: recoveryKey }).catch(() => navigator.clipboard.writeText(recoveryKey));
                       setCopiedRecoveryKey(true);
                       setTimeout(() => setCopiedRecoveryKey(false), 2000);
                     }}

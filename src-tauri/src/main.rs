@@ -48,9 +48,9 @@ fn get_vault_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// and memory allocation functions (GlobalAlloc, GlobalLock, GlobalUnlock) requires `unsafe`.
 /// We are manually managing global memory blocks allocated via the Win32 subsystem, ensuring
 /// pointers are valid and that clipboard ownership is properly transferred to the Windows OS.
-unsafe fn copy_to_windows_clipboard_secure(text: &str) -> Result<(), String> {
+unsafe fn copy_to_windows_clipboard_secure(text: &str) -> Result<u32, String> {
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+        CloseClipboard, EmptyClipboard, GetClipboardSequenceNumber, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
     };
     use windows_sys::Win32::System::Memory::{
         GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
@@ -104,7 +104,8 @@ unsafe fn copy_to_windows_clipboard_secure(text: &str) -> Result<(), String> {
     SetClipboardData(13 /* CF_UNICODETEXT */, hmem_text as _);
 
     CloseClipboard();
-    Ok(())
+    let seq = GetClipboardSequenceNumber();
+    Ok(seq)
 }
 
 /// Clears Windows clipboard.
@@ -329,8 +330,8 @@ async fn create_vault(
     app: AppHandle,
 ) -> Result<(), String> {
     let mut password = password;
-    if password.is_empty() {
-        return Err("Password cannot be empty".to_string());
+    if password.trim().len() < 6 {
+        return Err("يجب أن يتكون رمز الدخول أو كلمة المرور الرئيسية من 6 خانات على الأقل لحماية الخزنة".to_string());
     }
 
     let vault_path = get_vault_path(&app)?;
@@ -347,8 +348,7 @@ async fn create_vault(
 
     storage.save(&mut session).map_err(|e| e.to_string())?;
 
-    // Save master key to Windows Credential Store by default
-    let _ = unsafe { store_vault_key_wincred(&password) };
+    // Do NOT store master key in WinCred by default (Security by default: requires user to opt-in)
     let _ = update_recovery_file_internal(&app, &password);
 
     // Zeroize password immediately after use
@@ -431,19 +431,20 @@ async fn copy_password(
     update_activity(&state);
 
     // Unsafe block: Interacts directly with Win32 clipboard memory pointers
-    unsafe {
-        copy_to_windows_clipboard_secure(&pwd_to_copy)?;
-    }
+    let seq = unsafe { copy_to_windows_clipboard_secure(&pwd_to_copy)? };
 
     // Wipe temporary string buffer
     let mut pwd_to_copy = pwd_to_copy;
     pwd_to_copy.zeroize();
 
-    // Auto-clear clipboard after 15 seconds in background
+    // Auto-clear clipboard after 15 seconds in background IF content was not overwritten
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(15)).await;
         unsafe {
-            clear_windows_clipboard();
+            use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+            if GetClipboardSequenceNumber() == seq {
+                clear_windows_clipboard();
+            }
         }
     });
 
@@ -778,8 +779,8 @@ async fn change_master_password(
     app: AppHandle,
 ) -> Result<(), String> {
     let mut new_password = new_password;
-    if new_password.trim().is_empty() {
-        return Err("رمز الدخول أو كلمة المرور الجديدة لا يمكن أن تكون فارغة".to_string());
+    if new_password.trim().len() < 6 {
+        return Err("يجب أن يتكون رمز الدخول أو كلمة المرور الجديدة من 6 خانات على الأقل".to_string());
     }
 
     let vault_path = get_vault_path(&app)?;
@@ -800,39 +801,11 @@ async fn change_master_password(
         nonce: session.header.nonce,
     };
 
-    // 2. تحقق من الملف بالمفتاح القديم واحفظ نسخة احتياطية
-    let backup_path = vault_path.with_extension("dat.bak");
-    if vault_path.exists() {
-        let existing_bytes = std::fs::read(&vault_path).map_err(|e| e.to_string())?;
-        if existing_bytes.len() < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
-            return Err("ملف الخزنة الحالي تالف أو غير صالح".to_string());
-        }
-
-        kinana_core::crypto::decrypt_payload(&existing_bytes, &old_key)
-            .map_err(|_| "فشل التحقق من صحة الخزنة بالمفتاح الحالي".to_string())?;
-
-        std::fs::copy(&vault_path, &backup_path)
-            .map_err(|e| format!("فشل إنشاء النسخة الاحتياطية: {}", e))?;
-
-        // حذف الملف القديم حتى لا تفشل storage.save عند التحقق بالمفتاح الجديد
-        std::fs::remove_file(&vault_path).map_err(|e| e.to_string())?;
-    }
-
-    // 3. ثم بدّل المفتاح والهيدر
+    // 2. أنشئ هيدر ومفتاح جديدين
     let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
-        .map_err(|e| {
-            if backup_path.exists() && !vault_path.exists() {
-                let _ = std::fs::copy(&backup_path, &vault_path);
-            }
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
     let new_key = kinana_core::crypto::derive_key(&new_password, &new_header.salt, &new_header.argon2_params)
-        .map_err(|e| {
-            if backup_path.exists() && !vault_path.exists() {
-                let _ = std::fs::copy(&backup_path, &vault_path);
-            }
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
 
     session.header = new_header;
     session.key = new_key;
@@ -841,12 +814,8 @@ async fn change_master_password(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // 4. احفظ بالمفتاح الجديد
-    if let Err(e) = storage.save(session) {
-        // في حال فشل الحفظ، استعد الملف القديم وبيانات الجلسة
-        if backup_path.exists() && !vault_path.exists() {
-            let _ = std::fs::copy(&backup_path, &vault_path);
-        }
+    // 3. احفظ بالمفتاح الجديد ذرياً دون حذف الملف القديم
+    if let Err(e) = storage.save_rekey(session, &old_key) {
         session.key = old_key;
         session.header = old_header;
         return Err(format!("فشل حفظ الخزنة بالمفتاح الجديد: {}", e));
@@ -1045,11 +1014,6 @@ async fn get_service_accounts(
         .iter()
         .map(|acc| {
             let (email, recovery_key, notes) = unpack_account_notes(acc.notes.as_deref());
-            let pwd = if acc.password.0.is_empty() {
-                None
-            } else {
-                Some(acc.password.0.to_string())
-            };
             AccountDetail {
                 id: acc.id.clone(),
                 label: acc.label.clone(),
@@ -1059,7 +1023,7 @@ async fn get_service_accounts(
                 notes,
                 url: acc.url.clone().unwrap_or_default(),
                 has_password: !acc.password.0.is_empty(),
-                password: pwd,
+                password: None,
             }
         })
         .collect();
@@ -1100,15 +1064,18 @@ async fn copy_secure_text(
     update_activity(&state);
 
     let mut text_buf = text;
-    unsafe {
-        copy_to_windows_clipboard_secure(&text_buf)?;
-    }
+    let seq = unsafe {
+        copy_to_windows_clipboard_secure(&text_buf)?
+    };
     text_buf.zeroize();
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(15)).await;
         unsafe {
-            clear_windows_clipboard();
+            use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+            if GetClipboardSequenceNumber() == seq {
+                clear_windows_clipboard();
+            }
         }
     });
 
@@ -1411,23 +1378,40 @@ async fn import_vault_backup(
 
     if let Some(file_handle) = file_picked {
         let source_path = file_handle.path();
-        let bytes = std::fs::read(source_path).map_err(|e| format!("فشل قراءة الملف المختار: {}", e))?;
-
-        if bytes.len() < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
+        
+        // 1. فحص الحجم المسموح به لمنع استهلاك الذاكرة (بين الحد الأدنى و50 ميجابايت كحد أقصى)
+        let file_meta = std::fs::metadata(source_path).map_err(|e| format!("فشل قراءة معلومات الملف: {}", e))?;
+        if (file_meta.len() as usize) < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
             return Err("الملف المختار تالف أو ليس ملف خزنة كنانة صالح.".to_string());
         }
+        const MAX_VAULT_IMPORT_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+        if file_meta.len() > MAX_VAULT_IMPORT_BYTES {
+            return Err("حجم الملف المختار يتجاوز الحد الأقصى المسموح به (50 ميجابايت).".to_string());
+        }
+
+        let bytes = std::fs::read(source_path).map_err(|e| format!("فشل قراءة الملف المختار: {}", e))?;
 
         let _header = kinana_core::crypto::VaultHeader::from_bytes(&bytes[0..kinana_core::crypto::HEADER_SIZE])
             .map_err(|_| "ترويسة ملف الخزنة غير صالحة أو غير متوافقة مع هذا الإصدار.".to_string())?;
 
         let vault_path = get_vault_path(&app)?;
+        let backup_safety = vault_path.with_extension("dat.bak");
+        let tmp_import_path = vault_path.with_extension("dat.import_tmp");
 
+        // 2. اكتب أولاً إلى ملف مؤقت وافحص اكتماله
+        std::fs::write(&tmp_import_path, &bytes).map_err(|e| format!("فشل كتابة الملف المؤقت للاستيراد: {}", e))?;
+
+        // 3. تأكد من عمل نسخة احتياطية للخزنة الحالية قبل استبدالها
         if vault_path.exists() {
-            let backup_safety = vault_path.with_extension("dat.bak");
-            let _ = std::fs::copy(&vault_path, backup_safety);
+            std::fs::copy(&vault_path, &backup_safety)
+                .map_err(|e| format!("تعذر تأمين نسخة احتياطية من الخزنة الحالية: {}", e))?;
         }
 
-        std::fs::write(&vault_path, bytes).map_err(|e| format!("فشل كتابة ملف الخزنة الجديد: {}", e))?;
+        // 4. استبدال ذري للملف
+        if let Err(e) = std::fs::rename(&tmp_import_path, &vault_path) {
+            let _ = std::fs::remove_file(&tmp_import_path);
+            return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
+        }
 
         if let Ok(mut lock) = state.session.lock() {
             *lock = None;
@@ -1557,7 +1541,7 @@ fn trim_app_memory() -> Result<(), String> {
 fn main() {
     #[cfg(windows)]
     {
-        let flags = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
+        let flags = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
         std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
     }
 

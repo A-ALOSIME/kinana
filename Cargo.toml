@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/kinana-core",
+    "src-tauri",
+]
+resolver = "2"
