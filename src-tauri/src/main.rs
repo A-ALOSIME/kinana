@@ -17,6 +17,7 @@ pub struct AppState {
     pub session: Mutex<Option<VaultSession>>,
     pub last_activity: Mutex<std::time::Instant>,
     pub auto_lock_timeout_secs: Mutex<Option<u64>>,
+    pub current_recovery_key: Mutex<Option<SecretString>>,
 }
 
 fn update_activity(state: &AppState) {
@@ -197,61 +198,12 @@ unsafe fn delete_vault_key_wincred() -> Result<(), String> {
 
 const KINANA_RECOVERY_CRED_TARGET: &str = "kinana_recovery_code\0";
 
-unsafe fn store_recovery_code_wincred(code: &str) -> Result<(), String> {
-    use windows_sys::Win32::Foundation::GetLastError;
-    use windows_sys::Win32::Security::Credentials::{
-        CredWriteW, CREDENTIALW, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC,
-    };
-
+/// Cleans up any legacy recovery code from Windows Credential Store to ensure
+/// that the emergency recovery code is strictly offline and never accessible locally by processes.
+unsafe fn delete_recovery_code_wincred() {
+    use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
     let target_name: Vec<u16> = KINANA_RECOVERY_CRED_TARGET.encode_utf16().collect();
-    let user_name: Vec<u16> = "kinana_user\0".encode_utf16().collect();
-    let secret_bytes = code.as_bytes();
-
-    let cred = CREDENTIALW {
-        Flags: 0,
-        Type: CRED_TYPE_GENERIC,
-        TargetName: target_name.as_ptr() as *mut u16,
-        Comment: std::ptr::null_mut(),
-        LastWritten: std::mem::zeroed(),
-        CredentialBlobSize: secret_bytes.len() as u32,
-        CredentialBlob: secret_bytes.as_ptr() as *mut u8,
-        Persist: CRED_PERSIST_ENTERPRISE,
-        AttributeCount: 0,
-        Attributes: std::ptr::null_mut(),
-        TargetAlias: std::ptr::null_mut(),
-        UserName: user_name.as_ptr() as *mut u16,
-    };
-
-    if CredWriteW(&cred, 0) == 0 {
-        return Err(format!("CredWriteW failed with code {}", GetLastError()));
-    }
-    Ok(())
-}
-
-unsafe fn read_recovery_code_wincred() -> Result<String, String> {
-    use windows_sys::Win32::Security::Credentials::{
-        CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
-    };
-
-    let target_name: Vec<u16> = KINANA_RECOVERY_CRED_TARGET.encode_utf16().collect();
-    let mut cred_ptr: *mut CREDENTIALW = std::ptr::null_mut();
-
-    if CredReadW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0, &mut cred_ptr) == 0 {
-        return Err("No saved recovery code found in Windows Credential Store".to_string());
-    }
-
-    if cred_ptr.is_null() {
-        return Err("Recovery credential pointer is null".to_string());
-    }
-
-    let cred = &*cred_ptr;
-    let blob_slice = std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize);
-    let key_str = std::str::from_utf8(blob_slice)
-        .map_err(|_| "Invalid UTF-8 in credential store blob".to_string())?
-        .to_string();
-
-    CredFree(cred_ptr as *mut std::ffi::c_void);
-    Ok(key_str)
+    let _ = CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0);
 }
 
 // =========================================================================
@@ -330,8 +282,8 @@ async fn create_vault(
     app: AppHandle,
 ) -> Result<(), String> {
     let mut password = password;
-    if password.trim().len() < 6 {
-        return Err("يجب أن يتكون رمز الدخول أو كلمة المرور الرئيسية من 6 خانات على الأقل لحماية الخزنة".to_string());
+    if password.trim().len() < 8 {
+        return Err("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول من 8 خانات على الأقل لضمان حماية الخزنة ضد التخمين.".to_string());
     }
 
     let vault_path = get_vault_path(&app)?;
@@ -348,8 +300,11 @@ async fn create_vault(
 
     storage.save(&mut session).map_err(|e| e.to_string())?;
 
-    // Do NOT store master key in WinCred by default (Security by default: requires user to opt-in)
-    let _ = update_recovery_file_internal(&app, &password);
+    // Create emergency recovery file and hold the recovery key in memory for this session
+    let code = update_recovery_file_internal(&app, &password)?;
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = Some(SecretString::new(code));
+    }
 
     // Zeroize password immediately after use
     password.zeroize();
@@ -378,6 +333,9 @@ async fn unlock_vault(
 
     let mut lock = state.session.lock().map_err(|e| e.to_string())?;
     *lock = Some(session);
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = None;
+    }
     update_activity(&state);
 
     Ok(())
@@ -387,6 +345,9 @@ async fn unlock_vault(
 async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
     if let Ok(mut lock) = state.session.lock() {
         *lock = None;
+    }
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = None;
     }
     Ok(())
 }
@@ -711,12 +672,13 @@ fn update_recovery_file_internal(app: &AppHandle, master_password: &str) -> Resu
     let encrypted_payload = kinana_core::crypto::encrypt_payload(master_password.as_bytes(), &key, &header)
         .map_err(|e| e.to_string())?;
 
-    // Write ONLY raw encrypted binary payload directly (Starts with PORTVLT1 header + AES-256-GCM ciphertext)
-    // NO JSON, NO PLAINTEXT KEY ON DISK!
-    std::fs::write(&recovery_path, &encrypted_payload).map_err(|e| e.to_string())?;
+    // Write raw encrypted binary payload atomically via temporary file
+    let tmp_path = recovery_path.with_extension("dat.tmp");
+    std::fs::write(&tmp_path, &encrypted_payload).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp_path, &recovery_path).map_err(|e| e.to_string())?;
 
-    // Store the recovery code securely in Windows Credential Store (encrypted with Windows DPAPI)
-    let _ = unsafe { store_recovery_code_wincred(&code) };
+    // Ensure NO recovery code is stored in Windows Credential Store (strictly offline user recovery key)
+    unsafe { delete_recovery_code_wincred(); }
 
     Ok(code)
 }
@@ -779,8 +741,8 @@ async fn change_master_password(
     app: AppHandle,
 ) -> Result<(), String> {
     let mut new_password = new_password;
-    if new_password.trim().len() < 6 {
-        return Err("يجب أن يتكون رمز الدخول أو كلمة المرور الجديدة من 6 خانات على الأقل".to_string());
+    if new_password.trim().len() < 8 {
+        return Err("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول الجديد من 8 خانات على الأقل لضمان حماية الخزنة ضد التخمين.".to_string());
     }
 
     let vault_path = get_vault_path(&app)?;
@@ -821,11 +783,26 @@ async fn change_master_password(
         return Err(format!("فشل حفظ الخزنة بالمفتاح الجديد: {}", e));
     }
 
-    if unsafe { read_vault_key_wincred().is_ok() } {
-        let _ = unsafe { store_vault_key_wincred(&new_password) };
+    // 4. تحديث ملف الاسترداد والتحقق من عدم حدوث أخطاء صامتة
+    let recovery_code = update_recovery_file_internal(&app, &new_password)
+        .map_err(|e| format!("تم تشفير الخزنة بالمفتاح الجديد لكن تعذر تحديث ملف الاسترداد: {}", e))?;
+
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = Some(SecretString::new(recovery_code));
     }
 
-    let _ = update_recovery_file_internal(&app, &new_password);
+    // 5. إذا كان الفتح التلقائي مفعلاً مسبقاً، حدّث المفتاح في WinCred مع فحص الخطأ
+    if unsafe { read_vault_key_wincred().is_ok() } {
+        if let Err(e) = unsafe { store_vault_key_wincred(&new_password) } {
+            return Err(format!("تم حفظ الخزنة بالمفتاح الجديد ولكن تعذر تحديث الفتح التلقائي: {}", e));
+        }
+    }
+
+    // 6. تنظيف النسخ الاحتياطية القديمة لمنع فكها بكلمة المرور السابقة
+    let backup_safety = vault_path.with_extension("dat.bak");
+    if backup_safety.exists() {
+        let _ = std::fs::remove_file(backup_safety);
+    }
 
     new_password.zeroize();
     update_activity(&state);
@@ -845,39 +822,19 @@ async fn get_current_saved_password(state: State<'_, AppState>) -> Result<String
 #[tauri::command]
 async fn get_or_generate_recovery_key(
     state: State<'_, AppState>,
-    app: AppHandle,
 ) -> Result<String, String> {
     let lock = state.session.lock().map_err(|e| e.to_string())?;
     if lock.is_none() {
-        return Err("الخزنة مقفلة. يرجى فتح الخزنة أولاً.".to_string());
+        return Err("الخزنة مقفلة. يرجى فتح الخزنة أولاً لعرض مفتاح الاسترداد.".to_string());
     }
 
-    // 1. Check if recovery code is saved securely in Windows Credential Store
-    if let Ok(code) = unsafe { read_recovery_code_wincred() } {
-        if !code.is_empty() {
-            return Ok(code);
+    if let Ok(rec_lock) = state.current_recovery_key.lock() {
+        if let Some(ref key) = *rec_lock {
+            return Ok(key.as_str().to_string());
         }
     }
 
-    // 2. Migration: If legacy JSON file exists, migrate to binary and save code to WinCred!
-    let recovery_path = get_recovery_file_path(&app)?;
-    if recovery_path.exists() {
-        if let Ok(bytes) = std::fs::read(&recovery_path) {
-            if let Ok(file_data) = serde_json::from_slice::<RecoveryDataFile>(&bytes) {
-                let code = file_data.recovery_code.clone();
-                let _ = unsafe { store_recovery_code_wincred(&code) };
-                let _ = std::fs::write(&recovery_path, &file_data.encrypted_payload);
-                return Ok(code);
-            }
-        }
-    }
-
-    // 3. Otherwise generate a new recovery file and store it
-    if let Ok(pwd) = unsafe { read_vault_key_wincred() } {
-        return update_recovery_file_internal(&app, &pwd);
-    }
-
-    Err("لا يتوفر مفتاح استرداد حالياً. قم بتعيين رمز دخول لإنشاء مفتاح استرداد جديد.".to_string())
+    Err("مفتاح الاسترداد تم توليده عند إنشاء الخزنة ومتاح دون تخزين محلي لضمان الأمان.".to_string())
 }
 
 #[tauri::command]
@@ -922,9 +879,13 @@ async fn recover_vault_with_key(
     let storage = VaultStorage::new(&vault_path);
     let session = storage.unlock(&master_pwd).map_err(|e| e.to_string())?;
 
-    // Store the validated recovery code and ensure recovery.dat is strictly binary
-    let _ = unsafe { store_recovery_code_wincred(&clean_code) };
+    // Keep recovery key in memory for this session and delete any old unencrypted WinCred entry
+    unsafe { delete_recovery_code_wincred(); }
     let _ = update_recovery_file_internal(&app, &master_pwd);
+
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = Some(SecretString::new(clean_code));
+    }
 
     let mut lock = state.session.lock().map_err(|e| e.to_string())?;
     *lock = Some(session);
@@ -939,11 +900,14 @@ pub struct AccountDetail {
     pub label: String,
     pub username: String,
     pub email: String,
-    pub recovery_key: String,
-    pub notes: String,
     pub url: String,
     pub has_password: bool,
+    pub has_recovery_key: bool,
+    pub has_notes: bool,
+    pub has_pin: bool,
     pub password: Option<String>,
+    pub recovery_key: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -1014,16 +978,31 @@ async fn get_service_accounts(
         .iter()
         .map(|acc| {
             let (email, recovery_key, notes) = unpack_account_notes(acc.notes.as_deref());
+            let has_rec = !recovery_key.trim().is_empty();
+            let has_pin = notes.contains("PIN:");
+            let has_notes = !notes.trim().is_empty();
+            let safe_notes = if has_pin {
+                let filtered: Vec<&str> = notes.lines().filter(|l| !l.trim().starts_with("PIN:")).collect();
+                if filtered.is_empty() { None } else { Some(filtered.join("\n")) }
+            } else if has_notes {
+                Some(notes)
+            } else {
+                None
+            };
+
             AccountDetail {
                 id: acc.id.clone(),
                 label: acc.label.clone(),
                 username: acc.username.clone(),
                 email,
-                recovery_key,
-                notes,
                 url: acc.url.clone().unwrap_or_default(),
                 has_password: !acc.password.0.is_empty(),
+                has_recovery_key: has_rec,
+                has_notes,
+                has_pin,
                 password: None,
+                recovery_key: None,
+                notes: safe_notes,
             }
         })
         .collect();
@@ -1050,6 +1029,92 @@ async fn get_account_password(
 
     update_activity(&state);
     Ok(pwd.to_string())
+}
+
+#[tauri::command]
+async fn get_account_recovery_key(
+    service_id: String,
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let lock = state.session.lock().map_err(|e| e.to_string())?;
+    let session = lock
+        .as_ref()
+        .ok_or_else(|| "الخزنة مقفلة. يرجى فتح الخزنة أولاً.".to_string())?;
+
+    let service = session
+        .data
+        .services
+        .iter()
+        .find(|s| s.id == service_id)
+        .ok_or_else(|| format!("الخدمة بالمعرف '{}' غير موجودة", service_id))?;
+
+    let acc = service
+        .accounts
+        .iter()
+        .find(|a| a.id == account_id)
+        .ok_or_else(|| format!("الحساب بالمعرف '{}' غير موجود", account_id))?;
+
+    let (_, recovery_key, _) = unpack_account_notes(acc.notes.as_deref());
+    update_activity(&state);
+    Ok(recovery_key)
+}
+
+#[tauri::command]
+async fn get_account_pin(
+    service_id: String,
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let lock = state.session.lock().map_err(|e| e.to_string())?;
+    let session = lock
+        .as_ref()
+        .ok_or_else(|| "الخزنة مقفلة. يرجى فتح الخزنة أولاً.".to_string())?;
+
+    let service = session
+        .data
+        .services
+        .iter()
+        .find(|s| s.id == service_id)
+        .ok_or_else(|| format!("الخدمة بالمعرف '{}' غير موجودة", service_id))?;
+
+    let acc = service
+        .accounts
+        .iter()
+        .find(|a| a.id == account_id)
+        .ok_or_else(|| format!("الحساب بالمعرف '{}' غير موجود", account_id))?;
+
+    let (_, _, notes) = unpack_account_notes(acc.notes.as_deref());
+    for line in notes.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("PIN:") {
+            let pin = trimmed["PIN:".len()..].trim();
+            update_activity(&state);
+            return Ok(pin.to_string());
+        }
+    }
+    update_activity(&state);
+    Ok(String::new())
+}
+
+#[tauri::command]
+async fn copy_account_recovery_key(
+    service_id: String,
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let key = get_account_recovery_key(service_id, account_id, state.clone()).await?;
+    copy_secure_text(key, state).await
+}
+
+#[tauri::command]
+async fn copy_account_pin(
+    service_id: String,
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let pin = get_account_pin(service_id, account_id, state.clone()).await?;
+    copy_secure_text(pin, state).await
 }
 
 #[tauri::command]
@@ -1367,9 +1432,15 @@ async fn export_vault_backup(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn import_vault_backup(
+    password: String,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Option<String>, String> {
+    let mut password = password;
+    if password.trim().is_empty() {
+        return Err("يرجى إدخال كلمة المرور الخاصة بالخزنة المستوردة للتحقق من سلامة التشفير.".to_string());
+    }
+
     let file_picked = rfd::AsyncFileDialog::new()
         .set_title("اختر ملف نسخة الخزنة الاحتياطية لاستيراده")
         .add_filter("ملف خزنة كنانة (*.dat, *.kinana)", &["dat", "kinana"])
@@ -1382,43 +1453,66 @@ async fn import_vault_backup(
         // 1. فحص الحجم المسموح به لمنع استهلاك الذاكرة (بين الحد الأدنى و50 ميجابايت كحد أقصى)
         let file_meta = std::fs::metadata(source_path).map_err(|e| format!("فشل قراءة معلومات الملف: {}", e))?;
         if (file_meta.len() as usize) < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
+            password.zeroize();
             return Err("الملف المختار تالف أو ليس ملف خزنة كنانة صالح.".to_string());
         }
         const MAX_VAULT_IMPORT_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
         if file_meta.len() > MAX_VAULT_IMPORT_BYTES {
+            password.zeroize();
             return Err("حجم الملف المختار يتجاوز الحد الأقصى المسموح به (50 ميجابايت).".to_string());
         }
 
         let bytes = std::fs::read(source_path).map_err(|e| format!("فشل قراءة الملف المختار: {}", e))?;
 
-        let _header = kinana_core::crypto::VaultHeader::from_bytes(&bytes[0..kinana_core::crypto::HEADER_SIZE])
+        // 2. فحص ترويسة التشفير
+        let header = kinana_core::crypto::VaultHeader::from_bytes(&bytes[0..kinana_core::crypto::HEADER_SIZE])
             .map_err(|_| "ترويسة ملف الخزنة غير صالحة أو غير متوافقة مع هذا الإصدار.".to_string())?;
+
+        // 3. التحقق بفك تشفير الحمولة المشفرة في الذاكرة بالكامل لضمان صحة كلمة المرور وسلامة التشفير
+        let key = kinana_core::crypto::derive_key(&password, &header.salt, &header.argon2_params)
+            .map_err(|e| format!("فشل اشتقاق مفتاح التشفير: {}", e))?;
+
+        let (_hdr, payload_bytes) = kinana_core::crypto::decrypt_payload(&bytes, &key)
+            .map_err(|_| "كلمة المرور غير صحيحة، أو ملف الخزنة المستورد تالف وغير قابل لفك التشفير.".to_string())?;
+
+        // 4. التحقق من صحة بنية JSON الداخلية
+        let _data: kinana_core::models::VaultData = serde_json::from_slice(payload_bytes.as_slice())
+            .map_err(|_| "بنية بيانات الخزنة المستوردة تالفة أو غير متوافقة.".to_string())?;
 
         let vault_path = get_vault_path(&app)?;
         let backup_safety = vault_path.with_extension("dat.bak");
         let tmp_import_path = vault_path.with_extension("dat.import_tmp");
 
-        // 2. اكتب أولاً إلى ملف مؤقت وافحص اكتماله
+        // 5. كتابة الملف أولاً إلى ملف مؤقت وفحصه
         std::fs::write(&tmp_import_path, &bytes).map_err(|e| format!("فشل كتابة الملف المؤقت للاستيراد: {}", e))?;
 
-        // 3. تأكد من عمل نسخة احتياطية للخزنة الحالية قبل استبدالها
+        // 6. تأكيد إنشاء نسخة احتياطية من الخزنة الحالية
         if vault_path.exists() {
             std::fs::copy(&vault_path, &backup_safety)
                 .map_err(|e| format!("تعذر تأمين نسخة احتياطية من الخزنة الحالية: {}", e))?;
         }
 
-        // 4. استبدال ذري للملف
+        // 7. استبدال ذري للخزنة بعد ثبوت صحتها 100%
         if let Err(e) = std::fs::rename(&tmp_import_path, &vault_path) {
             let _ = std::fs::remove_file(&tmp_import_path);
+            password.zeroize();
             return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
         }
+
+        // 8. تحديث ملف الاسترداد للخزنة المستوردة بكلمة مرورها المحققة
+        let _ = update_recovery_file_internal(&app, &password);
 
         if let Ok(mut lock) = state.session.lock() {
             *lock = None;
         }
+        if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+            *rec_lock = None;
+        }
 
+        password.zeroize();
         Ok(Some(source_path.to_string_lossy().to_string()))
     } else {
+        password.zeroize();
         Ok(None)
     }
 }
@@ -1543,6 +1637,7 @@ fn main() {
     {
         let flags = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
         std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
+        unsafe { delete_recovery_code_wincred(); }
     }
 
     #[cfg(windows)]
@@ -1579,6 +1674,7 @@ fn main() {
             session: Mutex::new(None),
             last_activity: Mutex::new(std::time::Instant::now()),
             auto_lock_timeout_secs: Mutex::new(Some(300)),
+            current_recovery_key: Mutex::new(None),
         })
         .on_window_event(|window, event| {
             match event {
@@ -1721,6 +1817,9 @@ fn main() {
                         if let Ok(mut session_guard) = state.session.lock() {
                             *session_guard = None;
                         }
+                        if let Ok(mut rec_guard) = state.current_recovery_key.lock() {
+                            *rec_guard = None;
+                        }
                         let _ = app_handle.emit("vault-auto-locked", ());
                     }
                 }
@@ -1739,6 +1838,10 @@ fn main() {
             get_vault_summary,
             copy_password,
             get_account_password,
+            get_account_recovery_key,
+            get_account_pin,
+            copy_account_recovery_key,
+            copy_account_pin,
             add_service,
             update_service,
             delete_service,

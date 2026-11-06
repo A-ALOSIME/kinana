@@ -87,11 +87,14 @@ interface AccountDetail {
   label: string;
   username: string;
   email: string;
-  recovery_key: string;
-  notes: string;
   url: string;
   has_password: boolean;
-  password?: string;
+  has_recovery_key: boolean;
+  has_notes: boolean;
+  has_pin: boolean;
+  password?: string | null;
+  recovery_key?: string | null;
+  notes?: string | null;
 }
 
 interface ServiceSummary {
@@ -156,7 +159,7 @@ function isBankOrCardService(serviceName: string = ""): boolean {
 }
 
 // Check if an account is a dedicated bank card account
-function isAccountCard(acc: { notes?: string; url?: string }, serviceName: string = ""): boolean {
+function isAccountCard(acc: { notes?: string | null; url?: string | null }, serviceName: string = ""): boolean {
   if (acc.notes?.includes("[CARD]")) return true;
   if (acc.url && /^\d{2}\/\d{2}$/.test(acc.url.trim())) return true;
   if (isBankOrCardService(serviceName)) return true;
@@ -268,9 +271,16 @@ export default function App() {
   const [showFullscreenPill, setShowFullscreenPill] = useState<boolean>(false);
   const fullscreenPillTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-unlock status & Settings
-  const [autoUnlockActive, setAutoUnlockActive] = useState<boolean>(true);
+  // Auto-unlock status & Settings (Disabled by default: requires user to opt-in)
+  const [autoUnlockActive, setAutoUnlockActive] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [importPassword, setImportPassword] = useState<string>("");
+  const [showImportPassword, setShowImportPassword] = useState<boolean>(false);
+  const [importModalError, setImportModalError] = useState<string | null>(null);
+  const [revealedCardPinValues, setRevealedCardPinValues] = useState<Record<string, string>>({});
+  const sessionEpochRef = useRef<number>(0);
+  const isUnlockedRef = useRef<boolean>(false);
   const [savedPasswordHint, setSavedPasswordHint] = useState<string | null>(null);
   const [showSavedPassword, setShowSavedPassword] = useState<boolean>(false);
   const [showAutoUnlockModal, setShowAutoUnlockModal] = useState<boolean>(false);
@@ -565,11 +575,46 @@ export default function App() {
     }
   };
 
-  const toggleRevealAccountRecoveryKey = (accountId: string) => {
-    setRevealedAccountRecoveryKeys((prev) => ({
-      ...prev,
-      [accountId]: !prev[accountId],
-    }));
+  const toggleRevealAccountRecoveryKey = async (serviceId: string, account: AccountDetail) => {
+    const accId = account.id;
+    if (revealedAccountRecoveryKeys[accId]) {
+      setRevealedAccountRecoveryKeys((prev) => ({ ...prev, [accId]: false }));
+    } else {
+      if (!account.recovery_key) {
+        try {
+          const key = await invoke<string>("get_account_recovery_key", {
+            serviceId,
+            accountId: accId,
+          });
+          setServiceAccounts((prev) =>
+            prev.map((a) => (a.id === accId ? { ...a, recovery_key: key } : a))
+          );
+        } catch (err) {
+          console.error("Failed to fetch account recovery key:", err);
+        }
+      }
+      setRevealedAccountRecoveryKeys((prev) => ({ ...prev, [accId]: true }));
+    }
+  };
+
+  const toggleRevealCardPin = async (serviceId: string, account: AccountDetail) => {
+    const accId = account.id;
+    if (revealedCardPins[accId]) {
+      setRevealedCardPins((prev) => ({ ...prev, [accId]: false }));
+    } else {
+      if (!revealedCardPinValues[accId]) {
+        try {
+          const pin = await invoke<string>("get_account_pin", {
+            serviceId,
+            accountId: accId,
+          });
+          setRevealedCardPinValues((prev) => ({ ...prev, [accId]: pin }));
+        } catch (err) {
+          console.error("Failed to fetch card pin:", err);
+        }
+      }
+      setRevealedCardPins((prev) => ({ ...prev, [accId]: true }));
+    }
   };
 
   // Copy feedback state: key = `${accountId}_${field}`
@@ -614,16 +659,21 @@ export default function App() {
     }
   };
 
-  // Fetch accounts when service detail modal is open
+  // Fetch accounts when service detail modal is open with session guard
   const fetchServiceAccounts = async (serviceId: string) => {
+    const epoch = sessionEpochRef.current;
     try {
       setLoadingAccounts(true);
       const accs = await invoke<AccountDetail[]>("get_service_accounts", { serviceId });
+      if (sessionEpochRef.current !== epoch || !isUnlockedRef.current) return;
       setServiceAccounts(accs);
     } catch (err: any) {
+      if (sessionEpochRef.current !== epoch || !isUnlockedRef.current) return;
       setError(err?.toString() || "فشل جلب تفاصيل الحسابات");
     } finally {
-      setLoadingAccounts(false);
+      if (sessionEpochRef.current === epoch) {
+        setLoadingAccounts(false);
+      }
     }
   };
 
@@ -657,6 +707,8 @@ export default function App() {
       if (isExist && isAutoEnabled) {
         const unlockedViaStore = await invoke<boolean>("auto_unlock_vault");
         if (unlockedViaStore) {
+          sessionEpochRef.current += 1;
+          isUnlockedRef.current = true;
           await fetchSummary();
           return;
         }
@@ -669,6 +721,8 @@ export default function App() {
   };
 
   const purgeAllSensitiveState = () => {
+    sessionEpochRef.current += 1;
+    isUnlockedRef.current = false;
     setUnlocked(false);
     setSummary(null);
     setSelectedServiceId(null);
@@ -676,24 +730,53 @@ export default function App() {
     setPassword("");
     setSavedPasswordHint(null);
     setShowSavedPassword(false);
-    setRecoveryKey("");
+    setAutoUnlockPassword("");
+    setShowAutoUnlockPassword(false);
+    setRecoveryKey(null);
+    setInputRecoveryKey("");
+    setNewMasterPassword("");
+    setConfirmMasterPassword("");
+    setAccPassword("");
+    setAccRecoveryKey("");
+    setAccNotes("");
+    setAccUsername("");
+    setAccEmail("");
+    setAccLabel("");
+    setEditPassword("");
+    setEditRecoveryKey("");
+    setEditNotes("");
+    setEditUsername("");
+    setEditEmail("");
+    setEditLabel("");
+    setEditingAccount(null);
+    setCardHolder("");
+    setCardNumber("");
+    setCardExpiry("");
+    setCardCvv("");
+    setCardPin("");
     setRevealedAccountPasswords({});
     setRevealedAccountRecoveryKeys({});
     setRevealedCardNumbers({});
     setRevealedCardCvvs({});
     setRevealedCardPins({});
-    setAccPassword("");
-    setAccRecoveryKey("");
-    setCardCvv("");
-    setCardPin("");
-    setNewMasterPassword("");
-    setConfirmMasterPassword("");
+    setRevealedCardPinValues({});
+    setShowUnlockPassword(false);
+    setShowCreatePassword(false);
+    setShowAccPassword(false);
+    setShowAccRecoveryKey(false);
+    setShowEditPassword(false);
+    setShowEditRecoveryKey(false);
+    setShowCardNumber(false);
+    setShowCardCvv(false);
     setShowAddService(false);
     setShowEditService(false);
     setShowAddAccount(false);
-    setEditingAccount(null);
     setShowSettings(false);
     setShowRecoveryModal(false);
+    setShowAutoUnlockModal(false);
+    setShowImportModal(false);
+    setImportPassword("");
+    setImportModalError(null);
     setServiceToDelete(null);
     setAccountToDelete(null);
   };
@@ -863,7 +946,8 @@ export default function App() {
     showAddService ||
     showEditService ||
     showSettings ||
-    showRecoveryModal;
+    showRecoveryModal ||
+    showImportModal;
 
   useEffect(() => {
     if (!unlocked || !isAnyModalActive) return;
@@ -1226,13 +1310,19 @@ export default function App() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!password) return;
+    if (password.trim().length < 8) {
+      setError("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول من 8 خانات على الأقل لحماية الخزنة.");
+      return;
+    }
     try {
       setError(null);
       await invoke("create_vault", { password });
       setPassword("");
+      sessionEpochRef.current += 1;
+      isUnlockedRef.current = true;
       await fetchSummary();
       setExists(true);
-      setAutoUnlockActive(true);
+      setAutoUnlockActive(false);
     } catch (err: any) {
       setError(err?.toString() || "فشل إنشاء الخزنة");
     }
@@ -1245,6 +1335,8 @@ export default function App() {
       setError(null);
       await invoke("unlock_vault", { password });
       setPassword("");
+      sessionEpochRef.current += 1;
+      isUnlockedRef.current = true;
       await fetchSummary();
     } catch (err: any) {
       setError(err?.toString() || "فشل فتح الخزنة: كلمة المرور غير صحيحة");
@@ -1335,6 +1427,10 @@ export default function App() {
       setError("يرجى إدخال الرمز الجديد");
       return;
     }
+    if (newMasterPassword.trim().length < 8) {
+      setError("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول الجديد من 8 خانات على الأقل لضمان الحماية ضد التخمين.");
+      return;
+    }
     if (newMasterPassword !== confirmMasterPassword) {
       setError("الرمز وتأكيد الرمز غير متطابقين!");
       return;
@@ -1411,26 +1507,37 @@ export default function App() {
     }
   };
 
-  // Import Vault Backup from .dat / .kinana file
-  const handleImportVault = async () => {
+  // Open Secure Import Modal
+  const handleOpenImportModal = () => {
+    setImportPassword("");
+    setShowImportPassword(false);
+    setImportModalError(null);
+    setShowImportModal(true);
+  };
+
+  // Perform Verified Cryptographic Import of Backup Vault
+  const handlePerformImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importPassword.trim()) {
+      setImportModalError("يرجى إدخال كلمة مرور الخزنة المستوردة للتحقق من سلامة التشفير");
+      return;
+    }
     try {
       setIsProcessingBackup(true);
-      setExportImportStatus(null);
-      const importedPath = await invoke<string | null>("import_vault_backup");
+      setImportModalError(null);
+      const importedPath = await invoke<string | null>("import_vault_backup", {
+        password: importPassword.trim(),
+      });
       if (importedPath) {
+        setShowImportModal(false);
+        setImportPassword("");
         setShowSettings(false);
-        setUnlocked(false);
-        setSummary(null);
-        setSelectedServiceId(null);
-        setPassword("");
+        purgeAllSensitiveState();
         setExists(true);
-        setError(`تم استيراد الخزنة بنجاح من: ${importedPath}. أدخل كلمة المرور الخاصة بها لفتحها.`);
+        setError(`تم استيراد الخزنة بنجاح وفحص تشفيرها ومطابقة ترويستها بنجاح من: ${importedPath}. أدخل كلمة المرور الخاصة بها لفتحها.`);
       }
     } catch (err: any) {
-      setExportImportStatus({
-        type: "error",
-        message: err?.toString() || "فشل استيراد الخزنة",
-      });
+      setImportModalError(err?.toString() || "فشل استيراد الخزنة");
     } finally {
       setIsProcessingBackup(false);
     }
@@ -1608,11 +1715,11 @@ export default function App() {
       const cleanNotes = acc.notes?.replace(/\[CARD\]/g, "").replace(/PIN:\s*\d{4,6}/gi, "").trim();
       setAccNotes(cleanNotes || "");
     } else {
-      setAccUsername(acc.username);
-      setAccEmail(acc.email);
-      setAccRecoveryKey(acc.recovery_key);
-      setAccUrl(acc.url);
-      setAccNotes(acc.notes);
+      setAccUsername(acc.username || "");
+      setAccEmail(acc.email || "");
+      setAccRecoveryKey(acc.recovery_key || "");
+      setAccUrl(acc.url || "");
+      setAccNotes(acc.notes || "");
       setAccPassword("");
     }
 
@@ -1714,14 +1821,31 @@ export default function App() {
     }
   };
 
-  // Universal Field Copy Handler
-  const copyFieldValue = async (accountId: string, field: string, value: string) => {
-    if (!value) return;
+  // Universal Field Copy Handler (direct zero-leak Rust Win32 memory copy when available)
+  const copyFieldValue = async (accountId: string, field: string, value?: string | null) => {
     try {
-      if (field === "password" || field === "recovery_key" || field === "pin" || field === "cvv" || field === "number") {
-        await invoke("copy_secure_text", { text: value });
+      if (field === "password") {
+        if (selectedServiceId) {
+          await invoke("copy_password", { serviceId: selectedServiceId, accountId });
+        } else if (value) {
+          await invoke("copy_secure_text", { text: value });
+        }
+      } else if (field === "recovery_key" || field === "cvv") {
+        if (selectedServiceId) {
+          await invoke("copy_account_recovery_key", { serviceId: selectedServiceId, accountId });
+        } else if (value) {
+          await invoke("copy_secure_text", { text: value });
+        }
+      } else if (field === "pin") {
+        if (selectedServiceId) {
+          await invoke("copy_account_pin", { serviceId: selectedServiceId, accountId });
+        } else if (value) {
+          await invoke("copy_secure_text", { text: value });
+        }
+      } else if (field === "number") {
+        if (value) await invoke("copy_secure_text", { text: value });
       } else {
-        await navigator.clipboard.writeText(value);
+        if (value) await navigator.clipboard.writeText(value);
       }
       setCopiedKey(`${accountId}_${field}`);
       setTimeout(() => setCopiedKey(null), 2000);
@@ -1925,7 +2049,7 @@ export default function App() {
                   <div className="pt-4 text-center border-t border-border/40">
                     <button
                       type="button"
-                      onClick={handleImportVault}
+                      onClick={handleOpenImportModal}
                       className="text-sm font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Upload className="w-4 h-4 text-primary" />
@@ -2009,7 +2133,7 @@ export default function App() {
 
                     <button
                       type="button"
-                      onClick={handleImportVault}
+                      onClick={handleOpenImportModal}
                       className="text-xs font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Upload className="w-3.5 h-3.5 text-primary" />
@@ -2218,7 +2342,7 @@ export default function App() {
                   variant="outline"
                   size="icon"
                   disabled={isProcessingBackup}
-                  onClick={handleImportVault}
+                  onClick={handleOpenImportModal}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
                   title="استيراد خزنة من ملف (.dat)"
                 >
@@ -2799,7 +2923,7 @@ export default function App() {
           <Download className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuItem
-          onClick={handleImportVault}
+          onClick={handleOpenImportModal}
           disabled={isProcessingBackup}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
@@ -3145,15 +3269,15 @@ export default function App() {
                                   رمز الأمان CVV
                                 </span>
                                 <span className="font-mono font-bold text-amber-300 block">
-                                  {isCvvRevealed ? acc.recovery_key : (acc.recovery_key ? "•••" : "—")}
+                                  {isCvvRevealed ? (acc.recovery_key || "•••") : (acc.has_recovery_key ? "•••" : "—")}
                                 </span>
                               </div>
-                              {acc.recovery_key && (
+                              {acc.has_recovery_key && (
                                 <div className="flex items-center gap-1">
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => setRevealedCardCvvs(prev => ({ ...prev, [acc.id]: !prev[acc.id] }))}
+                                    onClick={() => toggleRevealAccountRecoveryKey(selectedService.id, acc)}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
                                     title={isCvvRevealed ? "إخفاء" : "إظهار"}
                                   >
@@ -3162,32 +3286,32 @@ export default function App() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => copyFieldValue(acc.id, "recovery_key", acc.recovery_key)}
+                                    onClick={() => copyFieldValue(acc.id, "cvv")}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
                                     title="نسخ CVV"
                                   >
-                                    {copiedKey === `${acc.id}_recovery_key` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                    {copiedKey === `${acc.id}_cvv` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                                   </Button>
                                 </div>
                               )}
                             </div>
 
                             {/* PIN */}
-                            {cardPin ? (
+                            {acc.has_pin ? (
                               <div className="bg-black/25 p-3 rounded-xl border border-white/10 flex items-center justify-between">
                                 <div>
                                   <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">
                                     الرمز السري PIN
                                   </span>
                                   <span className="font-mono font-bold text-emerald-400 block">
-                                    {isPinRevealed ? cardPin : "••••"}
+                                    {isPinRevealed ? (revealedCardPinValues[acc.id] || "••••") : "••••"}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => setRevealedCardPins(prev => ({ ...prev, [acc.id]: !prev[acc.id] }))}
+                                    onClick={() => toggleRevealCardPin(selectedService.id, acc)}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
                                     title={isPinRevealed ? "إخفاء" : "إظهار"}
                                   >
@@ -3196,7 +3320,7 @@ export default function App() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => copyFieldValue(acc.id, "pin", cardPin)}
+                                    onClick={() => copyFieldValue(acc.id, "pin")}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
                                     title="نسخ PIN"
                                   >
@@ -3416,7 +3540,7 @@ export default function App() {
                         )}
 
                         {/* Recovery Key */}
-                        {acc.recovery_key && (
+                        {acc.has_recovery_key && (
                           <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl md:col-span-2">
                             <div className="min-w-0 pr-1 flex-1">
                               <span className="text-xs font-bold text-amber-400 block mb-0.5">
@@ -3430,7 +3554,7 @@ export default function App() {
                                 }`}
                               >
                                 {revealedAccountRecoveryKeys[acc.id]
-                                  ? acc.recovery_key
+                                  ? (acc.recovery_key || "••••••••••••••••")
                                   : "••••••••••••••••"}
                               </span>
                             </div>
@@ -3439,7 +3563,7 @@ export default function App() {
                                 variant="ghost"
                                 size="sm"
                                 type="button"
-                                onClick={() => toggleRevealAccountRecoveryKey(acc.id)}
+                                onClick={() => selectedService && toggleRevealAccountRecoveryKey(selectedService.id, acc)}
                                 className="h-8 w-8 p-0 rounded-lg text-amber-300 hover:text-amber-100 hover:bg-amber-500/20"
                                 title={
                                   revealedAccountRecoveryKeys[acc.id]
@@ -3456,7 +3580,7 @@ export default function App() {
                               <Button
                                 variant="secondary"
                                 size="sm"
-                                onClick={() => copyFieldValue(acc.id, "recovery_key", acc.recovery_key)}
+                                onClick={() => copyFieldValue(acc.id, "recovery_key")}
                                 className="h-8 px-3 rounded-lg text-xs font-bold gap-1.5 shrink-0 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40"
                               >
                                 {copiedKey === `${acc.id}_recovery_key` ? (
@@ -5306,7 +5430,7 @@ export default function App() {
                   type="button"
                   variant="outline"
                   disabled={isProcessingBackup}
-                  onClick={handleImportVault}
+                  onClick={handleOpenImportModal}
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <Upload className="w-4 h-4 text-white" />
@@ -5475,6 +5599,85 @@ export default function App() {
               >
                 <Unlock className="w-5 h-5" />
                 <span>استعادة وفتح الخزنة</span>
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ================= MODAL: IMPORT VAULT (CRYPTOGRAPHICALLY VERIFIED) ================= */}
+      <Dialog open={showImportModal} onOpenChange={setShowImportModal}>
+        <DialogContent className="max-w-xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-3">
+              <Upload className="w-6 h-6 text-primary" />
+              <span>استيراد واستبدال الخزنة</span>
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground pt-1">
+              أدخل كلمة مرور ملف الخزنة المستوردة للتحقق التشفيري الكامل من سلامتها وفك تشفيرها قبل استبدال الملفات.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handlePerformImport} className="space-y-6 pt-4">
+            {importModalError && (
+              <div className="p-4 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive text-sm font-bold flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 flex-shrink-0" />
+                <span>{importModalError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-bold text-foreground mb-2">
+                كلمة مرور الخزنة المستوردة:
+              </label>
+              <div className="relative">
+                <Input
+                  type={showImportPassword ? "text" : "password"}
+                  placeholder="أدخل كلمة مرور ملف الخزنة..."
+                  value={importPassword}
+                  onChange={(e) => setImportPassword(e.target.value)}
+                  className="h-12 text-base rounded-xl border-2 pr-4 pl-12"
+                  autoFocus
+                  required
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowImportPassword((prev) => !prev)}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                >
+                  {showImportPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isProcessingBackup}
+                onClick={() => setShowImportModal(false)}
+                className="h-12 px-6 rounded-xl font-bold"
+              >
+                إلغاء
+              </Button>
+              <Button
+                type="submit"
+                disabled={isProcessingBackup}
+                className="h-12 px-8 rounded-xl font-bold shadow-lg gap-2"
+              >
+                {isProcessingBackup ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>جارٍ التحقق والاستيراد...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>اختيار الملف والاستيراد</span>
+                  </>
+                )}
               </Button>
             </div>
           </form>

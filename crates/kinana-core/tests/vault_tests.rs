@@ -255,3 +255,124 @@ fn test_unlock_on_file_smaller_than_min_size_returns_file_too_short() {
         other => panic!("Expected VaultError::FileTooShort, got: {:?}", other),
     }
 }
+
+/// 7. اختبار rekey: تغيير كلمة المرور للمفتاح الجديد وفشل القديم وتطابق البيانات
+#[test]
+fn test_save_rekey_rotates_password_and_preserves_data() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let old_password = "OldMasterPassword123#";
+    let new_password = "NewMasterPassword456$";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let mut session = storage
+        .create_new_vault(old_password, Some(fast_params))
+        .expect("Failed to create vault session");
+
+    session.data.services.push(Service {
+        id: "svc_github".to_string(),
+        name: "GitHub".to_string(),
+        icon_data: None,
+        accounts: vec![Account {
+            id: "acc_git1".to_string(),
+            label: "Dev Account".to_string(),
+            username: "octocat".to_string(),
+            password: SecretString::new("ghp_secret_token_123".to_string()),
+            notes: Some("SSH key configured".to_string()),
+            url: Some("https://github.com".to_string()),
+        }],
+    });
+
+    storage.save(&mut session).expect("Failed to save initial vault");
+
+    // 1. Prepare rekey
+    let old_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
+        .expect("Fresh header creation failed");
+    let new_key = kinana_core::crypto::derive_key(new_password, &new_header.salt, &new_header.argon2_params)
+        .expect("Derive new key failed");
+
+    session.header = new_header;
+    session.key = new_key;
+
+    // 2. Perform atomic rekey
+    storage.save_rekey(&mut session, &old_key).expect("save_rekey failed");
+
+    // 3. Unlock with old password MUST fail
+    let old_attempt = storage.unlock(old_password);
+    assert!(
+        matches!(old_attempt, Err(VaultError::DecryptionFailed)),
+        "Old password should not unlock the rekeyed vault"
+    );
+
+    // 4. Unlock with new password MUST succeed with all data intact
+    let new_attempt = storage.unlock(new_password).expect("New password should unlock cleanly");
+    assert_eq!(new_attempt.data.services.len(), 1);
+    assert_eq!(new_attempt.data.services[0].name, "GitHub");
+    assert_eq!(new_attempt.data.services[0].accounts[0].username, "octocat");
+    assert_eq!(new_attempt.data.services[0].accounts[0].password.as_str(), "ghp_secret_token_123");
+}
+
+/// 8. اختبار فحص الحمولة المشفرة: أي عبث في البايتات المشفرة يفشل فك التشفير فوراً
+#[test]
+fn test_corrupt_payload_fails_decryption() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let password = "TamperResistanceTest#1";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let mut session = storage
+        .create_new_vault(password, Some(fast_params))
+        .unwrap();
+    storage.save(&mut session).unwrap();
+
+    // Tamper with payload byte on disk (after header)
+    let mut bytes = fs::read(&vault_path).unwrap();
+    assert!(bytes.len() > kinana_core::crypto::HEADER_SIZE);
+    bytes[kinana_core::crypto::HEADER_SIZE + 5] ^= 0xFF; // Flip bits
+    fs::write(&vault_path, &bytes).unwrap();
+
+    let res = storage.unlock(password);
+    assert!(
+        matches!(res, Err(VaultError::DecryptionFailed)),
+        "Corrupted payload must be rejected by AES-GCM verification"
+    );
+}
+
+/// 9. اختبار دورة مفتاح استرداد الطوارئ المشفر بالكامل
+#[test]
+fn test_emergency_recovery_flow() {
+    let recovery_code = "KN-ABCD-EFGH-JKLM-NPQR";
+    let master_password = "MySuperSecretMasterPassword2026";
+
+    let params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    let header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(params).unwrap();
+    let key = kinana_core::crypto::derive_key(recovery_code, &header.salt, &header.argon2_params).unwrap();
+
+    let ciphertext = kinana_core::crypto::encrypt_payload(master_password.as_bytes(), &key, &header).unwrap();
+
+    // Decrypt with correct recovery code succeeds
+    let (_hdr, decrypted_payload) = kinana_core::crypto::decrypt_payload(&ciphertext, &key).unwrap();
+    assert_eq!(std::str::from_utf8(decrypted_payload.as_slice()).unwrap(), master_password);
+
+    // Decrypt with wrong recovery code fails
+    let wrong_key = kinana_core::crypto::derive_key("KN-ZZZZ-YYYY-XXXX-WWWW", &header.salt, &header.argon2_params).unwrap();
+    let failed = kinana_core::crypto::decrypt_payload(&ciphertext, &wrong_key);
+    assert!(failed.is_err(), "Wrong recovery code must fail decryption");
+}
