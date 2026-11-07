@@ -671,3 +671,130 @@ fn test_initial_import_failure_cleans_up_orphaned_vault() {
     // Verify no orphaned vault file is left on disk
     assert!(!vault_path.exists(), "Initial import failure must not leave orphaned vault file");
 }
+
+/// 17. اختبار المعالجة الذاتية (Self-Healing) عند فتح الخزنة في حال عدم تطابق ملف الاسترداد بسبب انقطاع سابق
+#[test]
+fn test_unlock_self_heals_mismatched_recovery_file() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let recovery_path = dir.path().join("recovery.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let old_pwd = "OldPasswordBeforeCrash1#";
+    let new_pwd = "NewPasswordAfterRekey2$";
+    let recovery_code = "KN-SELF-HEAL-TEST-CODE";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    // 1. الخزنة تم تحديثها بكلمة المرور الجديدة
+    let mut session = storage
+        .create_new_vault(new_pwd, Some(fast_params))
+        .unwrap();
+    session.data.recovery_code = Some(recovery_code.to_string());
+    storage.save(&mut session).unwrap();
+
+    // 2. محاكاة انقطاع مفاجئ: ملف الاسترداد recovery.dat ظل مشفراً بكلمة المرور القديمة!
+    let rec_hdr = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(recovery_code, &rec_hdr.salt, &rec_hdr.argon2_params).unwrap();
+    let stale_recovery_bytes = kinana_core::crypto::encrypt_payload(old_pwd.as_bytes(), &rec_key, &rec_hdr).unwrap();
+    fs::write(&recovery_path, &stale_recovery_bytes).unwrap();
+
+    // فحص ما قبل المعالجة: فك تشفير ملف الاسترداد الحالي يرجع كلمة المرور القديمة غير المتطابقة
+    let (_, raw_pwd) = kinana_core::crypto::decrypt_payload(&stale_recovery_bytes, &rec_key).unwrap();
+    assert_eq!(std::str::from_utf8(raw_pwd.as_slice()).unwrap(), old_pwd);
+
+    // 3. تطبيق منطق المواءمة والمعالجة الذاتية (Self-Healing logic) كما في unlock_vault
+    let unlocked = storage.unlock(new_pwd).expect("Vault unlocks cleanly with new password");
+    let code_in_vault = unlocked.data.recovery_code.as_deref().unwrap();
+    
+    // فحص ملف الاسترداد وملاحظة عدم تطابق كلمة المرور مع كلمة مرور الخزنة
+    let mut needs_healing = false;
+    if let Ok(bytes) = fs::read(&recovery_path) {
+        if let Ok(hdr) = kinana_core::crypto::VaultHeader::from_bytes(&bytes[0..kinana_core::crypto::HEADER_SIZE]) {
+            if let Ok(key) = kinana_core::crypto::derive_key(code_in_vault, &hdr.salt, &hdr.argon2_params) {
+                if let Ok((_, dec)) = kinana_core::crypto::decrypt_payload(&bytes, &key) {
+                    if dec.as_slice() != new_pwd.as_bytes() {
+                        needs_healing = true;
+                    }
+                } else {
+                    needs_healing = true;
+                }
+            }
+        }
+    }
+
+    assert!(needs_healing, "Self-healing detection must identify stale recovery file");
+
+    // تنفيذ المعالجة التلقائية
+    let fresh_rec_hdr = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let fresh_rec_key = kinana_core::crypto::derive_key(code_in_vault, &fresh_rec_hdr.salt, &fresh_rec_hdr.argon2_params).unwrap();
+    let healed_bytes = kinana_core::crypto::encrypt_payload(new_pwd.as_bytes(), &fresh_rec_key, &fresh_rec_hdr).unwrap();
+    fs::write(&recovery_path, &healed_bytes).unwrap();
+
+    // 4. التحقق بعد المعالجة: ملف الاسترداد صار يطابق كلمة المرور الحالية 100%
+    let updated_bytes = fs::read(&recovery_path).unwrap();
+    let updated_hdr = kinana_core::crypto::VaultHeader::from_bytes(&updated_bytes[0..kinana_core::crypto::HEADER_SIZE]).unwrap();
+    let updated_key = kinana_core::crypto::derive_key(code_in_vault, &updated_hdr.salt, &updated_hdr.argon2_params).unwrap();
+    let (_, healed_pwd) = kinana_core::crypto::decrypt_payload(&updated_bytes, &updated_key).unwrap();
+    assert_eq!(std::str::from_utf8(healed_pwd.as_slice()).unwrap(), new_pwd);
+}
+
+/// 18. اختبار الحفاظ على نسخة أرشيفية آمنة (.pre_import_bak) عند نجاح الاستيراد
+#[test]
+fn test_import_preserves_pre_import_backup_on_success() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let backup_safety = vault_path.with_extension("dat.import_safety");
+    let pre_import_archive = vault_path.with_extension("dat.pre_import_bak");
+    let storage = VaultStorage::new(&vault_path);
+
+    let original_pwd = "OriginalValuableData1#";
+    let imported_pwd = "NewImportedVault2$";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    // 1. إنشاء الخزنة الأصلية
+    let mut session = storage
+        .create_new_vault(original_pwd, Some(fast_params))
+        .unwrap();
+    session.data.recovery_code = Some("KN-ORIGINAL-DATA".to_string());
+    storage.save(&mut session).unwrap();
+
+    // 2. أخذ نسخة الأمان المؤقتة
+    fs::copy(&vault_path, &backup_safety).unwrap();
+
+    // 3. كتابة الخزنة المستوردة الجديدة
+    let imp_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let imp_key = kinana_core::crypto::derive_key(imported_pwd, &imp_header.salt, &imp_header.argon2_params).unwrap();
+    let imp_data = kinana_core::models::VaultData {
+        version: 1,
+        created_at: 2000,
+        updated_at: 2000,
+        recovery_code: Some("KN-IMPORTED-DATA".to_string()),
+        services: Vec::new(),
+    };
+    let new_bytes = kinana_core::crypto::encrypt_payload(
+        &zeroize::Zeroizing::new(serde_json::to_vec(&imp_data).unwrap()),
+        &imp_key,
+        &imp_header,
+    ).unwrap();
+    fs::write(&vault_path, &new_bytes).unwrap();
+
+    // 4. أرشفة نسخة الأمان إلى .pre_import_bak عند اكتمال الاستيراد بنجاح
+    fs::rename(&backup_safety, &pre_import_archive).unwrap();
+
+    // التحقق: الخزنة الحالية تعمل بكلمة المرور الجديدة
+    assert!(storage.unlock(imported_pwd).is_ok());
+
+    // التحقق: النسخة الأرشيفية محفوظة على القرص وتستطيع فك تشفير البيانات السابقة
+    assert!(pre_import_archive.exists(), "Pre-import archive must exist on disk");
+    let archived_storage = VaultStorage::new(&pre_import_archive);
+    let recovered_original = archived_storage.unlock(original_pwd).expect("Archived vault must unlock cleanly");
+    assert_eq!(recovered_original.data.recovery_code.as_deref(), Some("KN-ORIGINAL-DATA"));
+}

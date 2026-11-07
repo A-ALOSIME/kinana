@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo & Node dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build UI (TypeScript + Vite)
+        working-directory: ./ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run Cargo Workspace Tests
+        run: |
+          cargo test --workspace --verbose
+
+      - name: Run Cargo Release Check
+        run: |
+          cargo check --release --verbose
