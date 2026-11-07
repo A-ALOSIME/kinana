@@ -788,11 +788,34 @@ async fn change_master_password(
         nonce: session.header.nonce,
     };
 
-    // 2. أنشئ هيدر ومفتاح جديدين
+    // 2. تأمين نسخة احتياطية مخصصة ومستقلة للتراجع (Rollback Safety Backup)
+    let rekey_backup = vault_path.with_extension("dat.rekey_safety");
+    std::fs::copy(&vault_path, &rekey_backup)
+        .map_err(|e| format!("فشل تأمين نسخة أمان قبل تغيير كلمة المرور: {}", e))?;
+
+    let rec_path = get_recovery_file_path(&app)?;
+    let had_recovery_file = rec_path.exists();
+    let rec_backup = rec_path.with_extension("dat.rekey_safety");
+    if had_recovery_file {
+        if let Err(e) = std::fs::copy(&rec_path, &rec_backup) {
+            let _ = std::fs::remove_file(&rekey_backup);
+            return Err(format!("فشل تأمين نسخة احتياطية من ملف الاسترداد: {}", e));
+        }
+    }
+
+    // 3. أنشئ هيدر ومفتاح جديدين
     let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&rekey_backup);
+            if had_recovery_file { let _ = std::fs::remove_file(&rec_backup); }
+            e.to_string()
+        })?;
     let new_key = kinana_core::crypto::derive_key(&new_password, &new_header.salt, &new_header.argon2_params)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&rekey_backup);
+            if had_recovery_file { let _ = std::fs::remove_file(&rec_backup); }
+            e.to_string()
+        })?;
 
     session.header = new_header;
     session.key = new_key;
@@ -801,14 +824,16 @@ async fn change_master_password(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // 3. احفظ بالمفتاح الجديد ذرياً دون حذف الملف القديم
+    // 4. احفظ بالمفتاح الجديد ذرياً
     if let Err(e) = storage.save_rekey(session, &old_key) {
         session.key = old_key;
         session.header = old_header;
+        let _ = std::fs::remove_file(&rekey_backup);
+        if had_recovery_file { let _ = std::fs::remove_file(&rec_backup); }
         return Err(format!("فشل حفظ الخزنة بالمفتاح الجديد: {}", e));
     }
 
-    // 4. تحديث ملف الاسترداد وإذا فشل التحديث، يتم التراجع عن تغيير مفتاح الخزنة لضمان اتساق الملفين
+    // 5. تحديث ملف الاسترداد وإذا فشل التحديث، يتم التراجع المفحوص بدقة قطعية
     let recovery_code = if let Some(ref c) = session.data.recovery_code {
         c.clone()
     } else {
@@ -818,12 +843,49 @@ async fn change_master_password(
     };
 
     if let Err(err_rec) = write_recovery_file(&app, &new_password, &recovery_code) {
-        let current_new_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
-        session.header = old_header;
-        session.key = old_key;
-        let _ = storage.save_rekey(session, &current_new_key);
-        new_password.zeroize();
-        return Err(format!("فشل كتابة ملف الاسترداد بالمفتاح الجديد: {}. تم التراجع وإعادة الخزنة لكلمة المرور السابقة لضمان الأمان والاتساق.", err_rec));
+        // تنفيذ التراجع الذري من النسخة المخصصة
+        let restore_copy_res = std::fs::copy(&rekey_backup, &vault_path);
+        if had_recovery_file && rec_backup.exists() {
+            let _ = std::fs::copy(&rec_backup, &rec_path);
+        }
+        let _ = std::fs::remove_file(&rekey_backup);
+        if rec_backup.exists() {
+            let _ = std::fs::remove_file(&rec_backup);
+        }
+
+        // فحص عملي مباشر: التحقق من فك تشفير الملف المستعاد بالمفتاح القديم قبل إعلان النجاح
+        let verify_res = restore_copy_res
+            .map_err(|e| e.to_string())
+            .and_then(|_| {
+                let file_bytes = std::fs::read(&vault_path).map_err(|e| e.to_string())?;
+                kinana_core::crypto::decrypt_payload(&file_bytes, &old_key).map_err(|e| e.to_string())
+            });
+
+        match verify_res {
+            Ok(_) => {
+                session.header = old_header;
+                session.key = old_key;
+                new_password.zeroize();
+                return Err(format!(
+                    "فشل كتابة ملف الاسترداد بالمفتاح الجديد: {}. تم التراجع بنجاح والتحقق قطعيّاً من سلامة الخزنة وبقائها مشفرة بكلمة المرور القديمة.",
+                    err_rec
+                ));
+            }
+            Err(restore_err) => {
+                // فشلت عملية التراجع؛ نحذر المستخدم صراحة بأن الخزنة ما زالت بالمفتاح الجديد
+                new_password.zeroize();
+                return Err(format!(
+                    "خطأ حرج: تعذر تحديث ملف الاسترداد ({}) وفشلت استعادة النسخة السابقة ({}). الخزنة ما زالت مشفرة بكلمة المرور الجديدة.",
+                    err_rec, restore_err
+                ));
+            }
+        }
+    }
+
+    // تنظيف ملفات الأمان المؤقتة بعد النجاح الكامل
+    let _ = std::fs::remove_file(&rekey_backup);
+    if rec_backup.exists() {
+        let _ = std::fs::remove_file(&rec_backup);
     }
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
@@ -1601,6 +1663,7 @@ async fn import_vault_backup(
         let mut imported_data: kinana_core::models::VaultData = serde_json::from_slice(payload_bytes.as_slice())
             .map_err(|_| "بنية بيانات الخزنة المستوردة تالفة أو غير متوافقة.".to_string())?;
 
+        let was_legacy = imported_data.recovery_code.is_none();
         let rec_code = if let Some(ref code) = imported_data.recovery_code {
             code.clone()
         } else {
@@ -1609,33 +1672,114 @@ async fn import_vault_backup(
             code
         };
 
+        // إذا كانت الخزنة المستوردة قديمة (لا تحتوي رمز استرداد)، نعيد تشفيرها بالرمز الجديد
+        // ليتم حفظه داخل ملف vault.dat الفعلي على القرص منعاً لأي اختلاف مع recovery.dat
+        let bytes_to_write = if was_legacy {
+            let mut upgrade_header = kinana_core::crypto::VaultHeader {
+                magic: header.magic,
+                version: header.version,
+                argon2_params: header.argon2_params,
+                salt: header.salt,
+                nonce: header.nonce,
+            };
+            upgrade_header.refresh_nonce();
+            let json_bytes = zeroize::Zeroizing::new(
+                serde_json::to_vec(&imported_data)
+                    .map_err(|e| format!("فشل تسلسل بيانات الخزنة بعد ترقية رمز الاسترداد: {}", e))?
+            );
+            let encrypted = kinana_core::crypto::encrypt_payload(&json_bytes, &key, &upgrade_header)
+                .map_err(|e| format!("فشل إعادة تشفير الخزنة بعد الترقية: {}", e))?;
+
+            // فحص التحقق الذاتي للتأكد من نجاح التشفير ومطابقة رمز الاسترداد
+            let (_, test_decrypted) = kinana_core::crypto::decrypt_payload(&encrypted, &key)
+                .map_err(|_| "فشل التحقق من صحة تشفير الخزنة بعد الترقية.".to_string())?;
+            let test_data: kinana_core::models::VaultData = serde_json::from_slice(test_decrypted.as_slice())
+                .map_err(|_| "فشل التحقق من بنية البيانات بعد الترقية.".to_string())?;
+            if test_data.recovery_code.as_deref() != Some(&rec_code) {
+                return Err("رمز الاسترداد في الخزنة المرقّاة غير متطابق مع البيانات.".to_string());
+            }
+            encrypted
+        } else {
+            bytes
+        };
+
         let vault_path = get_vault_path(&app)?;
-        let backup_safety = vault_path.with_extension("dat.bak");
+        let had_existing_vault = vault_path.exists();
+        let backup_safety = vault_path.with_extension("dat.import_safety");
+
+        let rec_path = get_recovery_file_path(&app)?;
+        let had_existing_recovery = rec_path.exists();
+        let rec_safety = rec_path.with_extension("dat.import_safety");
+
         let tmp_import_path = vault_path.with_extension("dat.import_tmp");
 
-        // 5. كتابة الملف أولاً إلى ملف مؤقت وفحصه
-        std::fs::write(&tmp_import_path, &bytes).map_err(|e| format!("فشل كتابة الملف المؤقت للاستيراد: {}", e))?;
-
-        // 6. تأكيد إنشاء نسخة احتياطية من الخزنة الحالية
-        if vault_path.exists() {
+        // 5. تأمين نسخة احتياطية للخزنة القائمة وملف الاسترداد إن وُجدا
+        if had_existing_vault {
             std::fs::copy(&vault_path, &backup_safety)
                 .map_err(|e| format!("تعذر تأمين نسخة احتياطية من الخزنة الحالية: {}", e))?;
         }
+        if had_existing_recovery {
+            let _ = std::fs::copy(&rec_path, &rec_safety);
+        }
+
+        // 6. كتابة الملف أولاً إلى ملف مؤقت وفحصه
+        std::fs::write(&tmp_import_path, &bytes_to_write)
+            .map_err(|e| format!("فشل كتابة الملف المؤقت للاستيراد: {}", e))?;
 
         // 7. استبدال ذري للخزنة بعد ثبوت صحتها 100%
         if let Err(e) = std::fs::rename(&tmp_import_path, &vault_path) {
             let _ = std::fs::remove_file(&tmp_import_path);
+            if had_existing_vault {
+                let _ = std::fs::remove_file(&backup_safety);
+            }
+            if had_existing_recovery {
+                let _ = std::fs::remove_file(&rec_safety);
+            }
             password.zeroize();
             return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
         }
 
-        // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها مع التراجع في حال الفشل
-        if let Err(e) = write_recovery_file(&app, &password, &rec_code) {
-            if backup_safety.exists() {
-                let _ = std::fs::copy(&backup_safety, &vault_path);
-            }
+        // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها مع معالجة الفشل
+        if let Err(err_rec) = write_recovery_file(&app, &password, &rec_code) {
             password.zeroize();
-            return Err(format!("فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم التراجع لحماية سلامة بيانات الخزنة.", e));
+            if had_existing_vault {
+                // حالة استبدال خزنة سابقة: استعادة الخزنة وملف الاسترداد السابقين مع فحص النتيجة
+                let copy_res = std::fs::copy(&backup_safety, &vault_path);
+                if had_existing_recovery && rec_safety.exists() {
+                    let _ = std::fs::copy(&rec_safety, &rec_path);
+                }
+                let _ = std::fs::remove_file(&backup_safety);
+                if rec_safety.exists() {
+                    let _ = std::fs::remove_file(&rec_safety);
+                }
+
+                if let Err(copy_err) = copy_res {
+                    return Err(format!(
+                        "فشل إنشاء ملف الاسترداد للخزنة المستوردة ({}) وفشلت استعادة الخزنة السابقة ({}).",
+                        err_rec, copy_err
+                    ));
+                }
+                return Err(format!(
+                    "فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم التراجع بنجاح واستعادة الخزنة وملف الاسترداد السابقين.",
+                    err_rec
+                ));
+            } else {
+                // حالة الاستيراد لأول مرة: تنظيف أي ملف جزئي تم إنشاؤه لمنع ترك خزنة تالفة أو غير متناسقة
+                let _ = std::fs::remove_file(&vault_path);
+                let _ = std::fs::remove_file(&rec_path);
+                return Err(format!(
+                    "فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم إلغاء الاستيراد وتنظيف الملفات.",
+                    err_rec
+                ));
+            }
+        }
+
+        // تم الاستيراد بنجاح تام: تنظيف ملفات الأمان المؤقتة
+        if backup_safety.exists() {
+            let _ = std::fs::remove_file(&backup_safety);
+        }
+        if rec_safety.exists() {
+            let _ = std::fs::remove_file(&rec_safety);
         }
 
         if let Ok(mut lock) = state.session.lock() {
