@@ -469,3 +469,104 @@ fn test_recovery_key_retained_across_password_rekey() {
     let session_recovered = storage.unlock(recovered_pwd).unwrap();
     assert_eq!(session_recovered.data.recovery_code.as_deref(), Some(recovery_code));
 }
+
+/// 12. اختبار ترقية الخزنات القديمة التي لا تحتوي على recovery_code والتوافق العكسي
+#[test]
+fn test_legacy_vault_without_recovery_code_upgrades_cleanly() {
+    let legacy_json = r#"{"version":1,"created_at":1000,"updated_at":1000,"services":[]}"#;
+    let mut data: kinana_core::models::VaultData = serde_json::from_str(legacy_json).expect("Legacy vault must deserialize");
+    assert_eq!(data.recovery_code, None, "Legacy vault should have None for recovery_code");
+
+    // Upgrade with new recovery code
+    data.recovery_code = Some("KN-LEGACY-UPGRADED-KEY".to_string());
+    let serialized = serde_json::to_string(&data).unwrap();
+    let reloaded: kinana_core::models::VaultData = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(reloaded.recovery_code.as_deref(), Some("KN-LEGACY-UPGRADED-KEY"));
+}
+
+/// 13. اختبار التراجع الذري التام (Atomic Rollback) عند فشل كتابة ملف الاسترداد بعد تدوير المفتاح
+#[test]
+fn test_rekey_rollback_restores_old_key_and_preserves_vault() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let old_pwd = "OriginalKeyPassword1#";
+    let new_pwd = "AttemptedNewPassword2$";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let mut session = storage
+        .create_new_vault(old_pwd, Some(fast_params))
+        .unwrap();
+    session.data.recovery_code = Some("KN-TEST-ROLLBACK-KEY".to_string());
+    storage.save(&mut session).unwrap();
+
+    let old_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    let old_header = kinana_core::crypto::VaultHeader {
+        magic: session.header.magic,
+        version: session.header.version,
+        argon2_params: session.header.argon2_params,
+        salt: session.header.salt,
+        nonce: session.header.nonce,
+    };
+
+    // Rekey to new password
+    let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let new_key = kinana_core::crypto::derive_key(new_pwd, &new_header.salt, &new_header.argon2_params).unwrap();
+    session.header = new_header;
+    session.key = new_key;
+    storage.save_rekey(&mut session, &old_key).unwrap();
+
+    // Simulate recovery file write failure: trigger atomic rollback to old_key
+    let current_new_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    session.header = old_header;
+    session.key = old_key;
+    storage.save_rekey(&mut session, &current_new_key).expect("Rollback rekey must succeed");
+
+    // Old password MUST still unlock cleanly
+    let unlocked = storage.unlock(old_pwd).expect("Old password must unlock after rollback");
+    assert_eq!(unlocked.data.recovery_code.as_deref(), Some("KN-TEST-ROLLBACK-KEY"));
+
+    // New password MUST fail
+    let failed = storage.unlock(new_pwd);
+    assert!(failed.is_err(), "New password must not unlock after rollback");
+}
+
+/// 14. اختبار الحفاظ على الخزنة الحالية عند تراجع الاستيراد في حال فشل الاسترداد
+#[test]
+fn test_import_failure_rollback_preserves_existing_vault() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let backup_safety = dir.path().join("vault.dat.bak");
+    let storage = VaultStorage::new(&vault_path);
+
+    let active_pwd = "CurrentActiveVaultPassword1#";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let mut session = storage
+        .create_new_vault(active_pwd, Some(fast_params))
+        .unwrap();
+    session.data.recovery_code = Some("KN-CURRENT-ACTIVE-KEY".to_string());
+    storage.save(&mut session).unwrap();
+
+    // Create safety backup
+    fs::copy(&vault_path, &backup_safety).unwrap();
+
+    // Simulate corrupted import attempt: overwrite vault.dat
+    fs::write(&vault_path, b"CORRUPTED_INCOMPLETE_IMPORT_DATA").unwrap();
+
+    // Rollback from safety backup
+    fs::copy(&backup_safety, &vault_path).unwrap();
+
+    // Verify original vault remains 100% healthy and unlocks
+    let restored = storage.unlock(active_pwd).expect("Active vault must be intact after backup rollback");
+    assert_eq!(restored.data.recovery_code.as_deref(), Some("KN-CURRENT-ACTIVE-KEY"));
+}

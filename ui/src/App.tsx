@@ -279,6 +279,8 @@ export default function App() {
   const [showImportPassword, setShowImportPassword] = useState<boolean>(false);
   const [importModalError, setImportModalError] = useState<string | null>(null);
   const [revealedCardPinValues, setRevealedCardPinValues] = useState<Record<string, string>>({});
+  const [clearRecoveryKey, setClearRecoveryKey] = useState<boolean>(false);
+  const [clearCardPin, setClearCardPin] = useState<boolean>(false);
   const sessionEpochRef = useRef<number>(0);
   const isUnlockedRef = useRef<boolean>(false);
   const [savedPasswordHint, setSavedPasswordHint] = useState<string | null>(null);
@@ -794,6 +796,8 @@ export default function App() {
     setCardExpiry("");
     setCardCvv("");
     setCardPin("");
+    setClearRecoveryKey(false);
+    setClearCardPin(false);
     setRevealedAccountPasswords({});
     setRevealedAccountRecoveryKeys({});
     setRevealedCardNumbers({});
@@ -1790,6 +1794,8 @@ export default function App() {
       setEditUrl(acc.url || "");
       setEditNotes(acc.notes || "");
     }
+    setClearRecoveryKey(false);
+    setClearCardPin(false);
     setEditAccountError(null);
   };
 
@@ -1812,9 +1818,9 @@ export default function App() {
         payloadUsername = cardHolder.trim() || null;
         payloadPassword = cardNumber.replace(/\s+/g, "").trim() ? cardNumber.replace(/\s+/g, "").trim() : null;
         payloadUrl = cardExpiry.trim() || null;
-        payloadRecoveryKey = cardCvv.trim() || null;
+        payloadRecoveryKey = clearRecoveryKey ? "" : (cardCvv.trim() ? cardCvv.trim() : null);
         const extraNotes = editNotes.trim();
-        const pinPart = cardPin.trim() ? `PIN: ${cardPin.trim()}` : "";
+        const pinPart = clearCardPin ? "" : (cardPin.trim() ? `PIN: ${cardPin.trim()}` : "");
         const parts = ["[CARD]"];
         if (pinPart) parts.push(pinPart);
         if (extraNotes) parts.push(extraNotes);
@@ -1824,7 +1830,7 @@ export default function App() {
         payloadUsername = editUsername.trim() || null;
         payloadPassword = editPassword.trim() ? editPassword : null;
         payloadEmail = editEmail.trim() || null;
-        payloadRecoveryKey = editRecoveryKey.trim() || null;
+        payloadRecoveryKey = clearRecoveryKey ? "" : (editRecoveryKey.trim() ? editRecoveryKey.trim() : null);
         payloadNotes = editNotes.trim() || null;
         payloadUrl = editUrl.trim() || null;
       }
@@ -1839,6 +1845,8 @@ export default function App() {
         recoveryKey: payloadRecoveryKey,
         notes: payloadNotes,
         url: payloadUrl,
+        clearRecoveryKey: clearRecoveryKey,
+        clearPin: clearCardPin,
       });
       setSummary(updated);
       await fetchServiceAccounts(selectedServiceId);
@@ -4860,20 +4868,46 @@ export default function App() {
                       <label className="text-base font-bold text-foreground">
                         رمز الأمان (CVV / CVC)
                       </label>
-                      <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
+                      <div className="flex items-center gap-2">
+                        {editingAccount?.has_recovery_key && (
+                          clearRecoveryKey ? (
+                            <button
+                              type="button"
+                              onClick={() => setClearRecoveryKey(false)}
+                              className="text-xs text-amber-400 hover:text-amber-300 font-bold"
+                            >
+                              سيتم الحذف (تراجع)
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setClearRecoveryKey(true);
+                                setCardCvv("");
+                              }}
+                              className="text-xs text-rose-400 hover:text-rose-300 font-bold"
+                            >
+                              إزالة CVV
+                            </button>
+                          )
+                        )}
+                        <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
+                      </div>
                     </div>
                     <div className="relative">
                       <Input
                         type={showCardCvv ? "text" : "password"}
-                        placeholder="اتركه فارغاً للإبقاء على رمز الأمان الحالي"
-                        value={cardCvv}
+                        placeholder={clearRecoveryKey ? "سيتم حذف رمز CVV عند الحفظ" : "اتركه فارغاً للإبقاء على رمز الأمان الحالي"}
+                        disabled={clearRecoveryKey}
+                        value={clearRecoveryKey ? "" : cardCvv}
                         onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest pl-12"
+                        className={`h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest pl-12 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
                       />
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
+                        disabled={clearRecoveryKey}
                         onClick={() => setShowCardCvv(!showCardCvv)}
                         className="absolute left-2 top-2.5 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                       >
@@ -4884,15 +4918,40 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    الرمز السري للبطاقة (PIN - اختياري)
-                  </label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-base font-bold text-foreground">
+                      الرمز السري للبطاقة (PIN - اختياري)
+                    </label>
+                    {editingAccount?.has_pin && (
+                      clearCardPin ? (
+                        <button
+                          type="button"
+                          onClick={() => setClearCardPin(false)}
+                          className="text-xs text-amber-400 hover:text-amber-300 font-bold"
+                        >
+                          سيتم الحذف (تراجع)
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClearCardPin(true);
+                            setCardPin("");
+                          }}
+                          className="text-xs text-rose-400 hover:text-rose-300 font-bold"
+                        >
+                          إزالة الرمز السري
+                        </button>
+                      )
+                    )}
+                  </div>
                   <Input
                     type="password"
-                    placeholder="اتركه فارغاً للإبقاء على الرمز السري الحالي"
-                    value={cardPin}
+                    placeholder={clearCardPin ? "سيتم حذف الرمز السري عند الحفظ" : "اتركه فارغاً للإبقاء على الرمز السري الحالي"}
+                    disabled={clearCardPin}
+                    value={clearCardPin ? "" : cardPin}
                     onChange={(e) => setCardPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest"
+                    className={`h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest ${clearCardPin ? "opacity-50 line-through bg-destructive/10" : ""}`}
                   />
                 </div>
 
@@ -4984,21 +5043,47 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    مفتاح استرداد الحساب (Recovery Key)
-                  </label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-base font-bold text-foreground">
+                      مفتاح استرداد الحساب (Recovery Key)
+                    </label>
+                    {editingAccount?.has_recovery_key && (
+                      clearRecoveryKey ? (
+                        <button
+                          type="button"
+                          onClick={() => setClearRecoveryKey(false)}
+                          className="text-xs text-amber-400 hover:text-amber-300 font-bold"
+                        >
+                          سيتم الحذف (تراجع)
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClearRecoveryKey(true);
+                            setEditRecoveryKey("");
+                          }}
+                          className="text-xs text-rose-400 hover:text-rose-300 font-bold"
+                        >
+                          إزالة مفتاح الاسترداد
+                        </button>
+                      )
+                    )}
+                  </div>
                   <div className="relative">
                     <Input
                       type={showEditRecoveryKey ? "text" : "password"}
-                      placeholder="اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"
-                      value={editRecoveryKey}
+                      placeholder={clearRecoveryKey ? "سيتم حذف مفتاح الاسترداد عند الحفظ" : "اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"}
+                      disabled={clearRecoveryKey}
+                      value={clearRecoveryKey ? "" : editRecoveryKey}
                       onChange={(e) => setEditRecoveryKey(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12"
+                      className={`h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
+                      disabled={clearRecoveryKey}
                       onClick={() => setShowEditRecoveryKey(!showEditRecoveryKey)}
                       className="absolute left-2 top-2.5 h-8 w-8 text-muted-foreground hover:text-foreground"
                       title={showEditRecoveryKey ? "إخفاء مفتاح الاسترداد" : "إظهار مفتاح الاسترداد"}

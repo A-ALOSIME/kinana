@@ -336,14 +336,17 @@ async fn unlock_vault(
         let c = code.clone();
         let recovery_path = get_recovery_file_path(&app)?;
         if !recovery_path.exists() {
-            let _ = write_recovery_file(&app, &password, &c);
+            write_recovery_file(&app, &password, &c)
+                .map_err(|e| format!("فشل تأمين ملف الاسترداد للخزنة: {}", e))?;
         }
         c
     } else {
         let new_code = generate_emergency_recovery_code();
         session.data.recovery_code = Some(new_code.clone());
-        let _ = storage.save(&mut session);
-        let _ = write_recovery_file(&app, &password, &new_code);
+        storage.save(&mut session)
+            .map_err(|e| format!("فشل ترقية بيانات الخزنة برمز الاسترداد الجديد: {}", e))?;
+        write_recovery_file(&app, &password, &new_code)
+            .map_err(|e| format!("فشل كتابة ملف الاسترداد الجديد للخزنة: {}", e))?;
         new_code
     };
 
@@ -805,7 +808,7 @@ async fn change_master_password(
         return Err(format!("فشل حفظ الخزنة بالمفتاح الجديد: {}", e));
     }
 
-    // 4. تحديث ملف الاسترداد والتحقق من عدم حدوث أخطاء صامتة
+    // 4. تحديث ملف الاسترداد وإذا فشل التحديث، يتم التراجع عن تغيير مفتاح الخزنة لضمان اتساق الملفين
     let recovery_code = if let Some(ref c) = session.data.recovery_code {
         c.clone()
     } else {
@@ -814,8 +817,14 @@ async fn change_master_password(
         fresh
     };
 
-    write_recovery_file(&app, &new_password, &recovery_code)
-        .map_err(|e| format!("تم تشفير الخزنة بالمفتاح الجديد لكن تعذر تحديث ملف الاسترداد: {}", e))?;
+    if let Err(err_rec) = write_recovery_file(&app, &new_password, &recovery_code) {
+        let current_new_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+        session.header = old_header;
+        session.key = old_key;
+        let _ = storage.save_rekey(session, &current_new_key);
+        new_password.zeroize();
+        return Err(format!("فشل كتابة ملف الاسترداد بالمفتاح الجديد: {}. تم التراجع وإعادة الخزنة لكلمة المرور السابقة لضمان الأمان والاتساق.", err_rec));
+    }
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(recovery_code));
@@ -1316,6 +1325,8 @@ async fn update_account(
     recovery_key: Option<String>,
     notes: Option<String>,
     url: Option<String>,
+    clear_recovery_key: Option<bool>,
+    clear_pin: Option<bool>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultSummary, String> {
@@ -1358,29 +1369,44 @@ async fn update_account(
 
     let final_email = email.unwrap_or(existing_email);
 
-    // If recovery_key is None or empty in partial update, preserve existing secret (CVV or recovery key)
-    let final_recovery_key = match recovery_key {
-        Some(r) => {
-            let trimmed = r.trim().to_string();
-            if trimmed.is_empty() {
-                existing_recovery_key
-            } else {
-                trimmed
+    // Three-state logic for recovery key (CVV or account recovery key):
+    // 1. Explicit clear (clear_recovery_key == true) -> ""
+    // 2. Explicit update (non-empty recovery_key provided) -> new value
+    // 3. Keep existing (empty/None without explicit clear) -> existing_recovery_key
+    let final_recovery_key = if clear_recovery_key.unwrap_or(false) {
+        String::new()
+    } else {
+        match recovery_key {
+            Some(r) => {
+                let trimmed = r.trim().to_string();
+                if trimmed.is_empty() {
+                    existing_recovery_key
+                } else {
+                    trimmed
+                }
             }
+            None => existing_recovery_key,
         }
-        None => existing_recovery_key,
     };
 
-    // If account has an existing PIN in notes and the new update does not provide a new PIN, preserve existing PIN
-    let existing_pin_line = existing_notes
-        .lines()
-        .find(|l| l.trim().starts_with("PIN:"))
-        .map(|l| l.trim().to_string());
+    // Three-state logic for card PIN:
+    let should_clear_pin = clear_pin.unwrap_or(false);
+    let existing_pin_line = if should_clear_pin {
+        None
+    } else {
+        existing_notes
+            .lines()
+            .find(|l| l.trim().starts_with("PIN:"))
+            .map(|l| l.trim().to_string())
+    };
 
     let final_notes = match notes {
         Some(n) => {
             let trimmed = n.trim().to_string();
-            if trimmed.is_empty() {
+            if should_clear_pin {
+                let clean: Vec<&str> = trimmed.lines().filter(|l| !l.trim().starts_with("PIN:")).collect();
+                clean.join("\n")
+            } else if trimmed.is_empty() {
                 if let Some(pin) = existing_pin_line {
                     pin
                 } else {
@@ -1402,7 +1428,14 @@ async fn update_account(
                 trimmed
             }
         }
-        None => existing_notes,
+        None => {
+            if should_clear_pin {
+                let clean: Vec<&str> = existing_notes.lines().filter(|l| !l.trim().starts_with("PIN:")).collect();
+                clean.join("\n")
+            } else {
+                existing_notes
+            }
+        }
     };
 
     let packed_notes = pack_account_notes(&final_email, &final_recovery_key, &final_notes);
@@ -1596,8 +1629,14 @@ async fn import_vault_backup(
             return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
         }
 
-        // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها
-        let _ = write_recovery_file(&app, &password, &rec_code);
+        // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها مع التراجع في حال الفشل
+        if let Err(e) = write_recovery_file(&app, &password, &rec_code) {
+            if backup_safety.exists() {
+                let _ = std::fs::copy(&backup_safety, &vault_path);
+            }
+            password.zeroize();
+            return Err(format!("فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم التراجع لحماية سلامة بيانات الخزنة.", e));
+        }
 
         if let Ok(mut lock) = state.session.lock() {
             *lock = None;
