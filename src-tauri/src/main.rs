@@ -1925,10 +1925,11 @@ async fn import_vault_backup(
         }
         password.zeroize();
 
-        // 2. إغلاق المعاملة وتنظيف نسخ الأمان بعد تثبيت الخزنة بنجاح
-        let _ = journal.commit_and_cleanup(&journal_path);
+        // 2. تأكيد إتمام المعاملة رسمياً على القرص بحالة Committed قبل المساس بنسخ الأمان
+        journal.commit(&journal_path)
+            .map_err(|e| format!("فشل توثيق إتمام معاملة الاستيراد: {}", e))?;
 
-        // 3. أرشفة الخزنة السابقة كخطوة مستقلة لا تعطل إتمام الاستيراد
+        // 3. أرشفة الخزنة السابقة من نسخ الأمان الموجودة فعلياً على القرص قبل تنظيفها
         if had_existing_vault {
             if let Err(e) = create_pre_import_archive(
                 &vault_path,
@@ -1939,6 +1940,9 @@ async fn import_vault_backup(
                 eprintln!("WARNING: Failed to archive previous vault backup: {}", e);
             }
         }
+
+        // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة وأي ملفات أمان متبقية
+        let _ = journal.cleanup(&journal_path);
 
         Ok(Some(source_path.to_string_lossy().to_string()))
     } else {

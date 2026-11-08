@@ -12,6 +12,6 @@ pub use crypto::{
     MIN_M_COST, MIN_P_COST, MIN_T_COST, MIN_VAULT_FILE_SIZE,
 };
 pub use error::VaultError;
-pub use journal::{create_pre_import_archive, TransactionJournal, TransactionState};
+pub use journal::{atomic_replace, create_pre_import_archive, TransactionJournal, TransactionState};
 pub use models::{Account, AccountSummary, SecretString, Service, ServiceSummary, VaultData, VaultSummary};
 pub use storage::{VaultSession, VaultStorage};

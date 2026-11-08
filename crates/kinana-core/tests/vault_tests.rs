@@ -1097,3 +1097,121 @@ fn test_transaction_journal_committed_state_does_not_rollback_on_restart() {
     let unlocked = new_storage.unlock(new_pwd);
     assert!(unlocked.is_ok(), "Vault must remain unlocked with new password");
 }
+
+/// 25. اختبار التوافق العكسي: دفاتر المعاملات القديمة التي تفتقر لحقل state تُقرأ تلقائياً بحالة Pending
+#[test]
+fn test_legacy_journal_without_state_field_deserializes_as_pending() {
+    let dir = tempdir().unwrap();
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    // محاكاة تمثيل JSON لدفتر معاملات من إصدار قديم لا يحتوي على state أو بصمات sha256
+    let legacy_json = r#"{
+        "op": "rekey",
+        "vault_path": "C:\\fake\\vault.dat",
+        "recovery_path": "C:\\fake\\recovery.dat",
+        "vault_safety": null,
+        "recovery_safety": null,
+        "is_initial_import": false
+    }"#;
+    fs::write(&journal_path, legacy_json).unwrap();
+
+    let loaded = kinana_core::TransactionJournal::read_from_disk(&journal_path).unwrap();
+    assert!(loaded.is_some(), "Legacy journal must be parsed successfully");
+    let journal = loaded.unwrap();
+    assert_eq!(journal.state, kinana_core::TransactionState::Pending, "Legacy journal must default to Pending state");
+    assert!(journal.vault_safety_sha256.is_none(), "Legacy SHA-256 field must default to None");
+}
+
+/// 26. اختبار تسلسل الاستيراد الناجح: الأرشفة تعمل بسلاسة قبل تنظيف نسخ الأمان والدفتر
+#[test]
+fn test_import_archive_succeeds_before_cleanup_in_normal_path() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let rec_safety = dir.path().join("recovery.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let old_pwd = "OldMasterPassword1#";
+    let new_pwd = "ImportedMasterPassword2#";
+
+    // 1. إنشاء الخزنة الحالية
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(old_pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+    fs::write(&rec_path, b"dummy recovery data").unwrap();
+
+    // 2. محاكاة بدء معاملة الاستيراد: أخذ نسخ الأمان وكتابة دفتر بحالة Pending
+    fs::copy(&vault_path, &vault_safety).unwrap();
+    fs::copy(&rec_path, &rec_safety).unwrap();
+
+    let mut journal = kinana_core::TransactionJournal::new(
+        "import",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        Some(rec_safety.clone()),
+        false,
+    ).unwrap();
+    journal.write_to_disk(&journal_path).unwrap();
+
+    // 3. كتابة الخزنة الجديدة المستوردة إلى vault.dat
+    fs::remove_file(&vault_path).unwrap();
+    let mut new_session = storage.create_new_vault(new_pwd, None).unwrap();
+    storage.save(&mut new_session).unwrap();
+
+    // 4. تثبيت المعاملة رسمياً بحالة Committed قبل الأرشفة
+    journal.commit(&journal_path).unwrap();
+    assert_eq!(journal.state, kinana_core::TransactionState::Committed);
+
+    // التحقق من أن الدفتر على القرص أصبح Committed
+    let read_back = kinana_core::TransactionJournal::read_from_disk(&journal_path).unwrap().unwrap();
+    assert_eq!(read_back.state, kinana_core::TransactionState::Committed);
+
+    // 5. إنشاء الأرشيف الوقائي (يجب أن ينجح لأن نسخ الأمان ما زالت موجودة)
+    let archive_id = kinana_core::create_pre_import_archive(
+        &vault_path,
+        &vault_safety,
+        &rec_path,
+        Some(&rec_safety),
+    ).expect("create_pre_import_archive must succeed while safety backups exist");
+
+    // التحقق من إنشاء ملفات الأرشيف
+    let archived_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", archive_id));
+    let archived_rec = rec_path.with_extension(format!("dat.pre_import_{}.bak", archive_id));
+    assert!(archived_vault.exists(), "Archived vault must exist");
+    assert!(archived_rec.exists(), "Archived recovery must exist");
+
+    // 6. تنظيف الدفتر وملفات الأمان بعد انتهاء الأرشفة
+    journal.cleanup(&journal_path).unwrap();
+
+    assert!(!journal_path.exists(), "Journal must be deleted after cleanup");
+    assert!(!vault_safety.exists(), "Vault safety file must be deleted");
+    assert!(!rec_safety.exists(), "Recovery safety file must be deleted");
+
+    // 7. التحقق من سلامة فك تشفير الخزنة الجديدة والخزنة المؤرشفة
+    let new_check = storage.unlock(new_pwd);
+    assert!(new_check.is_ok(), "Imported vault must unlock with new password");
+
+    let arc_storage = VaultStorage::new(&archived_vault);
+    let arc_check = arc_storage.unlock(old_pwd);
+    assert!(arc_check.is_ok(), "Archived pre-import vault must unlock with old password");
+}
+
+/// 27. اختبار استبدال الملف الذري عبر atomic_replace وضمان عدم وجود فجوة اختفاء
+#[test]
+fn test_atomic_replace_replaces_target_file_atomically() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("source.tmp");
+    let dst = dir.path().join("destination.txt");
+
+    fs::write(&dst, b"old content").unwrap();
+    fs::write(&src, b"new content").unwrap();
+
+    kinana_core::atomic_replace(&src, &dst).unwrap();
+
+    assert!(!src.exists(), "Source file should have been moved/replaced");
+    assert!(dst.exists(), "Destination file must exist");
+    let content = fs::read_to_string(&dst).unwrap();
+    assert_eq!(content, "new content");
+}

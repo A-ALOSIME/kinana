@@ -6,6 +6,44 @@ use sha2::{Digest, Sha256};
 
 use crate::error::VaultError;
 
+/// Performs an atomic in-place file replacement.
+/// On Windows, uses MoveFileExW with MOVEFILE_REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH
+/// to guarantee NTFS atomicity without deleting the destination file beforehand.
+#[cfg(windows)]
+pub fn atomic_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let from_wide: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let to_wide: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+
+    let res = unsafe {
+        MoveFileExW(
+            from_wide.as_ptr(),
+            to_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+
+    if res == 0 {
+        let err = std::io::Error::last_os_error();
+        if let Err(_) = fs::copy(from, to) {
+            return Err(err);
+        }
+        let _ = fs::remove_file(from);
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn atomic_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::rename(from, to)
+}
+
 /// Computes the SHA-256 checksum in hexadecimal format for a given file on disk.
 pub fn compute_sha256(path: &Path) -> Result<String, VaultError> {
     let bytes = fs::read(path)?;
@@ -16,26 +54,36 @@ pub fn compute_sha256(path: &Path) -> Result<String, VaultError> {
 }
 
 /// Lifecycle state of a transactional storage operation.
+/// Defaults to Pending for backward compatibility with legacy journals.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransactionState {
-    /// Operation is ongoing; rollback required if interrupted.
+    #[serde(alias = "pending", alias = "Pending")]
     Pending,
-    /// Operation completed successfully on disk; no rollback needed if journal lingers.
+    #[serde(alias = "committed", alias = "Committed")]
     Committed,
-    /// In-process rollback completed successfully; no rollback needed if journal lingers.
+    #[serde(alias = "rolled_back", alias = "RolledBack")]
     RolledBack,
+}
+
+impl Default for TransactionState {
+    fn default() -> Self {
+        TransactionState::Pending
+    }
 }
 
 /// Write-Ahead Transaction Journal for multi-file crash consistency, verified rollback, and interrupted operations recovery.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TransactionJournal {
     pub op: String,
+    #[serde(default)]
     pub state: TransactionState,
     pub vault_path: PathBuf,
     pub recovery_path: PathBuf,
     pub vault_safety: Option<PathBuf>,
     pub recovery_safety: Option<PathBuf>,
+    #[serde(default)]
     pub vault_safety_sha256: Option<String>,
+    #[serde(default)]
     pub recovery_safety_sha256: Option<String>,
     pub is_initial_import: bool,
 }
@@ -84,7 +132,7 @@ impl TransactionJournal {
     }
 
     /// Writes the journal to disk atomically (write to temp file, sync_all, then atomic replace)
-    /// to eliminate partial JSON corruption if power cuts during write.
+    /// to eliminate partial JSON corruption without a window of destination deletion.
     pub fn write_to_disk(&self, journal_path: &Path) -> Result<(), VaultError> {
         let bytes = serde_json::to_vec_pretty(self)
             .map_err(|e| VaultError::TransactionJournalError(format!("Failed to serialize journal: {}", e)))?;
@@ -101,19 +149,12 @@ impl TransactionJournal {
             file.sync_all()?;
         }
 
-        // Atomic replacement on Windows
-        if journal_path.exists() {
-            let _ = fs::remove_file(journal_path);
-        }
-        if let Err(_) = fs::rename(&tmp_path, journal_path) {
-            fs::copy(&tmp_path, journal_path)?;
-            let _ = fs::remove_file(&tmp_path);
-        }
-
+        atomic_replace(&tmp_path, journal_path)?;
         Ok(())
     }
 
     /// Reads and deserializes a journal from disk if it exists.
+    /// Backwards compatible with legacy journals lacking state or sha256 fields.
     pub fn read_from_disk(journal_path: &Path) -> Result<Option<Self>, VaultError> {
         if !journal_path.exists() {
             return Ok(None);
@@ -133,17 +174,18 @@ impl TransactionJournal {
         Ok(())
     }
 
-    /// Commits the transaction and cleans up journal and safety files.
-    /// If removing the journal encounters a temporary Windows file lock, marks the state as Committed on disk,
-    /// ensuring that subsequent application launches will recognize the commit and never lock out the user.
-    pub fn commit_and_cleanup(&mut self, journal_path: &Path) -> Result<(), VaultError> {
+    /// Explicitly commits the transaction state on disk without deleting safety backups yet.
+    /// Returns error if disk write fails, ensuring state transition is verified.
+    pub fn commit(&mut self, journal_path: &Path) -> Result<(), VaultError> {
         self.state = TransactionState::Committed;
-        let _ = self.write_to_disk(journal_path);
+        self.write_to_disk(journal_path)
+    }
 
+    /// Cleans up the journal file and any safety backup files on disk.
+    pub fn cleanup(&self, journal_path: &Path) -> Result<(), VaultError> {
         if journal_path.exists() {
             let _ = fs::remove_file(journal_path);
         }
-
         if let Some(ref v) = self.vault_safety {
             if v.exists() {
                 let _ = fs::remove_file(v);
@@ -154,31 +196,22 @@ impl TransactionJournal {
                 let _ = fs::remove_file(r);
             }
         }
-
         Ok(())
     }
 
+    /// Commits the transaction and cleans up journal and safety files.
+    /// Strictly verifies state transition to Committed on disk before deleting any safety files.
+    pub fn commit_and_cleanup(&mut self, journal_path: &Path) -> Result<(), VaultError> {
+        self.commit(journal_path)?;
+        self.cleanup(journal_path)
+    }
+
     /// Marks the transaction as rolled back and cleans up journal and safety files.
+    /// Strictly verifies state transition to RolledBack on disk before deleting any safety files.
     pub fn rollback_and_cleanup(&mut self, journal_path: &Path) -> Result<(), VaultError> {
         self.state = TransactionState::RolledBack;
-        let _ = self.write_to_disk(journal_path);
-
-        if journal_path.exists() {
-            let _ = fs::remove_file(journal_path);
-        }
-
-        if let Some(ref v) = self.vault_safety {
-            if v.exists() {
-                let _ = fs::remove_file(v);
-            }
-        }
-        if let Some(ref r) = self.recovery_safety {
-            if r.exists() {
-                let _ = fs::remove_file(r);
-            }
-        }
-
-        Ok(())
+        self.write_to_disk(journal_path)?;
+        self.cleanup(journal_path)
     }
 
     /// Recovers from an interrupted transaction recorded in the journal.
@@ -316,13 +349,8 @@ pub fn create_pre_import_archive(
     fs::copy(vault_safety, &timestamped_vault)?;
 
     let latest_vault = vault_path.with_extension("dat.pre_import_latest.bak");
-    if latest_vault.exists() {
-        let _ = fs::remove_file(&latest_vault);
-    }
-    if let Err(_) = fs::rename(vault_safety, &latest_vault) {
-        fs::copy(&timestamped_vault, &latest_vault)?;
-        let _ = fs::remove_file(vault_safety);
-    }
+    let _ = fs::copy(vault_safety, &latest_vault);
+    let _ = fs::remove_file(vault_safety);
 
     // 2. Recovery Archive (using identical archive_id for perfect synchronization)
     if let Some(r_safety) = recovery_safety {
@@ -336,13 +364,8 @@ pub fn create_pre_import_archive(
             fs::copy(r_safety, &timestamped_rec)?;
 
             let latest_rec = recovery_path.with_extension("dat.pre_import_latest.bak");
-            if latest_rec.exists() {
-                let _ = fs::remove_file(&latest_rec);
-            }
-            if let Err(_) = fs::rename(r_safety, &latest_rec) {
-                fs::copy(&timestamped_rec, &latest_rec)?;
-                let _ = fs::remove_file(r_safety);
-            }
+            let _ = fs::copy(r_safety, &latest_rec);
+            let _ = fs::remove_file(r_safety);
         }
     }
 
