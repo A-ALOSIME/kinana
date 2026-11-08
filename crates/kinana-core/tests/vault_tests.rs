@@ -799,7 +799,7 @@ fn test_import_preserves_pre_import_backup_on_success() {
     assert_eq!(recovered_original.data.recovery_code.as_deref(), Some("KN-ORIGINAL-DATA"));
 }
 
-/// 19. اختبار استعادة المعاملات المتوقفة بسبب انقطاع مفاجئ عبر دفتر المعاملات (Transaction Journal Crash Recovery)
+/// 19. اختبار استعادة المعاملات المتوقفة بسبب انقطاع مفاجئ عبر دفتر المعاملات الإنتاجي الفعلي (Transaction Journal Crash Recovery)
 #[test]
 fn test_transaction_journal_crash_recovery_restores_consistent_state() {
     let dir = tempdir().unwrap();
@@ -833,33 +833,25 @@ fn test_transaction_journal_crash_recovery_restores_consistent_state() {
     fs::write(&rec_path, &rec_bytes).unwrap();
     fs::copy(&rec_path, &rec_safety).unwrap();
 
-    // 2. تسجيل دفتر المعاملة قبل بدء العملية الحساسة
-    let journal_json = serde_json::json!({
-        "op": "rekey",
-        "vault_path": vault_path.to_string_lossy(),
-        "recovery_path": rec_path.to_string_lossy(),
-        "vault_safety": vault_safety.to_string_lossy(),
-        "recovery_safety": rec_safety.to_string_lossy(),
-        "is_initial_import": false
-    });
-    fs::write(&journal_path, journal_json.to_string().as_bytes()).unwrap();
+    // 2. تسجيل دفتر المعاملة باستخدام الدالة الإنتاجية الفعلية
+    let journal = kinana_core::TransactionJournal {
+        op: "rekey".to_string(),
+        vault_path: vault_path.clone(),
+        recovery_path: rec_path.clone(),
+        vault_safety: Some(vault_safety.clone()),
+        recovery_safety: Some(rec_safety.clone()),
+        is_initial_import: false,
+    };
+    journal.write_to_disk(&journal_path).unwrap();
 
     // 3. محاكاة انقطاع تيار أو انهيار مفاجئ أثناء تدوير المفتاح:
     // كتابة ملف تالف أو غير متناسق جزئياً في vault.dat
     fs::write(&vault_path, b"PARTIAL_CRASH_CORRUPTED_INCOMPLETE_REKEY").unwrap();
 
-    // 4. تشغيل آلية الاسترداد التلقائي للدفتر عند بدء التشغيل
+    // 4. تشغيل آلية الاسترداد التلقائي للدفتر عبر دالة الإنتاج الفعلية
     assert!(journal_path.exists(), "Journal must exist indicating interrupted transaction");
-    
-    // تنفيذ منطق استعادة الدفتر
-    let journal_bytes = fs::read(&journal_path).unwrap();
-    let journal_val: serde_json::Value = serde_json::from_slice(&journal_bytes).unwrap();
-    let v_safe = std::path::PathBuf::from(journal_val["vault_safety"].as_str().unwrap());
-    let r_safe = std::path::PathBuf::from(journal_val["recovery_safety"].as_str().unwrap());
-    
-    fs::copy(&v_safe, &vault_path).unwrap();
-    fs::copy(&r_safe, &rec_path).unwrap();
-    fs::remove_file(&journal_path).unwrap();
+    let recovered = kinana_core::TransactionJournal::recover(&journal_path).expect("Recovery must succeed");
+    assert!(recovered, "Recovery must return true");
 
     // 5. التحقق: الخزنة المستعادة تعمل وتفك التشفير بكلمة المرور الأصلية ومفتاح الاسترداد سليم 100%
     assert!(!journal_path.exists(), "Journal should be cleared after successful recovery");
@@ -919,4 +911,99 @@ fn test_timestamped_pre_import_archives_maintain_history_across_multiple_imports
     assert_eq!(VaultStorage::new(&arc1).unlock(p1).unwrap().data.recovery_code.as_deref(), Some("CODE-1"));
     assert_eq!(VaultStorage::new(&arc2).unlock(p2).unwrap().data.recovery_code.as_deref(), Some("CODE-2"));
     assert_eq!(VaultStorage::new(&vault_path).unlock(p3).unwrap().data.recovery_code.as_deref(), Some("CODE-3"));
+}
+
+/// 21. اختبار الحفاظ الصارم على دفتر المعاملات عند فشل الاستعادة (عدم حذفه لمنع ضياع البيانات)
+#[test]
+fn test_transaction_journal_preserves_journal_on_recovery_failure() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let non_existent_safety = dir.path().join("vault.dat.missing_safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let journal = kinana_core::TransactionJournal {
+        op: "rekey".to_string(),
+        vault_path: vault_path.clone(),
+        recovery_path: rec_path.clone(),
+        vault_safety: Some(non_existent_safety),
+        recovery_safety: None,
+        is_initial_import: false,
+    };
+    journal.write_to_disk(&journal_path).unwrap();
+    assert!(journal_path.exists());
+
+    // محاولة الاستعادة عندما تكون نسخة الأمان مفقودة
+    let result = kinana_core::TransactionJournal::recover(&journal_path);
+    assert!(result.is_err(), "Recovery must return Err when safety file is missing");
+
+    // المعيار الأمني الحاسم: لا يُحذف الدفتر أبداً عند الفشل!
+    assert!(journal_path.exists(), "Journal file MUST be preserved on disk when recovery fails");
+}
+
+/// 22. اختبار دالة الأرشفة الإنتاجية الفعلية: توحيد المعرف، منع التصادم، وفحص السلامة
+#[test]
+fn test_create_pre_import_archive_function_with_unified_id_and_collision_prevention() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let rec_safety = dir.path().join("recovery.dat.safety");
+
+    let original_pwd = "OriginalImportPassword123#";
+    let original_code = "KN-ORIGINAL-REC-CODE";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    // تجهيز بيانات الخزنة الأصلية
+    let storage = VaultStorage::new(&vault_safety);
+    let mut session = storage.create_new_vault(original_pwd, Some(fast_params)).unwrap();
+    session.data.recovery_code = Some(original_code.to_string());
+    storage.save(&mut session).unwrap();
+
+    // تجهيز بيانات الاسترداد الأصلية
+    let rec_hdr = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(original_code, &rec_hdr.salt, &rec_hdr.argon2_params).unwrap();
+    let rec_bytes = kinana_core::crypto::encrypt_payload(original_pwd.as_bytes(), &rec_key, &rec_hdr).unwrap();
+    fs::write(&rec_safety, &rec_bytes).unwrap();
+
+    // تشغيل دالة الأرشفة الإنتاجية الأولى
+    let archive_id1 = kinana_core::create_pre_import_archive(
+        &vault_path,
+        &vault_safety,
+        &rec_path,
+        Some(&rec_safety),
+    ).expect("Archiving must succeed");
+
+    // التحقق من وجود الملفين المؤرخين بنفس المعرف الموحد تماماً
+    let arc1_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", archive_id1));
+    let arc1_rec = rec_path.with_extension(format!("dat.pre_import_{}.bak", archive_id1));
+    assert!(arc1_vault.exists(), "Timestamped vault archive 1 must exist");
+    assert!(arc1_rec.exists(), "Timestamped recovery archive 1 must exist");
+
+    // التحقق من أن النسخة الأرشيفية قابلة لفك التشفير بنجاح بكلمة المرور الأصلية
+    let unl = VaultStorage::new(&arc1_vault).unlock(original_pwd).unwrap();
+    assert_eq!(unl.data.recovery_code.as_deref(), Some(original_code));
+
+    // تشغيل أرشفة ثانية: إعادة إنشاء ملفات أمان وتشغيل الأرشفة للتأكد من عدم التصادم
+    fs::copy(&arc1_vault, &vault_safety).unwrap();
+    fs::copy(&arc1_rec, &rec_safety).unwrap();
+
+    let archive_id2 = kinana_core::create_pre_import_archive(
+        &vault_path,
+        &vault_safety,
+        &rec_path,
+        Some(&rec_safety),
+    ).expect("Second archiving must succeed");
+
+    let arc2_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", archive_id2));
+    let arc2_rec = rec_path.with_extension(format!("dat.pre_import_{}.bak", archive_id2));
+    assert!(arc2_vault.exists(), "Timestamped vault archive 2 must exist");
+    assert!(arc2_rec.exists(), "Timestamped recovery archive 2 must exist");
+
+    // التحقق من بقاء الأرشيف الأول والثاني كلاهما على القرص
+    assert!(arc1_vault.exists(), "First archive must not be overwritten by second import");
 }

@@ -40,4 +40,10 @@ pub enum VaultError {
 
     #[error("Existing vault file is corrupted or cannot be authenticated: {0}. Save aborted to protect data.")]
     ExistingVaultCorrupted(String),
+
+    #[error("Transaction recovery failed: {0}")]
+    TransactionRecoveryFailed(String),
+
+    #[error("Transaction journal error: {0}")]
+    TransactionJournalError(String),
 }

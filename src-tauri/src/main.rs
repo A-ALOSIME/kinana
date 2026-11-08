@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use kinana_core::{
+    journal::{create_pre_import_archive, TransactionJournal},
     models::{Account, SecretString, Service, VaultSummary},
     storage::{VaultSession, VaultStorage},
 };
@@ -218,79 +219,20 @@ async fn vault_exists(app: AppHandle) -> bool {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct TransactionJournal {
-    op: String,
-    vault_path: String,
-    recovery_path: String,
-    vault_safety: Option<String>,
-    recovery_safety: Option<String>,
-    is_initial_import: bool,
-}
-
 fn get_journal_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let vault_path = get_vault_path(app)?;
     Ok(vault_path.with_extension("tx.journal"))
 }
 
-fn write_transaction_journal(
-    app: &AppHandle,
-    journal: &TransactionJournal,
-) -> Result<std::path::PathBuf, String> {
-    let journal_path = get_journal_path(app)?;
-    let bytes = serde_json::to_vec_pretty(journal).map_err(|e| e.to_string())?;
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&journal_path)
-        .map_err(|e| e.to_string())?;
-    file.write_all(&bytes).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
-    Ok(journal_path)
-}
-
 fn clear_transaction_journal(app: &AppHandle) {
     if let Ok(path) = get_journal_path(app) {
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-        }
+        let _ = TransactionJournal::clear(&path);
     }
 }
 
-fn recover_interrupted_transactions_if_any(app: &AppHandle) {
-    if let Ok(journal_path) = get_journal_path(app) {
-        if !journal_path.exists() {
-            return;
-        }
-
-        if let Ok(bytes) = std::fs::read(&journal_path) {
-            if let Ok(journal) = serde_json::from_slice::<TransactionJournal>(&bytes) {
-                let vault_p = std::path::PathBuf::from(&journal.vault_path);
-                let rec_p = std::path::PathBuf::from(&journal.recovery_path);
-
-                if journal.is_initial_import {
-                    let _ = std::fs::remove_file(&vault_p);
-                    let _ = std::fs::remove_file(&rec_p);
-                } else {
-                    if let Some(ref v_safety) = journal.vault_safety {
-                        let v_safety_path = std::path::PathBuf::from(v_safety);
-                        if v_safety_path.exists() {
-                            let _ = std::fs::copy(&v_safety_path, &vault_p);
-                        }
-                    }
-                    if let Some(ref r_safety) = journal.recovery_safety {
-                        let r_safety_path = std::path::PathBuf::from(r_safety);
-                        if r_safety_path.exists() {
-                            let _ = std::fs::copy(&r_safety_path, &rec_p);
-                        }
-                    }
-                }
-            }
-        }
-        let _ = std::fs::remove_file(&journal_path);
-    }
+fn recover_interrupted_transactions_if_any(app: &AppHandle) -> Result<bool, String> {
+    let journal_path = get_journal_path(app)?;
+    TransactionJournal::recover(&journal_path).map_err(|e| e.to_string())
 }
 
 fn synchronize_and_heal_recovery_file(
@@ -361,7 +303,8 @@ async fn auto_unlock_vault(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<bool, String> {
-    recover_interrupted_transactions_if_any(&app);
+    recover_interrupted_transactions_if_any(&app)
+        .map_err(|e| format!("خطأ أمني حرج: توجد معاملة سابقة غير مكتملة وفشلت استعادتها تلقائياً ({})", e))?;
 
     let saved_key = match unsafe { read_vault_key_wincred() } {
         Ok(k) => k,
@@ -478,7 +421,8 @@ async fn unlock_vault(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    recover_interrupted_transactions_if_any(&app);
+    recover_interrupted_transactions_if_any(&app)
+        .map_err(|e| format!("خطأ أمني حرج: توجد معاملة سابقة غير مكتملة وفشلت استعادتها تلقائياً ({})", e))?;
 
     let mut password = password;
     let vault_path = get_vault_path(&app)?;
@@ -948,15 +892,20 @@ async fn change_master_password(
     }
 
     // 2.5 تسجيل المعاملة في دفتر المعاملات الذري لضمان التعافي التلقائي عند انقطاع التيار (Transaction Journal)
+    let journal_path = get_journal_path(&app)?;
     let journal = TransactionJournal {
         op: "rekey".to_string(),
-        vault_path: vault_path.to_string_lossy().to_string(),
-        recovery_path: rec_path.to_string_lossy().to_string(),
-        vault_safety: Some(rekey_backup.to_string_lossy().to_string()),
-        recovery_safety: if had_recovery_file { Some(rec_backup.to_string_lossy().to_string()) } else { None },
+        vault_path: vault_path.clone(),
+        recovery_path: rec_path.clone(),
+        vault_safety: Some(rekey_backup.clone()),
+        recovery_safety: if had_recovery_file { Some(rec_backup.clone()) } else { None },
         is_initial_import: false,
     };
-    let _ = write_transaction_journal(&app, &journal);
+    journal.write_to_disk(&journal_path).map_err(|e| {
+        let _ = std::fs::remove_file(&rekey_backup);
+        if had_recovery_file { let _ = std::fs::remove_file(&rec_backup); }
+        format!("فشل تسجيل دفتر المعاملات لضمان التعافي من الانهيار: {}", e)
+    })?;
 
     // 3. أنشئ هيدر ومفتاح جديدين
     let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
@@ -1001,8 +950,7 @@ async fn change_master_password(
     };
 
     if let Err(err_rec) = write_recovery_file(&app, &new_password, &recovery_code) {
-        clear_transaction_journal(&app);
-        // تنفيذ التراجع الذري المفحوص لكلا الملفين (vault.dat و recovery.dat)
+        // لا نحذف دفتر المعاملات هنا، بل نتركه حياً لضمان التعافي عند الإقلاع في حال انقطاع التيار أثناء التراجع
         let tmp_rollback = vault_path.with_extension("dat.rollback_tmp");
         let copy_tmp_res = std::fs::copy(&rekey_backup, &tmp_rollback);
         
@@ -1034,7 +982,7 @@ async fn change_master_password(
             let _ = std::fs::remove_file(&tmp_rollback);
             new_password.zeroize();
             return Err(format!(
-                "خطأ حرج: تعذر تحديث ملف الاسترداد ({}) وفشلت استعادة ملف الخزنة السابق ({}). نسخة الأمان محفوظة في: {}",
+                "خطأ حرج: تعذر تحديث ملف الاسترداد ({}) وفشلت استعادة ملف الخزنة السابق ({}). تم الاحتفاظ بدفتر المعاملات ونسخة الأمان في: {}",
                 err_rec, vault_err, rekey_backup.display()
             ));
         }
@@ -1042,12 +990,13 @@ async fn change_master_password(
         if let Err(rec_err) = restore_rec_res {
             new_password.zeroize();
             return Err(format!(
-                "تعذر تحديث ملف الاسترداد ({}) واستُعيدت الخزنة بنجاح لكن تعذرت استعادة ملف الاسترداد السابق ({}). نسخة الاسترداد محفوظة في: {}",
+                "تعذر تحديث ملف الاسترداد ({}) واستُعيدت الخزنة بنجاح لكن تعذرت استعادة ملف الاسترداد السابق ({}). تم الاحتفاظ بدفتر المعاملات ونسخة الاسترداد في: {}",
                 err_rec, rec_err, rec_backup.display()
             ));
         }
 
-        // تم استعادة والتحقق من الملفين بنجاح قطعي
+        // تم استعادة والتحقق من الملفين بنجاح قطعي: الآن فقط يُحذف دفتر المعاملات بأمان
+        clear_transaction_journal(&app);
         let _ = std::fs::remove_file(&rekey_backup);
         if rec_backup.exists() {
             let _ = std::fs::remove_file(&rec_backup);
@@ -1905,19 +1854,29 @@ async fn import_vault_backup(
         }
 
         // تسجيل معاملة الاستيراد في دفتر المعاملات لضمان التعافي التلقائي عند انقطاع التيار (Transaction Journal)
+        let journal_path = get_journal_path(&app)?;
         let journal = TransactionJournal {
             op: "import".to_string(),
-            vault_path: vault_path.to_string_lossy().to_string(),
-            recovery_path: rec_path.to_string_lossy().to_string(),
-            vault_safety: if had_existing_vault { Some(backup_safety.to_string_lossy().to_string()) } else { None },
-            recovery_safety: if had_existing_recovery { Some(rec_safety.to_string_lossy().to_string()) } else { None },
+            vault_path: vault_path.clone(),
+            recovery_path: rec_path.clone(),
+            vault_safety: if had_existing_vault { Some(backup_safety.clone()) } else { None },
+            recovery_safety: if had_existing_recovery { Some(rec_safety.clone()) } else { None },
             is_initial_import: !had_existing_vault,
         };
-        let _ = write_transaction_journal(&app, &journal);
+        journal.write_to_disk(&journal_path).map_err(|e| {
+            if had_existing_vault { let _ = std::fs::remove_file(&backup_safety); }
+            if had_existing_recovery { let _ = std::fs::remove_file(&rec_safety); }
+            format!("فشل تسجيل دفتر المعاملات لضمان التعافي من الانهيار: {}", e)
+        })?;
 
         // 6. كتابة الملف أولاً إلى ملف مؤقت وفحصه
         std::fs::write(&tmp_import_path, &bytes_to_write)
-            .map_err(|e| format!("فشل كتابة الملف المؤقت للاستيراد: {}", e))?;
+            .map_err(|e| {
+                clear_transaction_journal(&app);
+                if had_existing_vault { let _ = std::fs::remove_file(&backup_safety); }
+                if had_existing_recovery { let _ = std::fs::remove_file(&rec_safety); }
+                format!("فشل كتابة الملف المؤقت للاستيراد: {}", e)
+            })?;
 
         // 7. استبدال ذري للخزنة بعد ثبوت صحتها 100%
         if let Err(e) = std::fs::rename(&tmp_import_path, &vault_path) {
@@ -1935,7 +1894,6 @@ async fn import_vault_backup(
 
         // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها مع معالجة الفشل
         if let Err(err_rec) = write_recovery_file(&app, &password, &rec_code) {
-            clear_transaction_journal(&app);
             password.zeroize();
             if had_existing_vault {
                 // حالة استبدال خزنة سابقة: استعادة الخزنة وملف الاسترداد السابقين مع فحص نتائج الاستعادة بدقة
@@ -1946,22 +1904,23 @@ async fn import_vault_backup(
                     None
                 };
 
-                // التحقق من صحة الاستعادة قبل حذف نسخ الأمان
+                // التحقق من صحة الاستعادة قبل حذف نسخ الأمان أو الدفتر
                 if let Err(copy_err) = restore_vault_res {
                     return Err(format!(
-                        "فشل إنشاء ملف الاسترداد للخزنة المستوردة ({}) وفشلت استعادة ملف الخزنة السابق ({}). نسخة الأمان محفوظة في: {}",
+                        "فشل إنشاء ملف الاسترداد للخزنة المستوردة ({}) وفشلت استعادة ملف الخزنة السابق ({}). تم الاحتفاظ بدفتر المعاملات ونسخة الأمان في: {}",
                         err_rec, copy_err, backup_safety.display()
                     ));
                 }
 
                 if let Some(Err(rec_copy_err)) = restore_rec_res {
                     return Err(format!(
-                        "فشل إنشاء ملف الاسترداد للخزنة المستوردة ({}) واستُعيدت الخزنة بنجاح ولكن تعذرت استعادة ملف الاسترداد السابق ({}). نسخة الأمان محفوظة في: {}",
+                        "فشل إنشاء ملف الاسترداد للخزنة المستوردة ({}) واستُعيدت الخزنة بنجاح ولكن تعذرت استعادة ملف الاسترداد السابق ({}). تم الاحتفاظ بدفتر المعاملات ونسخة الأمان في: {}",
                         err_rec, rec_copy_err, rec_safety.display()
                     ));
                 }
 
-                // تم التحقق من نجاح استعادة الملفين معاً
+                // تم التحقق من نجاح استعادة الملفين معاً: الآن فقط يتم إغلاق الدفتر وتنظيف ملفات الأمان
+                clear_transaction_journal(&app);
                 let _ = std::fs::remove_file(&backup_safety);
                 if rec_safety.exists() {
                     let _ = std::fs::remove_file(&rec_safety);
@@ -1975,6 +1934,7 @@ async fn import_vault_backup(
                 // حالة الاستيراد لأول مرة: تنظيف أي ملف جزئي تم إنشاؤه لمنع ترك خزنة تالفة أو غير متناسقة
                 let _ = std::fs::remove_file(&vault_path);
                 let _ = std::fs::remove_file(&rec_path);
+                clear_transaction_journal(&app);
                 return Err(format!(
                     "فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم إلغاء الاستيراد وتنظيف الملفات الجزئية بالكامل.",
                     err_rec
@@ -1984,39 +1944,14 @@ async fn import_vault_backup(
 
         // تم الاستيراد بنجاح تام:
         clear_transaction_journal(&app);
-        // حفظ سجل تاريخي مؤرخ (.pre_import_<timestamp>.bak) مع نسخة latest
-        if had_existing_vault && backup_safety.exists() {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let timestamped_vault_archive = vault_path.with_extension(format!("dat.pre_import_{}.bak", timestamp));
-            let latest_vault_archive = vault_path.with_extension("dat.pre_import_latest.bak");
-            
-            let _ = std::fs::copy(&backup_safety, &timestamped_vault_archive);
-            if let Err(_) = std::fs::rename(&backup_safety, &latest_vault_archive) {
-                let _ = std::fs::copy(&backup_safety, &latest_vault_archive);
-                let _ = std::fs::remove_file(&backup_safety);
-            }
-        } else if backup_safety.exists() {
-            let _ = std::fs::remove_file(&backup_safety);
-        }
-
-        if had_existing_recovery && rec_safety.exists() {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let timestamped_rec_archive = rec_path.with_extension(format!("dat.pre_import_{}.bak", timestamp));
-            let latest_rec_archive = rec_path.with_extension("dat.pre_import_latest.bak");
-            
-            let _ = std::fs::copy(&rec_safety, &timestamped_rec_archive);
-            if let Err(_) = std::fs::rename(&rec_safety, &latest_rec_archive) {
-                let _ = std::fs::copy(&rec_safety, &latest_rec_archive);
-                let _ = std::fs::remove_file(&rec_safety);
-            }
-        } else if rec_safety.exists() {
-            let _ = std::fs::remove_file(&rec_safety);
+        // حفظ سجل تاريخي مؤرخ باستخدام معرّف فريد موحد لكلا الملفين
+        if had_existing_vault {
+            create_pre_import_archive(
+                &vault_path,
+                &backup_safety,
+                &rec_path,
+                if had_existing_recovery { Some(&rec_safety) } else { None },
+            ).map_err(|e| format!("تم الاستيراد بنجاح لكن فشلت أرشفة الخزنة السابقة: {}", e))?;
         }
 
         if let Ok(mut lock) = state.session.lock() {
@@ -2213,7 +2148,9 @@ fn main() {
         })
         .setup(|app| {
             // استعادة أي معاملات غير مكتملة بسبب انقطاع تيار أو إغلاق قسري سابق فور إقلاع التطبيق
-            recover_interrupted_transactions_if_any(&app.handle());
+            if let Err(e) = recover_interrupted_transactions_if_any(&app.handle()) {
+                eprintln!("CRITICAL ERROR: Failed to recover interrupted transaction at startup: {}", e);
+            }
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(hwnd) = window.hwnd() {
