@@ -833,15 +833,15 @@ fn test_transaction_journal_crash_recovery_restores_consistent_state() {
     fs::write(&rec_path, &rec_bytes).unwrap();
     fs::copy(&rec_path, &rec_safety).unwrap();
 
-    // 2. تسجيل دفتر المعاملة باستخدام الدالة الإنتاجية الفعلية
-    let journal = kinana_core::TransactionJournal {
-        op: "rekey".to_string(),
-        vault_path: vault_path.clone(),
-        recovery_path: rec_path.clone(),
-        vault_safety: Some(vault_safety.clone()),
-        recovery_safety: Some(rec_safety.clone()),
-        is_initial_import: false,
-    };
+    // 2. تسجيل دفتر المعاملة باستخدام الدالة الإنتاجية الفعلية مع احتساب SHA-256
+    let journal = kinana_core::TransactionJournal::new(
+        "rekey",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        Some(rec_safety.clone()),
+        false,
+    ).unwrap();
     journal.write_to_disk(&journal_path).unwrap();
 
     // 3. محاكاة انقطاع تيار أو انهيار مفاجئ أثناء تدوير المفتاح:
@@ -922,14 +922,14 @@ fn test_transaction_journal_preserves_journal_on_recovery_failure() {
     let non_existent_safety = dir.path().join("vault.dat.missing_safety");
     let journal_path = dir.path().join("vault.tx.journal");
 
-    let journal = kinana_core::TransactionJournal {
-        op: "rekey".to_string(),
-        vault_path: vault_path.clone(),
-        recovery_path: rec_path.clone(),
-        vault_safety: Some(non_existent_safety),
-        recovery_safety: None,
-        is_initial_import: false,
-    };
+    let journal = kinana_core::TransactionJournal::new(
+        "rekey",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(non_existent_safety),
+        None,
+        false,
+    ).unwrap();
     journal.write_to_disk(&journal_path).unwrap();
     assert!(journal_path.exists());
 
@@ -1006,4 +1006,94 @@ fn test_create_pre_import_archive_function_with_unified_id_and_collision_prevent
 
     // التحقق من بقاء الأرشيف الأول والثاني كلاهما على القرص
     assert!(arc1_vault.exists(), "First archive must not be overwritten by second import");
+}
+
+/// 23. اختبار الكشف التلقائي عن تلف أو تلاعب نسخة الأمان عبر بصمة SHA-256 قبل الاستعادة
+#[test]
+fn test_transaction_journal_detects_tampered_safety_backup_via_sha256() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let pwd = "TamperDetectionPassword1#";
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+
+    // حفظ نسخة أمان الخزنة
+    fs::copy(&vault_path, &vault_safety).unwrap();
+
+    // تسجيل الدفتر مع حساب بصمة SHA-256 لملف الأمان
+    let journal = kinana_core::TransactionJournal::new(
+        "rekey",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        None,
+        false,
+    ).unwrap();
+    journal.write_to_disk(&journal_path).unwrap();
+
+    // تعمد تخريب بايت واحد داخل ملف الأمان لمحاكاة تلف القرص
+    let mut corrupted = fs::read(&vault_safety).unwrap();
+    let last = corrupted.len() - 1;
+    corrupted[last] ^= 0xFF;
+    fs::write(&vault_safety, &corrupted).unwrap();
+
+    // محاولة الاستعادة: يجب أن تفشل لاكتشاف عدم تطابق بصمة SHA-256
+    let res = kinana_core::TransactionJournal::recover(&journal_path);
+    assert!(res.is_err(), "Recovery must fail when safety backup SHA-256 is tampered");
+    let err_str = res.err().unwrap().to_string();
+    assert!(err_str.contains("SHA-256"), "Error message must report SHA-256 mismatch");
+
+    // يجب الحفاظ على الدفتر لمنع فقدان فرصة التراجع
+    assert!(journal_path.exists(), "Journal MUST be preserved when recovery fails");
+}
+
+/// 24. اختبار حالة الالتزام Committed: بقاء الدفتر بسبب قفل ملف لا يُعيد دحرجة العملية الناجحة عند الإقلاع
+#[test]
+fn test_transaction_journal_committed_state_does_not_rollback_on_restart() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let old_pwd = "OldPassword1#";
+    let new_pwd = "NewPassword2#";
+
+    // 1. إنشاء الخزنة بكلمة مرور قديمة ونسخة أمان
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(old_pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+    fs::copy(&vault_path, &vault_safety).unwrap();
+
+    // 2. تحديث الخزنة إلى كلمة مرور جديدة بنجاح
+    let new_storage = VaultStorage::new(&vault_path);
+    let _ = new_storage.unlock(old_pwd).unwrap();
+    fs::remove_file(&vault_path).unwrap();
+    let mut new_s = new_storage.create_new_vault(new_pwd, None).unwrap();
+    new_storage.save(&mut new_s).unwrap();
+
+    // 3. كتابة دفتر معاملات ولكن في حالة Committed (محاكاة قفل الملف الذي منع حذف الدفتر بعد النجاح)
+    let mut journal = kinana_core::TransactionJournal::new(
+        "rekey",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        None,
+        false,
+    ).unwrap();
+    journal.state = kinana_core::TransactionState::Committed;
+    journal.write_to_disk(&journal_path).unwrap();
+
+    // 4. تشغيل الاستعادة عند الإقلاع: يجب ألا تتدحرج الخزنة للنسخة القديمة!
+    let recovered = kinana_core::TransactionJournal::recover(&journal_path).unwrap();
+    assert!(!recovered, "Committed transaction must not trigger rollback");
+
+    // 5. التحقق: الخزنة ما زالت تعمل بكلمة المرور الجديدة ولم تُدحرج إلى القديمة
+    let unlocked = new_storage.unlock(new_pwd);
+    assert!(unlocked.is_ok(), "Vault must remain unlocked with new password");
 }
