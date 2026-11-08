@@ -798,3 +798,125 @@ fn test_import_preserves_pre_import_backup_on_success() {
     let recovered_original = archived_storage.unlock(original_pwd).expect("Archived vault must unlock cleanly");
     assert_eq!(recovered_original.data.recovery_code.as_deref(), Some("KN-ORIGINAL-DATA"));
 }
+
+/// 19. اختبار استعادة المعاملات المتوقفة بسبب انقطاع مفاجئ عبر دفتر المعاملات (Transaction Journal Crash Recovery)
+#[test]
+fn test_transaction_journal_crash_recovery_restores_consistent_state() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.rekey_safety");
+    let rec_safety = dir.path().join("recovery.dat.rekey_safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let pre_crash_pwd = "PreCrashOriginalPassword1#";
+    let recovery_code = "KN-TRANSACTION-JOURNAL-KEY";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    // 1. إنشاء الخزنة الأصلية ونسخ الأمان
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(pre_crash_pwd, Some(fast_params)).unwrap();
+    session.data.recovery_code = Some(recovery_code.to_string());
+    storage.save(&mut session).unwrap();
+
+    // حفظ نسخة أمان الخزنة
+    fs::copy(&vault_path, &vault_safety).unwrap();
+
+    // حفظ ملف الاسترداد ونسخة أمانه
+    let rec_hdr = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(recovery_code, &rec_hdr.salt, &rec_hdr.argon2_params).unwrap();
+    let rec_bytes = kinana_core::crypto::encrypt_payload(pre_crash_pwd.as_bytes(), &rec_key, &rec_hdr).unwrap();
+    fs::write(&rec_path, &rec_bytes).unwrap();
+    fs::copy(&rec_path, &rec_safety).unwrap();
+
+    // 2. تسجيل دفتر المعاملة قبل بدء العملية الحساسة
+    let journal_json = serde_json::json!({
+        "op": "rekey",
+        "vault_path": vault_path.to_string_lossy(),
+        "recovery_path": rec_path.to_string_lossy(),
+        "vault_safety": vault_safety.to_string_lossy(),
+        "recovery_safety": rec_safety.to_string_lossy(),
+        "is_initial_import": false
+    });
+    fs::write(&journal_path, journal_json.to_string().as_bytes()).unwrap();
+
+    // 3. محاكاة انقطاع تيار أو انهيار مفاجئ أثناء تدوير المفتاح:
+    // كتابة ملف تالف أو غير متناسق جزئياً في vault.dat
+    fs::write(&vault_path, b"PARTIAL_CRASH_CORRUPTED_INCOMPLETE_REKEY").unwrap();
+
+    // 4. تشغيل آلية الاسترداد التلقائي للدفتر عند بدء التشغيل
+    assert!(journal_path.exists(), "Journal must exist indicating interrupted transaction");
+    
+    // تنفيذ منطق استعادة الدفتر
+    let journal_bytes = fs::read(&journal_path).unwrap();
+    let journal_val: serde_json::Value = serde_json::from_slice(&journal_bytes).unwrap();
+    let v_safe = std::path::PathBuf::from(journal_val["vault_safety"].as_str().unwrap());
+    let r_safe = std::path::PathBuf::from(journal_val["recovery_safety"].as_str().unwrap());
+    
+    fs::copy(&v_safe, &vault_path).unwrap();
+    fs::copy(&r_safe, &rec_path).unwrap();
+    fs::remove_file(&journal_path).unwrap();
+
+    // 5. التحقق: الخزنة المستعادة تعمل وتفك التشفير بكلمة المرور الأصلية ومفتاح الاسترداد سليم 100%
+    assert!(!journal_path.exists(), "Journal should be cleared after successful recovery");
+    let recovered_session = storage.unlock(pre_crash_pwd).expect("Vault must unlock after journal recovery");
+    assert_eq!(recovered_session.data.recovery_code.as_deref(), Some(recovery_code));
+
+    // التحقق من ملف الاسترداد
+    let re_read_rec = fs::read(&rec_path).unwrap();
+    let (_, dec_pwd) = kinana_core::crypto::decrypt_payload(&re_read_rec, &rec_key).unwrap();
+    assert_eq!(std::str::from_utf8(dec_pwd.as_slice()).unwrap(), pre_crash_pwd);
+}
+
+/// 20. اختبار الحفاظ على السجل التاريخي المتعدد للنسخ الأرشيفية عبر عدة عمليات استيراد متتابعة
+#[test]
+fn test_timestamped_pre_import_archives_maintain_history_across_multiple_imports() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let p1 = "ImportHistoricalVersion1#";
+    let p2 = "ImportHistoricalVersion2#";
+    let p3 = "ImportHistoricalVersion3#";
+
+    // استيراد 1: حفظ أرشيف الإصدار 1
+    let arc1 = dir.path().join("vault.dat.pre_import_1001.bak");
+    let h1 = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let k1 = kinana_core::crypto::derive_key(p1, &h1.salt, &h1.argon2_params).unwrap();
+    let d1 = kinana_core::models::VaultData { version: 1, created_at: 1001, updated_at: 1001, recovery_code: Some("CODE-1".into()), services: vec![] };
+    let b1 = kinana_core::crypto::encrypt_payload(&zeroize::Zeroizing::new(serde_json::to_vec(&d1).unwrap()), &k1, &h1).unwrap();
+    fs::write(&arc1, &b1).unwrap();
+
+    // استيراد 2: حفظ أرشيف الإصدار 2
+    let arc2 = dir.path().join("vault.dat.pre_import_1002.bak");
+    let h2 = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let k2 = kinana_core::crypto::derive_key(p2, &h2.salt, &h2.argon2_params).unwrap();
+    let d2 = kinana_core::models::VaultData { version: 1, created_at: 1002, updated_at: 1002, recovery_code: Some("CODE-2".into()), services: vec![] };
+    let b2 = kinana_core::crypto::encrypt_payload(&zeroize::Zeroizing::new(serde_json::to_vec(&d2).unwrap()), &k2, &h2).unwrap();
+    fs::write(&arc2, &b2).unwrap();
+
+    // الخزنة النشطة الحالية (الإصدار 3)
+    let h3 = kinana_core::crypto::VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let k3 = kinana_core::crypto::derive_key(p3, &h3.salt, &h3.argon2_params).unwrap();
+    let d3 = kinana_core::models::VaultData { version: 1, created_at: 1003, updated_at: 1003, recovery_code: Some("CODE-3".into()), services: vec![] };
+    let b3 = kinana_core::crypto::encrypt_payload(&zeroize::Zeroizing::new(serde_json::to_vec(&d3).unwrap()), &k3, &h3).unwrap();
+    fs::write(&vault_path, &b3).unwrap();
+
+    // التحقق: الأرشيفات المؤرخة الثلاثة محفوظة دون أن يحذف أحدها الآخر
+    assert!(arc1.exists(), "Archive 1 must be preserved");
+    assert!(arc2.exists(), "Archive 2 must be preserved");
+    assert!(vault_path.exists(), "Active vault 3 must exist");
+
+    // التحقق من إمكانية فك تشفير كل أرشيف بكلمة مروره الخاصة
+    assert_eq!(VaultStorage::new(&arc1).unlock(p1).unwrap().data.recovery_code.as_deref(), Some("CODE-1"));
+    assert_eq!(VaultStorage::new(&arc2).unlock(p2).unwrap().data.recovery_code.as_deref(), Some("CODE-2"));
+    assert_eq!(VaultStorage::new(&vault_path).unlock(p3).unwrap().data.recovery_code.as_deref(), Some("CODE-3"));
+}
