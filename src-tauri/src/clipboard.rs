@@ -282,9 +282,25 @@ mod tests {
     fn test_windows_clipboard_sequence_tracking() {
         unsafe {
             let initial_seq = windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber();
-            assert!(initial_seq > 0, "Windows clipboard sequence number must be non-zero");
+            
+            // In headless CI runner environments without an interactive desktop window station,
+            // GetClipboardSequenceNumber() returns 0 and OpenClipboard may fail gracefully.
+            if initial_seq == 0 {
+                let res = copy_to_clipboard_secure("HeadlessTestSecret");
+                match res {
+                    Ok(seq) => {
+                        assert!(seq >= initial_seq);
+                        assert!(!clear_clipboard_if_sequence_matches(seq.wrapping_add(9999)));
+                        assert!(clear_clipboard_if_sequence_matches(seq));
+                    }
+                    Err(e) => {
+                        assert!(e.contains("clipboard"));
+                    }
+                }
+                return;
+            }
 
-            // Copying secure text must advance or return a valid sequence number
+            // Interactive desktop session: verify sequence increment and conditional clear
             let seq = copy_to_clipboard_secure("TestKinanaSeqSecret123").expect("Copy must succeed");
             assert!(seq >= initial_seq, "Returned sequence number must be >= initial sequence");
 
