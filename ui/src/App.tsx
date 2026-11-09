@@ -111,6 +111,17 @@ interface VaultSummary {
   updated_at: number;
 }
 
+interface VaultOperationResult {
+  success: boolean;
+  warning?: string | null;
+}
+
+interface ImportVaultResult {
+  success: boolean;
+  source_path?: string | null;
+  warning?: string | null;
+}
+
 // Category labels for popular presets
 const PRESET_CATEGORY_LABELS: Record<string, string> = {
   gaming: "ألعاب",
@@ -1481,12 +1492,16 @@ export default function App() {
     }
     try {
       setError(null);
-      await invoke("change_master_password", { newPassword: newMasterPassword });
+      const res = await invoke<VaultOperationResult>("change_master_password", { newPassword: newMasterPassword });
       setSavedPasswordHint(newMasterPassword);
       setNewMasterPassword("");
       setConfirmMasterPassword("");
-      setPasswordChangeSuccess("تم تغيير رمز الدخول بنجاح وتحديث بيانات الحماية!");
-      setTimeout(() => setPasswordChangeSuccess(null), 4000);
+      if (res?.warning) {
+        setPasswordChangeSuccess(`تم تغيير رمز الدخول بنجاح مع تنبيه: ${res.warning}`);
+      } else {
+        setPasswordChangeSuccess("تم تغيير رمز الدخول بنجاح وتحديث بيانات الحماية!");
+      }
+      setTimeout(() => setPasswordChangeSuccess(null), 5000);
     } catch (err: any) {
       setError(err?.toString() || "فشل تغيير رمز الدخول");
     }
@@ -1569,16 +1584,20 @@ export default function App() {
     try {
       setIsProcessingBackup(true);
       setImportModalError(null);
-      const importedPath = await invoke<string | null>("import_vault_backup", {
+      const res = await invoke<ImportVaultResult>("import_vault_backup", {
         password: importPassword.trim(),
       });
-      if (importedPath) {
+      if (res && res.success && res.source_path) {
         setShowImportModal(false);
         setImportPassword("");
         setShowSettings(false);
         purgeAllSensitiveState();
         setExists(true);
-        setError(`تم استيراد الخزنة بنجاح وفحص تشفيرها ومطابقة ترويستها بنجاح من: ${importedPath}. أدخل كلمة المرور الخاصة بها لفتحها.`);
+        if (res.warning) {
+          setError(`تم استيراد الخزنة بنجاح من: ${res.source_path}. تنبيه: ${res.warning}. أدخل كلمة المرور الخاصة بها لفتحها.`);
+        } else {
+          setError(`تم استيراد الخزنة بنجاح وفحص تشفيرها ومطابقة ترويستها بنجاح من: ${res.source_path}. أدخل كلمة المرور الخاصة بها لفتحها.`);
+        }
       }
     } catch (err: any) {
       setImportModalError(err?.toString() || "فشل استيراد الخزنة");

@@ -182,14 +182,10 @@ impl TransactionJournal {
     /// Attempts to delete all transaction artifacts, collecting any failures so that
     /// every possible file is cleaned up, and returns an error reporting all leftover files
     /// if any deletion failed.
+    /// Safety backups are deleted FIRST before the journal. If any safety backup fails to delete,
+    /// the journal is preserved on disk to continue tracking the remaining sensitive files.
     pub fn cleanup(&self, journal_path: &Path) -> Result<(), VaultError> {
         let mut errors = Vec::new();
-
-        if journal_path.exists() {
-            if let Err(e) = fs::remove_file(journal_path) {
-                errors.push(format!("journal '{}' ({})", journal_path.display(), e));
-            }
-        }
 
         if let Some(ref v) = self.vault_safety {
             if v.exists() {
@@ -203,6 +199,15 @@ impl TransactionJournal {
             if r.exists() {
                 if let Err(e) = fs::remove_file(r) {
                     errors.push(format!("recovery safety backup '{}' ({})", r.display(), e));
+                }
+            }
+        }
+
+        // Only remove the journal if all safety backup files were successfully cleaned up
+        if errors.is_empty() {
+            if journal_path.exists() {
+                if let Err(e) = fs::remove_file(journal_path) {
+                    errors.push(format!("journal '{}' ({})", journal_path.display(), e));
                 }
             }
         }
@@ -248,9 +253,16 @@ impl TransactionJournal {
         };
 
         // If the transaction was already committed or rolled back prior to app exit,
-        // the files on disk are already in their correct state; simply clean up lingering journal.
+        // the files on disk are already in their correct state; attempt to clean up lingering files.
+        // Critical: A cleanup failure on a Committed or RolledBack transaction MUST NOT block
+        // the user from opening their healthy vault!
         if journal.state == TransactionState::Committed || journal.state == TransactionState::RolledBack {
-            journal.cleanup(journal_path)?;
+            if let Err(e) = journal.cleanup(journal_path) {
+                eprintln!(
+                    "WARNING: Completed transaction ({:?}) cleanup encountered issues: {}. Journal preserved to track lingering artifacts.",
+                    journal.state, e
+                );
+            }
             return Ok(false);
         }
 
@@ -322,7 +334,16 @@ impl TransactionJournal {
         }
 
         // Only mark rolled back and clean up journal once all recovery steps succeeded without errors
-        journal.rollback_and_cleanup(journal_path)?;
+        journal.state = TransactionState::RolledBack;
+        journal.write_to_disk(journal_path)?;
+
+        if let Err(e) = journal.cleanup(journal_path) {
+            eprintln!(
+                "WARNING: Rollback restoration succeeded, but cleanup of safety files had issues: {}. Journal preserved to track lingering artifacts.",
+                e
+            );
+        }
+
         Ok(true)
     }
 }

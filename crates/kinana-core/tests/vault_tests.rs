@@ -1328,13 +1328,246 @@ fn test_cleanup_reports_deletion_failures_and_continues_removing_other_files() {
         let err_msg = cleanup_res.err().unwrap().to_string();
         assert!(err_msg.contains("vault safety backup"), "Error must report the failed file: {}", err_msg);
 
-        // التحقق من أن الملفات الأخرى تم حذفها بنجاح ولم يتوقف التنظيف فور أول خطأ
-        assert!(!journal_path.exists(), "Journal should have been deleted");
+        // التحقق من الحفاظ على الدفتر لتتبع الملفات المتبقية، وحذف باقي الملفات غير المقفولة
+        assert!(journal_path.exists(), "Journal MUST be preserved when safety files fail to delete");
         assert!(!rec_safety.exists(), "Recovery safety should have been deleted");
         assert!(vault_safety.exists(), "Locked file should still exist");
 
-        // تحرير القفل ليتم تنظيف الملف لاحقاً
+        // تحرير القفل وإعادة محاولة التنظيف للتأكد من نجاحها بالكامل وحذف الدفتر عند خلو الملفات
         drop(_locked_file);
-        let _ = fs::remove_file(&vault_safety);
+        let retry_res = journal.cleanup(&journal_path);
+        assert!(retry_res.is_ok(), "Cleanup should succeed after releasing file lock");
+        assert!(!journal_path.exists(), "Journal should now be deleted after all files are cleaned");
+        assert!(!vault_safety.exists(), "Vault safety file should now be deleted");
     }
+}
+
+/// 31. اختبار معاملة Committed مقفلة: تعذر حذف ملف الأمان بسبب قفل Windows لا يمنع فتح الخزنة السليمة
+#[test]
+fn test_committed_transaction_with_locked_safety_file_does_not_block_vault_unlock() {
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let pwd = "HealthyVaultPassword123#";
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+
+    fs::copy(&vault_path, &vault_safety).unwrap();
+
+    // كتابة دفتر في حالة Committed
+    let mut journal = kinana_core::TransactionJournal::new(
+        "rekey",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        None,
+        false,
+    ).unwrap();
+    journal.state = kinana_core::TransactionState::Committed;
+    journal.write_to_disk(&journal_path).unwrap();
+
+    #[cfg(windows)]
+    {
+        // حجز قفل حصري على ملف الأمان لمحاكاة قفل ويندوز
+        let locked_safety = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&vault_safety)
+            .unwrap();
+
+        // تشغيل التعافي عند محاولة فتح الخزنة: يجب ألا يُرجع خطأ يمنع فتح الخزنة السليمة
+        let res = kinana_core::TransactionJournal::recover(&journal_path);
+        assert!(res.is_ok(), "recover must return Ok for committed transaction even if cleanup fails");
+        assert_eq!(res.unwrap(), false, "Committed transaction must not trigger rollback");
+
+        // الخزنة السليمة يجب أن تفتح بنجاح كامل
+        let unlocked = storage.unlock(pwd);
+        assert!(unlocked.is_ok(), "Healthy vault must unlock successfully");
+
+        // الدفتر يجب أن يظل محفوظاً على القرص لتتبع ملف الأمان المتبقي
+        assert!(journal_path.exists(), "Journal must be retained while safety file remains");
+
+        // تحرير القفل وإعادة المحاولة: الآن يجب أن يتم التنظيف وحذف الدفتر
+        drop(locked_safety);
+        let retry_res = kinana_core::TransactionJournal::recover(&journal_path);
+        assert!(retry_res.is_ok());
+        assert!(!journal_path.exists(), "Journal should be deleted once cleanup succeeds");
+        assert!(!vault_safety.exists(), "Safety file should be deleted once cleanup succeeds");
+    }
+}
+
+/// 32. اختبار فشل MoveFileExW بسبب قفل حقيقي على الملف الهدف وضمان بقاء الملفين سليمين
+#[test]
+fn test_atomic_replace_fails_when_destination_is_locked_and_preserves_both_files() {
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("source.tmp");
+    let dst = dir.path().join("destination.txt");
+
+    fs::write(&dst, b"original intact content").unwrap();
+    fs::write(&src, b"new pending content").unwrap();
+
+    #[cfg(windows)]
+    {
+        // حجز قفل حصري على الملف الهدف
+        let locked_dst = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&dst)
+            .unwrap();
+
+        // محاولة الاستبدال الذري: يجب أن تفشل لأن الهدف مقفول
+        let res = kinana_core::atomic_replace(&src, &dst);
+        assert!(res.is_err(), "atomic_replace must fail when destination is locked");
+
+        // التأكد من بقاء الملف المصدر دون حذف وبقاء الملف الهدف دون إفساد جزئي
+        assert!(src.exists(), "Source file must not be deleted on failure");
+        assert_eq!(fs::read(&src).unwrap(), b"new pending content");
+
+        // تحرير القفل وإعادة الاستبدال الذري: يجب أن ينجح الآن بالكامل
+        drop(locked_dst);
+        let retry = kinana_core::atomic_replace(&src, &dst);
+        assert!(retry.is_ok(), "atomic_replace must succeed after unlocking");
+        assert_eq!(fs::read(&dst).unwrap(), b"new pending content");
+        assert!(!src.exists(), "Source file should have been moved");
+    }
+}
+
+/// 33. اختبار نجاح تغيير كلمة المرور مع تعذر حذف ملف الأمان وضمان نفاذ كلمة المرور الجديدة
+#[test]
+fn test_password_change_success_with_locked_safety_preserves_new_key() {
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let old_pwd = "OldMasterPassword1#";
+    let new_pwd = "NewMasterPassword2#";
+
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(old_pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+
+    // محاكاة أخذ نسخة أمان وتوثيق الدفتر
+    fs::copy(&vault_path, &vault_safety).unwrap();
+    let mut journal = kinana_core::TransactionJournal::new(
+        "rekey",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        None,
+        false,
+    ).unwrap();
+    journal.write_to_disk(&journal_path).unwrap();
+
+    // حفظ الخزنة بالمفتاح الجديد
+    let old_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    let new_hdr = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params).unwrap();
+    let new_key = kinana_core::crypto::derive_key(new_pwd, &new_hdr.salt, &new_hdr.argon2_params).unwrap();
+    session.header = new_hdr;
+    session.key = new_key;
+    storage.save_rekey(&mut session, &old_key).unwrap();
+
+    // توثيق الالتزام بالمعاملة
+    journal.commit(&journal_path).unwrap();
+
+    #[cfg(windows)]
+    {
+        // قفل ملف الأمان لمحاكاة فشل التنظيف
+        let locked_safety = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&vault_safety)
+            .unwrap();
+
+        let cleanup_res = journal.cleanup(&journal_path);
+        assert!(cleanup_res.is_err(), "cleanup reports failure when safety file is locked");
+
+        // التحقق الجوهري: كلمة المرور الجديدة سارية وصالحة لفك التشفير
+        let new_unlock = storage.unlock(new_pwd);
+        assert!(new_unlock.is_ok(), "New password must unlock vault despite cleanup warning");
+
+        let old_unlock = storage.unlock(old_pwd);
+        assert!(old_unlock.is_err(), "Old password must no longer unlock the vault");
+
+        // محاولة التعافي عند الإقلاع لا تعطل الخزنة الجديدة
+        let recover_check = kinana_core::TransactionJournal::recover(&journal_path).unwrap();
+        assert_eq!(recover_check, false, "Must not rollback committed rekey");
+
+        drop(locked_safety);
+        let _ = journal.cleanup(&journal_path);
+    }
+}
+
+/// 34. اختبار نجاح الاستيراد عند فشل الأرشفة الوقائية واعتماده كنجاح مع بقاء الخزنة المستوردة سارية
+#[test]
+fn test_import_success_with_archiving_failure_yields_valid_vault() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let old_pwd = "PreviousVaultPassword1#";
+    let imported_pwd = "ImportedVaultPassword2#";
+
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(old_pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+
+    // حفظ نسخة الأمان
+    fs::copy(&vault_path, &vault_safety).unwrap();
+    let mut journal = kinana_core::TransactionJournal::new(
+        "import",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        None,
+        false,
+    ).unwrap();
+    journal.write_to_disk(&journal_path).unwrap();
+
+    // كتابة الخزنة المستوردة الجديدة
+    fs::remove_file(&vault_path).unwrap();
+    let mut imported_session = storage.create_new_vault(imported_pwd, None).unwrap();
+    storage.save(&mut imported_session).unwrap();
+
+    // توثيق إتمام المعاملة بنجاح Committed
+    journal.commit(&journal_path).unwrap();
+
+    // تعمد إحداث فشل في الأرشفة (عبر حذف ملف الأمان قبل استدعاء الأرشفة)
+    fs::remove_file(&vault_safety).unwrap();
+
+    let archive_res = kinana_core::create_pre_import_archive(
+        &vault_path,
+        &vault_safety,
+        &rec_path,
+        None,
+    );
+    assert!(archive_res.is_err(), "Archiving must fail when safety backup is missing");
+
+    // التحقق الجوهري: الخزنة المستوردة سليمة وتفتح بكلمة المرور المستوردة ولا تتدحرج
+    let imported_unlock = storage.unlock(imported_pwd);
+    assert!(imported_unlock.is_ok(), "Imported vault must remain active and functional");
+
+    let previous_unlock = storage.unlock(old_pwd);
+    assert!(previous_unlock.is_err(), "Previous vault password must not unlock");
+
+    // تنظيف الدفتر
+    let cleanup_res = journal.cleanup(&journal_path);
+    assert!(cleanup_res.is_ok());
+    assert!(!journal_path.exists());
 }

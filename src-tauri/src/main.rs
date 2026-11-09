@@ -12,6 +12,7 @@ use kinana_core::{
 };
 
 use tauri::{AppHandle, Emitter, Manager, State};
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 pub struct AppState {
@@ -19,6 +20,19 @@ pub struct AppState {
     pub last_activity: Mutex<std::time::Instant>,
     pub auto_lock_timeout_secs: Mutex<Option<u64>>,
     pub current_recovery_key: Mutex<Option<SecretString>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VaultOperationResult {
+    pub success: bool,
+    pub warning: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ImportVaultResult {
+    pub success: bool,
+    pub source_path: Option<String>,
+    pub warning: Option<String>,
 }
 
 fn update_activity(state: &AppState) {
@@ -846,7 +860,7 @@ async fn change_master_password(
     new_password: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<VaultOperationResult, String> {
     let mut new_password = new_password;
     if new_password.trim().len() < 8 {
         return Err("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول الجديد من 8 خانات على الأقل لضمان حماية الخزنة ضد التخمين.".to_string());
@@ -1029,8 +1043,8 @@ async fn change_master_password(
     new_password.zeroize();
     update_activity(&state);
 
-    // 5. إذا نجح التغيير والتشفير لكن تعذر تنظيف بعض الملفات القديمة، نبلّغ المستخدم مع التفريق بين نجاح المعاملة وفشل التنظيف
-    if cleanup_err.is_some() || bak_del_err.is_some() {
+    // 5. إذا نجح التغيير والتشفير لكن تعذر تنظيف بعض الملفات القديمة، نبلّغ المستخدم بتحذير منظم مع اعتماد نجاح العملية
+    let warning = if cleanup_err.is_some() || bak_del_err.is_some() {
         let mut details = Vec::new();
         if let Some(ce) = cleanup_err {
             details.push(ce.to_string());
@@ -1038,13 +1052,18 @@ async fn change_master_password(
         if let Some(be) = bak_del_err {
             details.push(be);
         }
-        return Err(format!(
-            "تم تغيير كلمة المرور وحفظ الخزنة بنجاح بالمفتاح الجديد، ولكن تعذر حذف بعض الملفات السابقة: {}. يرجى حذفها يدوياً لحماية سرية بياناتك السابقة.",
+        Some(format!(
+            "تعذر حذف بعض ملفات الأمان المؤقتة السابقة: {}. يرجى حذفها يدوياً لحماية سرية بياناتك السابقة.",
             details.join("; ")
-        ));
-    }
+        ))
+    } else {
+        None
+    };
 
-    Ok(())
+    Ok(VaultOperationResult {
+        success: true,
+        warning,
+    })
 }
 
 #[tauri::command]
@@ -1758,7 +1777,7 @@ async fn import_vault_backup(
     password: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<Option<String>, String> {
+) -> Result<ImportVaultResult, String> {
     let mut password = password;
     if password.trim().is_empty() {
         return Err("يرجى إدخال كلمة المرور الخاصة بالخزنة المستوردة للتحقق من سلامة التشفير.".to_string());
@@ -1975,7 +1994,7 @@ async fn import_vault_backup(
         // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة وأي ملفات أمان متبقية مع فحص النتيجة
         let cleanup_err = journal.cleanup(&journal_path).err();
 
-        if cleanup_err.is_some() || archive_err.is_some() {
+        let warning = if cleanup_err.is_some() || archive_err.is_some() {
             let mut details = Vec::new();
             if let Some(ae) = archive_err {
                 details.push(format!("أرشفة الخزنة السابقة ({})", ae));
@@ -1983,16 +2002,26 @@ async fn import_vault_backup(
             if let Some(ce) = cleanup_err {
                 details.push(format!("تنظيف الملفات المؤقتة ({})", ce));
             }
-            return Err(format!(
-                "تم استيراد وتثبيت الخزنة بنجاح، لكن واجه النظام مشاكل أثناء الأرشفة أو التنظيف: {}. يرجى مراجعة المجلد لحذف الملفات المتبقية يدوياً.",
+            Some(format!(
+                "تم استيراد وتثبيت الخزنة بنجاح، لكن واجه النظام تنبيهاً أثناء الأرشفة أو التنظيف: {}. يرجى مراجعة مجلد الخزنة وحذف الملفات المؤقتة يدوياً.",
                 details.join("; ")
-            ));
-        }
+            ))
+        } else {
+            None
+        };
 
-        Ok(Some(source_path.to_string_lossy().to_string()))
+        Ok(ImportVaultResult {
+            success: true,
+            source_path: Some(source_path.to_string_lossy().to_string()),
+            warning,
+        })
     } else {
         password.zeroize();
-        Ok(None)
+        Ok(ImportVaultResult {
+            success: false,
+            source_path: None,
+            warning: None,
+        })
     }
 }
 
