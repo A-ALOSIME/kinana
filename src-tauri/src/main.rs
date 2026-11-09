@@ -1991,21 +1991,29 @@ async fn import_vault_backup(
             }
         }
 
-        // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة وأي ملفات أمان متبقية مع فحص النتيجة
+        // إذا تعذرت الأرشفة الوقائية لأي سبب، نحافظ قطعياً على نسخ الأمان الأصلية على القرص
+        // ولا نحذفها أثناء التنظيف لضمان تمكن المستخدم من استرجاع خزنته السابقة.
+        if archive_err.is_some() {
+            journal.vault_safety = None;
+            journal.recovery_safety = None;
+        }
+
+        // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة (وحذف ملفات الأمان فقط إن كانت الأرشفة قد نجحت)
         let cleanup_err = journal.cleanup(&journal_path).err();
 
         let warning = if cleanup_err.is_some() || archive_err.is_some() {
             let mut details = Vec::new();
             if let Some(ae) = archive_err {
-                details.push(format!("أرشفة الخزنة السابقة ({})", ae));
+                details.push(format!(
+                    "تعذر إنشاء نسخة الأرشيف الوقائي ({}) ولكن تم الاحتفاظ بنسخة الخزنة السابقة كاملةً بأمان في: {}",
+                    ae,
+                    backup_safety.display()
+                ));
             }
             if let Some(ce) = cleanup_err {
                 details.push(format!("تنظيف الملفات المؤقتة ({})", ce));
             }
-            Some(format!(
-                "تم استيراد وتثبيت الخزنة بنجاح، لكن واجه النظام تنبيهاً أثناء الأرشفة أو التنظيف: {}. يرجى مراجعة مجلد الخزنة وحذف الملفات المؤقتة يدوياً.",
-                details.join("; ")
-            ))
+            Some(details.join(" | "))
         } else {
             None
         };

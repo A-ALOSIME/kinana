@@ -1512,7 +1512,7 @@ fn test_password_change_success_with_locked_safety_preserves_new_key() {
     }
 }
 
-/// 34. اختبار نجاح الاستيراد عند فشل الأرشفة الوقائية واعتماده كنجاح مع بقاء الخزنة المستوردة سارية
+/// 34. اختبار نجاح الاستيراد عند فشل الأرشفة الوقائية: الحفاظ على نسخة الأمان السابقة كاملة دون حذفها
 #[test]
 fn test_import_success_with_archiving_failure_yields_valid_vault() {
     let dir = tempdir().unwrap();
@@ -1528,7 +1528,7 @@ fn test_import_success_with_archiving_failure_yields_valid_vault() {
     let mut session = storage.create_new_vault(old_pwd, None).unwrap();
     storage.save(&mut session).unwrap();
 
-    // حفظ نسخة الأمان
+    // حفظ نسخة الأمان الأصلية للخزنة السابقة
     fs::copy(&vault_path, &vault_safety).unwrap();
     let mut journal = kinana_core::TransactionJournal::new(
         "import",
@@ -1548,26 +1548,36 @@ fn test_import_success_with_archiving_failure_yields_valid_vault() {
     // توثيق إتمام المعاملة بنجاح Committed
     journal.commit(&journal_path).unwrap();
 
-    // تعمد إحداث فشل في الأرشفة (عبر حذف ملف الأمان قبل استدعاء الأرشفة)
-    fs::remove_file(&vault_safety).unwrap();
-
+    // محاكاة فشل كتابة الأرشيف الوقائي عبر مسار وجهة غير صالح (مجلد غير موجود) مع بقاء نسخة الأمان موجودة
+    let invalid_vault_target = dir.path().join("non_existent_subdir").join("vault.dat");
     let archive_res = kinana_core::create_pre_import_archive(
-        &vault_path,
+        &invalid_vault_target,
         &vault_safety,
         &rec_path,
         None,
     );
-    assert!(archive_res.is_err(), "Archiving must fail when safety backup is missing");
+    assert!(archive_res.is_err(), "Archiving must fail when target directory does not exist");
 
-    // التحقق الجوهري: الخزنة المستوردة سليمة وتفتح بكلمة المرور المستوردة ولا تتدحرج
-    let imported_unlock = storage.unlock(imported_pwd);
-    assert!(imported_unlock.is_ok(), "Imported vault must remain active and functional");
-
-    let previous_unlock = storage.unlock(old_pwd);
-    assert!(previous_unlock.is_err(), "Previous vault password must not unlock");
+    // تطبيق المنطق الإنتاجي: عند فشل الأرشفة، تُحذف الإشارة إليها من الدفتر لمنع حذفها أثناء التنظيف
+    if archive_res.is_err() {
+        journal.vault_safety = None;
+        journal.recovery_safety = None;
+    }
 
     // تنظيف الدفتر
     let cleanup_res = journal.cleanup(&journal_path);
-    assert!(cleanup_res.is_ok());
-    assert!(!journal_path.exists());
+    assert!(cleanup_res.is_ok(), "Journal cleanup must succeed");
+    assert!(!journal_path.exists(), "Journal must be deleted");
+
+    // التحقق الجوهري الأول: نسخة الأمان الأصلية ظلت محفوظة على القرص ولم تُحذف
+    assert!(vault_safety.exists(), "Previous safety backup MUST be strictly preserved on disk");
+
+    // التحقق الجوهري الثاني: إمكانية استرجاع الخزنة السابقة بالكامل من نسخة الأمان بكلمة المرور القديمة
+    let safety_storage = VaultStorage::new(&vault_safety);
+    let recovered_previous = safety_storage.unlock(old_pwd);
+    assert!(recovered_previous.is_ok(), "Safety backup must successfully unlock with previous password");
+
+    // التحقق الجوهري الثالث: الخزنة المستوردة تعمل وتفتح بكلمة المرور المستوردة الجديدة
+    let imported_unlock = storage.unlock(imported_pwd);
+    assert!(imported_unlock.is_ok(), "Imported vault must remain active and functional");
 }
