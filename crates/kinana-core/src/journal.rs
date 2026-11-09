@@ -28,12 +28,9 @@ pub fn atomic_replace(from: &Path, to: &Path) -> std::io::Result<()> {
     };
 
     if res == 0 {
-        let err = std::io::Error::last_os_error();
-        if let Err(_) = fs::copy(from, to) {
-            return Err(err);
-        }
-        let _ = fs::remove_file(from);
-        Ok(())
+        // Return OS error directly. Never fall back to non-atomic fs::copy which could corrupt
+        // destination file upon power failure or crash. Both temp file and destination are preserved.
+        Err(std::io::Error::last_os_error())
     } else {
         Ok(())
     }
@@ -182,21 +179,42 @@ impl TransactionJournal {
     }
 
     /// Cleans up the journal file and any safety backup files on disk.
+    /// Attempts to delete all transaction artifacts, collecting any failures so that
+    /// every possible file is cleaned up, and returns an error reporting all leftover files
+    /// if any deletion failed.
     pub fn cleanup(&self, journal_path: &Path) -> Result<(), VaultError> {
+        let mut errors = Vec::new();
+
         if journal_path.exists() {
-            let _ = fs::remove_file(journal_path);
+            if let Err(e) = fs::remove_file(journal_path) {
+                errors.push(format!("journal '{}' ({})", journal_path.display(), e));
+            }
         }
+
         if let Some(ref v) = self.vault_safety {
             if v.exists() {
-                let _ = fs::remove_file(v);
+                if let Err(e) = fs::remove_file(v) {
+                    errors.push(format!("vault safety backup '{}' ({})", v.display(), e));
+                }
             }
         }
+
         if let Some(ref r) = self.recovery_safety {
             if r.exists() {
-                let _ = fs::remove_file(r);
+                if let Err(e) = fs::remove_file(r) {
+                    errors.push(format!("recovery safety backup '{}' ({})", r.display(), e));
+                }
             }
         }
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(VaultError::TransactionJournalError(format!(
+                "Failed to delete sensitive transaction artifact(s): {}",
+                errors.join("; ")
+            )))
+        }
     }
 
     /// Commits the transaction and cleans up journal and safety files.
@@ -232,17 +250,7 @@ impl TransactionJournal {
         // If the transaction was already committed or rolled back prior to app exit,
         // the files on disk are already in their correct state; simply clean up lingering journal.
         if journal.state == TransactionState::Committed || journal.state == TransactionState::RolledBack {
-            let _ = fs::remove_file(journal_path);
-            if let Some(ref v) = journal.vault_safety {
-                if v.exists() {
-                    let _ = fs::remove_file(v);
-                }
-            }
-            if let Some(ref r) = journal.recovery_safety {
-                if r.exists() {
-                    let _ = fs::remove_file(r);
-                }
-            }
+            journal.cleanup(journal_path)?;
             return Ok(false);
         }
 
@@ -337,37 +345,51 @@ pub fn create_pre_import_archive(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    let archive_id = format!("{}_{:06}", now.as_secs(), now.subsec_micros());
+    let base_archive_id = format!("{}_{:06}", now.as_secs(), now.subsec_micros());
 
-    // 1. Vault Archive
-    let mut timestamped_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", archive_id));
+    // Single unified suffix & collision detection:
+    // Check if EITHER candidate vault archive or candidate recovery archive exists.
+    // If either exists, bump the shared suffix together, ensuring both files share the exact same archive_id.
+    let mut final_archive_id = base_archive_id.clone();
     let mut counter = 1;
-    while timestamped_vault.exists() {
-        timestamped_vault = vault_path.with_extension(format!("dat.pre_import_{}_{}.bak", archive_id, counter));
+    loop {
+        let candidate_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", final_archive_id));
+        let candidate_rec = recovery_path.with_extension(format!("dat.pre_import_{}.bak", final_archive_id));
+
+        let vault_exists = candidate_vault.exists();
+        let rec_exists = if recovery_safety.is_some() {
+            candidate_rec.exists()
+        } else {
+            false
+        };
+
+        if !vault_exists && !rec_exists {
+            break;
+        }
+
+        final_archive_id = format!("{}_{}", base_archive_id, counter);
         counter += 1;
     }
+
+    // 1. Vault Archive
+    let timestamped_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", final_archive_id));
     fs::copy(vault_safety, &timestamped_vault)?;
 
     let latest_vault = vault_path.with_extension("dat.pre_import_latest.bak");
-    let _ = fs::copy(vault_safety, &latest_vault);
+    fs::copy(vault_safety, &latest_vault)?;
     let _ = fs::remove_file(vault_safety);
 
-    // 2. Recovery Archive (using identical archive_id for perfect synchronization)
+    // 2. Recovery Archive (using identical final_archive_id for perfect synchronization)
     if let Some(r_safety) = recovery_safety {
         if r_safety.exists() {
-            let mut timestamped_rec = recovery_path.with_extension(format!("dat.pre_import_{}.bak", archive_id));
-            let mut rec_counter = 1;
-            while timestamped_rec.exists() {
-                timestamped_rec = recovery_path.with_extension(format!("dat.pre_import_{}_{}.bak", archive_id, rec_counter));
-                rec_counter += 1;
-            }
+            let timestamped_rec = recovery_path.with_extension(format!("dat.pre_import_{}.bak", final_archive_id));
             fs::copy(r_safety, &timestamped_rec)?;
 
             let latest_rec = recovery_path.with_extension("dat.pre_import_latest.bak");
-            let _ = fs::copy(r_safety, &latest_rec);
+            fs::copy(r_safety, &latest_rec)?;
             let _ = fs::remove_file(r_safety);
         }
     }
 
-    Ok(archive_id)
+    Ok(final_archive_id)
 }

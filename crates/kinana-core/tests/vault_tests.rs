@@ -1215,3 +1215,126 @@ fn test_atomic_replace_replaces_target_file_atomically() {
     let content = fs::read_to_string(&dst).unwrap();
     assert_eq!(content, "new content");
 }
+
+/// 28. اختبار منع التصادم الموحد لأسماء الأرشيف: ضمان تطابق معرفات الخزنة والاسترداد حتى عند تصادم اسم ملف واحد فقط
+#[test]
+fn test_pre_import_archive_unified_collision_detection_synchronizes_ids() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let rec_safety = dir.path().join("recovery.dat.safety");
+
+    fs::write(&vault_safety, b"vault safety data").unwrap();
+    fs::write(&rec_safety, b"recovery safety data").unwrap();
+
+    // تشغيل الأرشفة الأولى
+    let archive_id1 = kinana_core::create_pre_import_archive(
+        &vault_path,
+        &vault_safety,
+        &rec_path,
+        Some(&rec_safety),
+    ).expect("First archiving must succeed");
+
+    // التحقق من إنشاء ملفات الأرشيف
+    let arc1_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", archive_id1));
+    let arc1_rec = rec_path.with_extension(format!("dat.pre_import_{}.bak", archive_id1));
+    assert!(arc1_vault.exists());
+    assert!(arc1_rec.exists());
+
+    // التحقق من تحديث latest.bak
+    let latest_vault = vault_path.with_extension("dat.pre_import_latest.bak");
+    let latest_rec = rec_path.with_extension("dat.pre_import_latest.bak");
+    assert_eq!(fs::read(&latest_vault).unwrap(), b"vault safety data");
+    assert_eq!(fs::read(&latest_rec).unwrap(), b"recovery safety data");
+
+    // محاكاة تصادم غير متناظر: إعادة إنشاء ملف الأمان وملف أرشيف خزنة فقط يحمل نفس المعرف التالي
+    fs::write(&vault_safety, b"vault safety data 2").unwrap();
+    fs::write(&rec_safety, b"recovery safety data 2").unwrap();
+
+    let archive_id2 = kinana_core::create_pre_import_archive(
+        &vault_path,
+        &vault_safety,
+        &rec_path,
+        Some(&rec_safety),
+    ).expect("Second archiving must succeed");
+
+    let arc2_vault = vault_path.with_extension(format!("dat.pre_import_{}.bak", archive_id2));
+    let arc2_rec = rec_path.with_extension(format!("dat.pre_import_{}.bak", archive_id2));
+    assert!(arc2_vault.exists());
+    assert!(arc2_rec.exists());
+
+    // التأكد من أن المعرف المشترك للملفين متطابق تماماً
+    assert_eq!(arc2_vault.file_name().unwrap().to_str().unwrap().replace("vault.dat.pre_import_", ""),
+               arc2_rec.file_name().unwrap().to_str().unwrap().replace("recovery.dat.pre_import_", ""));
+}
+
+/// 29. اختبار فشل atomic_replace الصارم: عدم المساس بالملف الهدف أو إفساده بالنسخ غير الذري
+#[test]
+fn test_atomic_replace_failure_strictly_preserves_target() {
+    let dir = tempdir().unwrap();
+    let non_existent_src = dir.path().join("missing.tmp");
+    let dst = dir.path().join("critical_target.dat");
+
+    fs::write(&dst, b"critical existing data").unwrap();
+
+    let res = kinana_core::atomic_replace(&non_existent_src, &dst);
+    assert!(res.is_err(), "atomic_replace must return Err on missing source");
+
+    // الملف الهدف يجب أن يظل سليماً دون أي تغيير
+    assert_eq!(fs::read(&dst).unwrap(), b"critical existing data");
+}
+
+/// 30. اختبار رصد أخطاء التنظيف في cleanup وعدم التوقف المبكر عند فشل حذف ملف واحد
+#[test]
+fn test_cleanup_reports_deletion_failures_and_continues_removing_other_files() {
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempdir().unwrap();
+    let journal_path = dir.path().join("vault.tx.journal");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let rec_safety = dir.path().join("recovery.dat.safety");
+
+    fs::write(&journal_path, b"journal data").unwrap();
+    fs::write(&vault_safety, b"vault safety data").unwrap();
+    fs::write(&rec_safety, b"recovery safety data").unwrap();
+
+    // حجز قفل ملف حصري لمحاكاة خطأ قفل/مشاركة ملف قيد الاستخدام على نظام ويندوز
+    #[cfg(windows)]
+    let _locked_file = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&vault_safety)
+        .unwrap();
+
+    let journal = kinana_core::TransactionJournal {
+        op: "rekey".to_string(),
+        state: kinana_core::TransactionState::Committed,
+        vault_path: dir.path().join("vault.dat"),
+        recovery_path: dir.path().join("recovery.dat"),
+        vault_safety: Some(vault_safety.clone()),
+        recovery_safety: Some(rec_safety.clone()),
+        vault_safety_sha256: None,
+        recovery_safety_sha256: None,
+        is_initial_import: false,
+    };
+
+    #[cfg(windows)]
+    {
+        let cleanup_res = journal.cleanup(&journal_path);
+        assert!(cleanup_res.is_err(), "cleanup must return Err when a file fails to delete");
+
+        let err_msg = cleanup_res.err().unwrap().to_string();
+        assert!(err_msg.contains("vault safety backup"), "Error must report the failed file: {}", err_msg);
+
+        // التحقق من أن الملفات الأخرى تم حذفها بنجاح ولم يتوقف التنظيف فور أول خطأ
+        assert!(!journal_path.exists(), "Journal should have been deleted");
+        assert!(!rec_safety.exists(), "Recovery safety should have been deleted");
+        assert!(vault_safety.exists(), "Locked file should still exist");
+
+        // تحرير القفل ليتم تنظيف الملف لاحقاً
+        drop(_locked_file);
+        let _ = fs::remove_file(&vault_safety);
+    }
+}

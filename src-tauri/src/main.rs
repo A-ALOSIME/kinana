@@ -905,12 +905,12 @@ async fn change_master_password(
     // 3. أنشئ هيدر ومفتاح جديدين
     let new_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(session.header.argon2_params)
         .map_err(|e| {
-            let _ = journal.commit_and_cleanup(&journal_path);
+            let _ = journal.rollback_and_cleanup(&journal_path);
             e.to_string()
         })?;
     let new_key = kinana_core::crypto::derive_key(&new_password, &new_header.salt, &new_header.argon2_params)
         .map_err(|e| {
-            let _ = journal.commit_and_cleanup(&journal_path);
+            let _ = journal.rollback_and_cleanup(&journal_path);
             e.to_string()
         })?;
 
@@ -923,7 +923,7 @@ async fn change_master_password(
 
     // 4. احفظ بالمفتاح الجديد ذرياً
     if let Err(e) = storage.save_rekey(session, &old_key) {
-        let _ = journal.commit_and_cleanup(&journal_path);
+        let _ = journal.rollback_and_cleanup(&journal_path);
         session.key = old_key;
         session.header = old_header;
         return Err(format!("فشل حفظ الخزنة بالمفتاح الجديد: {}", e));
@@ -985,7 +985,9 @@ async fn change_master_password(
         }
 
         // تم استعادة والتحقق من الملفين بنجاح قطعي: الآن فقط يُغلق الدفتر وتُنظف نسخ الأمان
-        let _ = journal.rollback_and_cleanup(&journal_path);
+        if let Err(e) = journal.rollback_and_cleanup(&journal_path) {
+            eprintln!("WARNING: Failed to cleanup after rollback: {}", e);
+        }
 
         session.header = old_header;
         session.key = old_key;
@@ -996,28 +998,51 @@ async fn change_master_password(
         ));
     }
 
-    // إغلاق دفتر المعاملة بنجاح وتنظيف ملفات الأمان المؤقتة
-    let _ = journal.commit_and_cleanup(&journal_path);
+    // 1. إغلاق دفتر المعاملة بنجاح وتوثيق الالتزام المكتمل على القرص
+    journal.commit(&journal_path)
+        .map_err(|e| format!("فشل توثيق إتمام معاملة تغيير كلمة المرور: {}", e))?;
+
+    // 2. تنظيف ملفات الأمان والدفتر مع رصد أي فشل لإبلاغ المستخدم
+    let cleanup_err = journal.cleanup(&journal_path).err();
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(recovery_code));
     }
 
-    // 5. إذا كان الفتح التلقائي مفعلاً مسبقاً، حدّث المفتاح في WinCred مع فحص الخطأ
+    // 3. إذا كان الفتح التلقائي مفعلاً مسبقاً، حدّث المفتاح في WinCred مع فحص الخطأ
     if unsafe { read_vault_key_wincred().is_ok() } {
         if let Err(e) = unsafe { store_vault_key_wincred(&new_password) } {
             return Err(format!("تم حفظ الخزنة بالمفتاح الجديد ولكن تعذر تحديث الفتح التلقائي: {}", e));
         }
     }
 
-    // 6. تنظيف النسخ الاحتياطية القديمة لمنع فكها بكلمة المرور السابقة
+    // 4. تنظيف النسخ الاحتياطية القديمة لمنع فكها بكلمة المرور السابقة
     let backup_safety = vault_path.with_extension("dat.bak");
+    let mut bak_del_err = None;
     if backup_safety.exists() {
-        let _ = std::fs::remove_file(backup_safety);
+        if let Err(e) = std::fs::remove_file(&backup_safety) {
+            eprintln!("WARNING: Failed to remove old vault backup {}: {}", backup_safety.display(), e);
+            bak_del_err = Some(format!("النسخة الاحتياطية '{}' ({})", backup_safety.display(), e));
+        }
     }
 
     new_password.zeroize();
     update_activity(&state);
+
+    // 5. إذا نجح التغيير والتشفير لكن تعذر تنظيف بعض الملفات القديمة، نبلّغ المستخدم مع التفريق بين نجاح المعاملة وفشل التنظيف
+    if cleanup_err.is_some() || bak_del_err.is_some() {
+        let mut details = Vec::new();
+        if let Some(ce) = cleanup_err {
+            details.push(ce.to_string());
+        }
+        if let Some(be) = bak_del_err {
+            details.push(be);
+        }
+        return Err(format!(
+            "تم تغيير كلمة المرور وحفظ الخزنة بنجاح بالمفتاح الجديد، ولكن تعذر حذف بعض الملفات السابقة: {}. يرجى حذفها يدوياً لحماية سرية بياناتك السابقة.",
+            details.join("; ")
+        ));
+    }
 
     Ok(())
 }
@@ -1857,14 +1882,14 @@ async fn import_vault_backup(
         // 6. كتابة الملف أولاً إلى ملف مؤقت وفحصه
         std::fs::write(&tmp_import_path, &bytes_to_write)
             .map_err(|e| {
-                let _ = journal.commit_and_cleanup(&journal_path);
+                let _ = journal.rollback_and_cleanup(&journal_path);
                 format!("فشل كتابة الملف المؤقت للاستيراد: {}", e)
             })?;
 
         // 7. استبدال ذري للخزنة بعد ثبوت صحتها 100%
         if let Err(e) = std::fs::rename(&tmp_import_path, &vault_path) {
             let _ = std::fs::remove_file(&tmp_import_path);
-            let _ = journal.commit_and_cleanup(&journal_path);
+            let _ = journal.rollback_and_cleanup(&journal_path);
             password.zeroize();
             return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
         }
@@ -1897,7 +1922,9 @@ async fn import_vault_backup(
                 }
 
                 // تم التحقق من نجاح استعادة الملفين معاً: الآن فقط يتم إغلاق الدفتر وتنظيف ملفات الأمان
-                let _ = journal.rollback_and_cleanup(&journal_path);
+                if let Err(e) = journal.rollback_and_cleanup(&journal_path) {
+                    eprintln!("WARNING: Failed to cleanup after rollback: {}", e);
+                }
 
                 return Err(format!(
                     "فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم التراجع بنجاح واستعادة الخزنة وملف الاسترداد السابقين وتأكيد سلامتهما.",
@@ -1907,7 +1934,9 @@ async fn import_vault_backup(
                 // حالة الاستيراد لأول مرة: تنظيف أي ملف جزئي تم إنشاؤه لمنع ترك خزنة تالفة أو غير متناسقة
                 let _ = std::fs::remove_file(&vault_path);
                 let _ = std::fs::remove_file(&rec_path);
-                let _ = journal.commit_and_cleanup(&journal_path);
+                if let Err(e) = journal.rollback_and_cleanup(&journal_path) {
+                    eprintln!("WARNING: Failed to cleanup after rollback: {}", e);
+                }
                 return Err(format!(
                     "فشل تأمين ملف استرداد الخزنة المستوردة: {}. تم إلغاء الاستيراد وتنظيف الملفات الجزئية بالكامل.",
                     err_rec
@@ -1930,6 +1959,7 @@ async fn import_vault_backup(
             .map_err(|e| format!("فشل توثيق إتمام معاملة الاستيراد: {}", e))?;
 
         // 3. أرشفة الخزنة السابقة من نسخ الأمان الموجودة فعلياً على القرص قبل تنظيفها
+        let mut archive_err = None;
         if had_existing_vault {
             if let Err(e) = create_pre_import_archive(
                 &vault_path,
@@ -1938,11 +1968,26 @@ async fn import_vault_backup(
                 if had_existing_recovery { Some(&rec_safety) } else { None },
             ) {
                 eprintln!("WARNING: Failed to archive previous vault backup: {}", e);
+                archive_err = Some(e.to_string());
             }
         }
 
-        // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة وأي ملفات أمان متبقية
-        let _ = journal.cleanup(&journal_path);
+        // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة وأي ملفات أمان متبقية مع فحص النتيجة
+        let cleanup_err = journal.cleanup(&journal_path).err();
+
+        if cleanup_err.is_some() || archive_err.is_some() {
+            let mut details = Vec::new();
+            if let Some(ae) = archive_err {
+                details.push(format!("أرشفة الخزنة السابقة ({})", ae));
+            }
+            if let Some(ce) = cleanup_err {
+                details.push(format!("تنظيف الملفات المؤقتة ({})", ce));
+            }
+            return Err(format!(
+                "تم استيراد وتثبيت الخزنة بنجاح، لكن واجه النظام مشاكل أثناء الأرشفة أو التنظيف: {}. يرجى مراجعة المجلد لحذف الملفات المتبقية يدوياً.",
+                details.join("; ")
+            ));
+        }
 
         Ok(Some(source_path.to_string_lossy().to_string()))
     } else {
