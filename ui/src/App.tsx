@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { SessionGuard } from "./session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
@@ -292,8 +293,7 @@ export default function App() {
   const [revealedCardPinValues, setRevealedCardPinValues] = useState<Record<string, string>>({});
   const [clearRecoveryKey, setClearRecoveryKey] = useState<boolean>(false);
   const [clearCardPin, setClearCardPin] = useState<boolean>(false);
-  const sessionEpochRef = useRef<number>(0);
-  const isUnlockedRef = useRef<boolean>(false);
+  const sessionGuardRef = useRef<SessionGuard>(new SessionGuard());
   const [savedPasswordHint, setSavedPasswordHint] = useState<string | null>(null);
   const [showSavedPassword, setShowSavedPassword] = useState<boolean>(false);
   const [showAutoUnlockModal, setShowAutoUnlockModal] = useState<boolean>(false);
@@ -568,7 +568,7 @@ export default function App() {
 
   const toggleRevealAccountPassword = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
-    const epoch = sessionEpochRef.current;
+    const epoch = sessionGuardRef.current.epoch;
     if (revealedAccountPasswords[accId]) {
       setRevealedAccountPasswords((prev) => ({ ...prev, [accId]: false }));
       // Wipe decrypted password from memory on hide
@@ -581,7 +581,7 @@ export default function App() {
           serviceId,
           accountId: accId,
         });
-        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        if (!sessionGuardRef.current.isResponseValid(epoch)) return;
         setServiceAccounts((prev) =>
           prev.map((a) => (a.id === accId ? { ...a, password: pwd } : a))
         );
@@ -594,7 +594,7 @@ export default function App() {
 
   const toggleRevealAccountRecoveryKey = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
-    const epoch = sessionEpochRef.current;
+    const epoch = sessionGuardRef.current.epoch;
     if (revealedAccountRecoveryKeys[accId]) {
       setRevealedAccountRecoveryKeys((prev) => ({ ...prev, [accId]: false }));
       // Wipe recovery key from memory on hide
@@ -607,7 +607,7 @@ export default function App() {
           serviceId,
           accountId: accId,
         });
-        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        if (!sessionGuardRef.current.isResponseValid(epoch)) return;
         setServiceAccounts((prev) =>
           prev.map((a) => (a.id === accId ? { ...a, recovery_key: key } : a))
         );
@@ -620,7 +620,7 @@ export default function App() {
 
   const toggleRevealCardCvv = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
-    const epoch = sessionEpochRef.current;
+    const epoch = sessionGuardRef.current.epoch;
     if (revealedCardCvvs[accId]) {
       setRevealedCardCvvs((prev) => ({ ...prev, [accId]: false }));
       // Wipe card CVV from memory on hide
@@ -633,7 +633,7 @@ export default function App() {
           serviceId,
           accountId: accId,
         });
-        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        if (!sessionGuardRef.current.isResponseValid(epoch)) return;
         setServiceAccounts((prev) =>
           prev.map((a) => (a.id === accId ? { ...a, recovery_key: cvv } : a))
         );
@@ -646,7 +646,7 @@ export default function App() {
 
   const toggleRevealCardPin = async (serviceId: string, account: AccountDetail) => {
     const accId = account.id;
-    const epoch = sessionEpochRef.current;
+    const epoch = sessionGuardRef.current.epoch;
     if (revealedCardPins[accId]) {
       setRevealedCardPins((prev) => ({ ...prev, [accId]: false }));
       // Wipe card PIN from memory on hide
@@ -661,7 +661,7 @@ export default function App() {
           serviceId,
           accountId: accId,
         });
-        if (!isUnlockedRef.current || sessionEpochRef.current !== epoch) return;
+        if (!sessionGuardRef.current.isResponseValid(epoch)) return;
         setRevealedCardPinValues((prev) => ({ ...prev, [accId]: pin }));
         setRevealedCardPins((prev) => ({ ...prev, [accId]: true }));
       } catch (err) {
@@ -714,17 +714,17 @@ export default function App() {
 
   // Fetch accounts when service detail modal is open with session guard
   const fetchServiceAccounts = async (serviceId: string) => {
-    const epoch = sessionEpochRef.current;
+    const epoch = sessionGuardRef.current.epoch;
     try {
       setLoadingAccounts(true);
       const accs = await invoke<AccountDetail[]>("get_service_accounts", { serviceId });
-      if (sessionEpochRef.current !== epoch || !isUnlockedRef.current) return;
+      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
       setServiceAccounts(accs);
     } catch (err: any) {
-      if (sessionEpochRef.current !== epoch || !isUnlockedRef.current) return;
+      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
       setError(err?.toString() || "فشل جلب تفاصيل الحسابات");
     } finally {
-      if (sessionEpochRef.current === epoch) {
+      if (sessionGuardRef.current.epoch === epoch) {
         setLoadingAccounts(false);
       }
     }
@@ -760,8 +760,7 @@ export default function App() {
       if (isExist && isAutoEnabled) {
         const unlockedViaStore = await invoke<boolean>("auto_unlock_vault");
         if (unlockedViaStore) {
-          sessionEpochRef.current += 1;
-          isUnlockedRef.current = true;
+          sessionGuardRef.current.unlock();
           await fetchSummary();
           return;
         }
@@ -774,8 +773,7 @@ export default function App() {
   };
 
   const purgeAllSensitiveState = () => {
-    sessionEpochRef.current += 1;
-    isUnlockedRef.current = false;
+    sessionGuardRef.current.lock();
     setUnlocked(false);
     setSummary(null);
     setSelectedServiceId(null);
@@ -856,6 +854,12 @@ export default function App() {
     syncFullscreen();
     window.addEventListener("resize", syncFullscreen);
 
+    const handleBlur = () => {
+      setShowSavedPassword(false);
+      setSavedPasswordHint(null);
+    };
+    window.addEventListener("blur", handleBlur);
+
     // Keyboard shortcuts: F11 fullscreen, Ctrl+= zoom in, Ctrl+- zoom out, Ctrl+0 zoom reset
     const handleKeyDown = async (e: KeyboardEvent) => {
       if (e.key === "F11") {
@@ -919,6 +923,7 @@ export default function App() {
       window.removeEventListener("wheel", handleWheel);
       window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("resize", syncFullscreen);
+      window.removeEventListener("blur", handleBlur);
       if (zoomHudTimerRef.current) clearTimeout(zoomHudTimerRef.current);
     };
   }, []);
@@ -1373,8 +1378,7 @@ export default function App() {
       setError(null);
       await invoke("create_vault", { password });
       setPassword("");
-      sessionEpochRef.current += 1;
-      isUnlockedRef.current = true;
+      sessionGuardRef.current.unlock();
       await fetchSummary();
       setExists(true);
       setAutoUnlockActive(false);
@@ -1390,8 +1394,7 @@ export default function App() {
       setError(null);
       await invoke("unlock_vault", { password });
       setPassword("");
-      sessionEpochRef.current += 1;
-      isUnlockedRef.current = true;
+      sessionGuardRef.current.unlock();
       await fetchSummary();
     } catch (err: any) {
       setError(err?.toString() || "فشل فتح الخزنة: كلمة المرور غير صحيحة");
@@ -1451,7 +1454,8 @@ export default function App() {
       setAutoUnlockModalError(null);
       await invoke("enable_auto_unlock", { password: autoUnlockPassword.trim() });
       setAutoUnlockActive(true);
-      setSavedPasswordHint(autoUnlockPassword.trim());
+      setSavedPasswordHint(null);
+      setShowSavedPassword(false);
       setAutoUnlockPassword("");
       setShowAutoUnlockModal(false);
       setSettingsFeedback({
@@ -1493,7 +1497,8 @@ export default function App() {
     try {
       setError(null);
       const res = await invoke<VaultOperationResult>("change_master_password", { newPassword: newMasterPassword });
-      setSavedPasswordHint(newMasterPassword);
+      setSavedPasswordHint(null);
+      setShowSavedPassword(false);
       setNewMasterPassword("");
       setConfirmMasterPassword("");
       if (res?.warning) {
@@ -1537,8 +1542,7 @@ export default function App() {
       await invoke("recover_vault_with_key", { recoveryCode: inputRecoveryKey.trim() });
       setInputRecoveryKey("");
       setShowRecoveryModal(false);
-      sessionEpochRef.current += 1;
-      isUnlockedRef.current = true;
+      sessionGuardRef.current.unlock();
       await fetchSummary();
       setError("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
     } catch (err: any) {
@@ -2172,8 +2176,7 @@ export default function App() {
                           try {
                             const ok = await invoke<boolean>("auto_unlock_vault");
                             if (ok) {
-                              sessionEpochRef.current += 1;
-                              isUnlockedRef.current = true;
+                              sessionGuardRef.current.unlock();
                               await fetchSummary();
                             } else {
                               setError("فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ");
@@ -2441,7 +2444,6 @@ export default function App() {
                   onClick={() => {
                     setSettingsFeedback(null);
                     setShowSettings(true);
-                    handleFetchSavedPassword();
                     handleFetchRecoveryKey();
                   }}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
@@ -5228,7 +5230,16 @@ export default function App() {
       </Dialog>
 
       {/* ================= MODAL: SETTINGS & SECURITY ================= */}
-      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+      <Dialog
+        open={showSettings}
+        onOpenChange={(open) => {
+          setShowSettings(open);
+          if (!open) {
+            setShowSavedPassword(false);
+            setSavedPasswordHint(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-3xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
@@ -5318,18 +5329,32 @@ export default function App() {
               </div>
 
               {/* Reveal current password if available */}
-              {savedPasswordHint && autoUnlockActive && (
+              {autoUnlockActive && (
                 <div className="pt-3 border-t border-border/40 flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">الرمز المحفوظ حالياً في ويندوز:</span>
                   <div className="flex items-center gap-2">
                     <span className="font-sans font-bold bg-background px-3 py-1 rounded-lg border border-border">
-                      {showSavedPassword ? savedPasswordHint : "••••••••••••"}
+                      {showSavedPassword && savedPasswordHint ? savedPasswordHint : "••••••••••••"}
                     </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => setShowSavedPassword(!showSavedPassword)}
+                      onClick={async () => {
+                        if (showSavedPassword) {
+                          setShowSavedPassword(false);
+                          setSavedPasswordHint(null);
+                        } else {
+                          try {
+                            const saved = await invoke<string>("get_current_saved_password");
+                            setSavedPasswordHint(saved);
+                            setShowSavedPassword(true);
+                          } catch {
+                            setSavedPasswordHint(null);
+                            setShowSavedPassword(false);
+                          }
+                        }
+                      }}
                       className="h-8 w-8 p-0"
                     >
                       {showSavedPassword ? (

@@ -1,6 +1,9 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clipboard;
+mod wincred;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -13,13 +16,14 @@ use kinana_core::{
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 pub struct AppState {
     pub session: Mutex<Option<VaultSession>>,
     pub last_activity: Mutex<std::time::Instant>,
     pub auto_lock_timeout_secs: Mutex<Option<u64>>,
     pub current_recovery_key: Mutex<Option<SecretString>>,
+    pub last_clipboard_seq: Mutex<Option<u32>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -55,170 +59,6 @@ fn get_vault_path(app: &AppHandle) -> Result<PathBuf, String> {
     }
 
     Ok(app_dir.join("vault.dat"))
-}
-
-/// Native Windows Clipboard helper with security formats.
-///
-/// SAFETY:
-/// Calling Win32 native clipboard functions (OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard)
-/// and memory allocation functions (GlobalAlloc, GlobalLock, GlobalUnlock) requires `unsafe`.
-/// We are manually managing global memory blocks allocated via the Win32 subsystem, ensuring
-/// pointers are valid and that clipboard ownership is properly transferred to the Windows OS.
-unsafe fn copy_to_windows_clipboard_secure(text: &str) -> Result<u32, String> {
-    use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, GetClipboardSequenceNumber, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
-    };
-    use windows_sys::Win32::System::Memory::{
-        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
-    };
-
-    if OpenClipboard(std::ptr::null_mut()) == 0 {
-        return Err("Failed to open Windows clipboard".to_string());
-    }
-
-    EmptyClipboard();
-
-    // 1. Exclude from Windows 10/11 Clipboard History (Win + V):
-    // Documented Microsoft format: DWORD = 0 prevents inclusion in clipboard history
-    let hist_fmt_name: Vec<u16> = "CanIncludeInClipboardHistory\0".encode_utf16().collect();
-    let cf_history = RegisterClipboardFormatW(hist_fmt_name.as_ptr());
-    if cf_history != 0 {
-        let hmem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, std::mem::size_of::<u32>());
-        if !hmem.is_null() {
-            SetClipboardData(cf_history, hmem as _);
-        }
-    }
-
-    // 2. Prevent uploading/syncing to Microsoft Cloud Clipboard:
-    // Documented Microsoft format: DWORD = 0 prevents cross-device sync
-    let cloud_fmt_name: Vec<u16> = "CanUploadToCloudClipboard\0".encode_utf16().collect();
-    let cf_cloud = RegisterClipboardFormatW(cloud_fmt_name.as_ptr());
-    if cf_cloud != 0 {
-        let hmem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, std::mem::size_of::<u32>());
-        if !hmem.is_null() {
-            SetClipboardData(cf_cloud, hmem as _);
-        }
-    }
-
-    // 3. Write plaintext to clipboard as CF_UNICODETEXT (ID 13)
-    let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-    let byte_len = utf16.len() * std::mem::size_of::<u16>();
-    let hmem_text = GlobalAlloc(GMEM_MOVEABLE, byte_len);
-    if hmem_text.is_null() {
-        CloseClipboard();
-        return Err("Failed to allocate global memory for clipboard text".to_string());
-    }
-
-    let ptr = GlobalLock(hmem_text) as *mut u16;
-    if ptr.is_null() {
-        CloseClipboard();
-        return Err("Failed to lock global memory for clipboard text".to_string());
-    }
-    std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
-    GlobalUnlock(hmem_text);
-
-    SetClipboardData(13 /* CF_UNICODETEXT */, hmem_text as _);
-
-    CloseClipboard();
-    let seq = GetClipboardSequenceNumber();
-    Ok(seq)
-}
-
-/// Clears Windows clipboard.
-/// SAFETY: Opens and empties clipboard using standard Win32 API.
-unsafe fn clear_windows_clipboard() {
-    use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard};
-    if OpenClipboard(std::ptr::null_mut()) != 0 {
-        EmptyClipboard();
-        CloseClipboard();
-    }
-}
-
-// =========================================================================
-// WINDOWS CREDENTIAL MANAGER HELPERS (WinCred API)
-// =========================================================================
-
-const KINANA_CRED_TARGET: &str = "kinana_vault_key\0";
-
-unsafe fn store_vault_key_wincred(key: &str) -> Result<(), String> {
-    use windows_sys::Win32::Foundation::GetLastError;
-    use windows_sys::Win32::Security::Credentials::{
-        CredWriteW, CREDENTIALW, CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC,
-    };
-
-    let target_name: Vec<u16> = KINANA_CRED_TARGET.encode_utf16().collect();
-    let user_name: Vec<u16> = "kinana_user\0".encode_utf16().collect();
-    let secret_bytes = key.as_bytes();
-
-    let cred = CREDENTIALW {
-        Flags: 0,
-        Type: CRED_TYPE_GENERIC,
-        TargetName: target_name.as_ptr() as *mut u16,
-        Comment: std::ptr::null_mut(),
-        LastWritten: std::mem::zeroed(),
-        CredentialBlobSize: secret_bytes.len() as u32,
-        CredentialBlob: secret_bytes.as_ptr() as *mut u8,
-        Persist: CRED_PERSIST_ENTERPRISE,
-        AttributeCount: 0,
-        Attributes: std::ptr::null_mut(),
-        TargetAlias: std::ptr::null_mut(),
-        UserName: user_name.as_ptr() as *mut u16,
-    };
-
-    if CredWriteW(&cred, 0) == 0 {
-        return Err(format!("CredWriteW failed with code {}", GetLastError()));
-    }
-    Ok(())
-}
-
-unsafe fn read_vault_key_wincred() -> Result<String, String> {
-    use windows_sys::Win32::Security::Credentials::{
-        CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
-    };
-
-    let target_name: Vec<u16> = KINANA_CRED_TARGET.encode_utf16().collect();
-    let mut cred_ptr: *mut CREDENTIALW = std::ptr::null_mut();
-
-    if CredReadW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0, &mut cred_ptr) == 0 {
-        return Err("No saved credential found in Windows Credential Store".to_string());
-    }
-
-    if cred_ptr.is_null() {
-        return Err("Credential pointer is null".to_string());
-    }
-
-    let cred = &*cred_ptr;
-    let blob_slice = std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize);
-    let key_str = std::str::from_utf8(blob_slice)
-        .map_err(|_| "Invalid UTF-8 in credential store blob".to_string())?
-        .to_string();
-
-    CredFree(cred_ptr as *mut std::ffi::c_void);
-    Ok(key_str)
-}
-
-unsafe fn delete_vault_key_wincred() -> Result<(), String> {
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND};
-    use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
-
-    let target_name: Vec<u16> = KINANA_CRED_TARGET.encode_utf16().collect();
-    if CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0) == 0 {
-        let err = GetLastError();
-        if err != ERROR_NOT_FOUND {
-            return Err(format!("CredDeleteW failed with code {}", err));
-        }
-    }
-    Ok(())
-}
-
-const KINANA_RECOVERY_CRED_TARGET: &str = "kinana_recovery_code\0";
-
-/// Cleans up any legacy recovery code from Windows Credential Store to ensure
-/// that the emergency recovery code is strictly offline and never accessible locally by processes.
-unsafe fn delete_recovery_code_wincred() {
-    use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
-    let target_name: Vec<u16> = KINANA_RECOVERY_CRED_TARGET.encode_utf16().collect();
-    let _ = CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0);
 }
 
 // =========================================================================
@@ -314,7 +154,7 @@ async fn auto_unlock_vault(
     recover_interrupted_transactions_if_any(&app)
         .map_err(|e| format!("خطأ أمني حرج: توجد معاملة سابقة غير مكتملة وفشلت استعادتها تلقائياً ({})", e))?;
 
-    let saved_key = match unsafe { read_vault_key_wincred() } {
+    let saved_key = match unsafe { wincred::read_vault_key_wincred() } {
         Ok(k) => k,
         Err(_) => return Ok(false),
     };
@@ -325,24 +165,10 @@ async fn auto_unlock_vault(
         return Ok(false);
     }
 
-    let mut saved_key = saved_key;
-    let mut session = match storage.unlock(&saved_key) {
-        Ok(s) => s,
-        Err(e) => {
-            saved_key.zeroize();
-            return Err(e.to_string());
-        }
-    };
+    let mut session = storage.unlock(&saved_key).map_err(|e| e.to_string())?;
 
     // تطبيق آلية المواءمة والمعالجة الذاتية (Self-Healing) لملف الاسترداد في مسار الفتح التلقائي أيضاً
-    let rec_code = match synchronize_and_heal_recovery_file(&app, &storage, &mut session, &saved_key) {
-        Ok(c) => c,
-        Err(e) => {
-            saved_key.zeroize();
-            return Err(e);
-        }
-    };
-    saved_key.zeroize();
+    let rec_code = synchronize_and_heal_recovery_file(&app, &storage, &mut session, &saved_key)?;
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(rec_code));
@@ -357,12 +183,12 @@ async fn auto_unlock_vault(
 
 #[tauri::command]
 async fn is_auto_unlock_enabled() -> bool {
-    unsafe { read_vault_key_wincred().is_ok() }
+    unsafe { wincred::has_vault_key_wincred() }
 }
 
 #[tauri::command]
 async fn disable_auto_unlock() -> Result<(), String> {
-    unsafe { delete_vault_key_wincred() }
+    unsafe { wincred::delete_vault_key_wincred() }
 }
 
 #[tauri::command]
@@ -370,12 +196,11 @@ async fn enable_auto_unlock(
     password: String,
     app: AppHandle,
 ) -> Result<(), String> {
-    let mut password = password;
+    let password = Zeroizing::new(password);
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
     let _ = storage.unlock(&password).map_err(|e| e.to_string())?;
-    unsafe { store_vault_key_wincred(&password)? };
-    password.zeroize();
+    unsafe { wincred::store_vault_key_wincred(&password)? };
     Ok(())
 }
 
@@ -385,7 +210,7 @@ async fn create_vault(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let mut password = password;
+    let password = Zeroizing::new(password);
     if password.trim().len() < 8 {
         return Err("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول من 8 خانات على الأقل لضمان حماية الخزنة ضد التخمين.".to_string());
     }
@@ -394,7 +219,6 @@ async fn create_vault(
     let storage = VaultStorage::new(&vault_path);
 
     if storage.exists() {
-        password.zeroize();
         return Err("Vault already exists. Use unlock instead.".to_string());
     }
 
@@ -413,9 +237,6 @@ async fn create_vault(
         *rec_lock = Some(SecretString::new(code));
     }
 
-    // Zeroize password immediately after use
-    password.zeroize();
-
     let mut lock = state.session.lock().map_err(|e| e.to_string())?;
     *lock = Some(session);
     update_activity(&state);
@@ -432,26 +253,17 @@ async fn unlock_vault(
     recover_interrupted_transactions_if_any(&app)
         .map_err(|e| format!("خطأ أمني حرج: توجد معاملة سابقة غير مكتملة وفشلت استعادتها تلقائياً ({})", e))?;
 
-    let mut password = password;
+    let password = Zeroizing::new(password);
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
 
     let mut session = storage.unlock(&password).map_err(|e| e.to_string())?;
 
-    let rec_code = match synchronize_and_heal_recovery_file(&app, &storage, &mut session, &password) {
-        Ok(c) => c,
-        Err(e) => {
-            password.zeroize();
-            return Err(e);
-        }
-    };
+    let rec_code = synchronize_and_heal_recovery_file(&app, &storage, &mut session, &password)?;
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(rec_code));
     }
-
-    // Zeroize password immediately after use
-    password.zeroize();
 
     let mut lock = state.session.lock().map_err(|e| e.to_string())?;
     *lock = Some(session);
@@ -467,6 +279,13 @@ async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
     }
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = None;
+    }
+    if let Ok(mut seq_lock) = state.last_clipboard_seq.lock() {
+        if let Some(expected_seq) = seq_lock.take() {
+            unsafe {
+                clipboard::clear_clipboard_if_sequence_matches(expected_seq);
+            }
+        }
     }
     Ok(())
 }
@@ -505,26 +324,23 @@ async fn copy_password(
             return Err("لا توجد كلمة مرور محفوظة لهذا الحساب".to_string());
         }
 
-        pwd.to_string()
+        Zeroizing::new(pwd.to_string())
     };
 
     update_activity(&state);
 
-    // Unsafe block: Interacts directly with Win32 clipboard memory pointers
-    let seq = unsafe { copy_to_windows_clipboard_secure(&pwd_to_copy)? };
+    // Interacts securely with Win32 clipboard memory pointers
+    let seq = unsafe { clipboard::copy_to_windows_clipboard_secure(&pwd_to_copy)? };
 
-    // Wipe temporary string buffer
-    let mut pwd_to_copy = pwd_to_copy;
-    pwd_to_copy.zeroize();
+    if let Ok(mut seq_guard) = state.last_clipboard_seq.lock() {
+        *seq_guard = Some(seq);
+    }
 
     // Auto-clear clipboard after 15 seconds in background IF content was not overwritten
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(15)).await;
         unsafe {
-            use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
-            if GetClipboardSequenceNumber() == seq {
-                clear_windows_clipboard();
-            }
+            clipboard::clear_clipboard_if_sequence_matches(seq);
         }
     });
 
@@ -799,7 +615,7 @@ fn write_recovery_file(app: &AppHandle, master_password: &str, recovery_code: &s
     std::fs::rename(&tmp_path, &recovery_path).map_err(|e| e.to_string())?;
 
     // Ensure NO recovery code is stored in Windows Credential Store (strictly offline user recovery key)
-    unsafe { delete_recovery_code_wincred(); }
+    unsafe { wincred::delete_recovery_code_wincred(); }
 
     Ok(())
 }
@@ -861,7 +677,7 @@ async fn change_master_password(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultOperationResult, String> {
-    let mut new_password = new_password;
+    let new_password = Zeroizing::new(new_password);
     if new_password.trim().len() < 8 {
         return Err("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول الجديد من 8 خانات على الأقل لضمان حماية الخزنة ضد التخمين.".to_string());
     }
@@ -983,7 +799,6 @@ async fn change_master_password(
 
         if let Err(vault_err) = restore_vault_res {
             let _ = std::fs::remove_file(&tmp_rollback);
-            new_password.zeroize();
             return Err(format!(
                 "خطأ حرج: تعذر تحديث ملف الاسترداد ({}) وفشلت استعادة ملف الخزنة السابق ({}). تم الاحتفاظ بدفتر المعاملات ونسخة الأمان في: {}",
                 err_rec, vault_err, rekey_backup.display()
@@ -991,7 +806,6 @@ async fn change_master_password(
         }
 
         if let Err(rec_err) = restore_rec_res {
-            new_password.zeroize();
             return Err(format!(
                 "تعذر تحديث ملف الاسترداد ({}) واستُعيدت الخزنة بنجاح لكن تعذرت استعادة ملف الاسترداد السابق ({}). تم الاحتفاظ بدفتر المعاملات ونسخة الاسترداد في: {}",
                 err_rec, rec_err, rec_backup.display()
@@ -1005,7 +819,6 @@ async fn change_master_password(
 
         session.header = old_header;
         session.key = old_key;
-        new_password.zeroize();
         return Err(format!(
             "فشل كتابة ملف الاسترداد بالمفتاح الجديد: {}. تم التراجع الذري بنجاح واستعادة الخزنة وملف الاسترداد والتحقق قطعيّاً من سلامتهما بكلمة المرور القديمة.",
             err_rec
@@ -1024,8 +837,8 @@ async fn change_master_password(
     }
 
     // 3. إذا كان الفتح التلقائي مفعلاً مسبقاً، حدّث المفتاح في WinCred مع فحص الخطأ
-    if unsafe { read_vault_key_wincred().is_ok() } {
-        if let Err(e) = unsafe { store_vault_key_wincred(&new_password) } {
+    if unsafe { wincred::has_vault_key_wincred() } {
+        if let Err(e) = unsafe { wincred::store_vault_key_wincred(&new_password) } {
             return Err(format!("تم حفظ الخزنة بالمفتاح الجديد ولكن تعذر تحديث الفتح التلقائي: {}", e));
         }
     }
@@ -1040,7 +853,6 @@ async fn change_master_password(
         }
     }
 
-    new_password.zeroize();
     update_activity(&state);
 
     // 5. إذا نجح التغيير والتشفير لكن تعذر تنظيف بعض الملفات القديمة، نبلّغ المستخدم بتحذير منظم مع اعتماد نجاح العملية
@@ -1072,7 +884,7 @@ async fn get_current_saved_password(state: State<'_, AppState>) -> Result<String
     if lock.is_none() {
         return Err("الخزنة مقفلة".to_string());
     }
-    unsafe { read_vault_key_wincred() }
+    unsafe { wincred::read_vault_key_wincred().map(|k| k.to_string()) }
 }
 
 #[tauri::command]
@@ -1109,7 +921,7 @@ async fn recover_vault_with_key(
     recover_interrupted_transactions_if_any(&app)
         .map_err(|e| format!("خطأ أمني حرج: توجد معاملة سابقة غير مكتملة وفشلت استعادتها تلقائياً ({})", e))?;
 
-    let clean_code = recovery_code.trim().to_uppercase();
+    let clean_code = Zeroizing::new(recovery_code.trim().to_uppercase());
     let recovery_path = get_recovery_file_path(&app)?;
     if !recovery_path.exists() {
         return Err("ملف الاسترداد غير موجود على هذا الجهاز.".to_string());
@@ -1139,7 +951,9 @@ async fn recover_vault_with_key(
     let (_header, plaintext) = kinana_core::crypto::decrypt_payload(&payload, &key)
         .map_err(|_| "مفتاح الاسترداد المدخل غير مطابق أو غير صحيح!".to_string())?;
 
-    let master_pwd = String::from_utf8(plaintext.to_vec()).map_err(|_| "فشل فك تشفير كلمة المرور".to_string())?;
+    let master_pwd = Zeroizing::new(
+        String::from_utf8(plaintext.to_vec()).map_err(|_| "فشل فك تشفير كلمة المرور".to_string())?
+    );
 
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
@@ -1148,7 +962,7 @@ async fn recover_vault_with_key(
     // Ensure session data recovery code matches the key used; avoid unnecessary disk writes if already matching.
     if session.data.recovery_code.as_deref() != Some(&clean_code) {
         let old_code = session.data.recovery_code.clone();
-        session.data.recovery_code = Some(clean_code.clone());
+        session.data.recovery_code = Some(clean_code.to_string());
         if let Err(e) = storage.save(&mut session) {
             session.data.recovery_code = old_code;
             return Err(format!("فشل تحديث رمز الاسترداد في الخزنة: {}", e));
@@ -1156,10 +970,10 @@ async fn recover_vault_with_key(
     }
 
     // Keep recovery key in memory for this session and delete any old unencrypted WinCred entry
-    unsafe { delete_recovery_code_wincred(); }
+    unsafe { wincred::delete_recovery_code_wincred(); }
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
-        *rec_lock = Some(SecretString::new(clean_code));
+        *rec_lock = Some(SecretString::new(clean_code.to_string()));
     }
 
     let mut lock = state.session.lock().map_err(|e| e.to_string())?;
@@ -1403,19 +1217,19 @@ async fn copy_secure_text(
 
     update_activity(&state);
 
-    let mut text_buf = text;
+    let text_buf = Zeroizing::new(text);
     let seq = unsafe {
-        copy_to_windows_clipboard_secure(&text_buf)?
+        clipboard::copy_to_windows_clipboard_secure(&text_buf)?
     };
-    text_buf.zeroize();
+
+    if let Ok(mut seq_guard) = state.last_clipboard_seq.lock() {
+        *seq_guard = Some(seq);
+    }
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(15)).await;
         unsafe {
-            use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
-            if GetClipboardSequenceNumber() == seq {
-                clear_windows_clipboard();
-            }
+            clipboard::clear_clipboard_if_sequence_matches(seq);
         }
     });
 
@@ -1435,10 +1249,8 @@ async fn add_account(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultSummary, String> {
-    let secret_password = if let Some(mut p) = password {
-        let sec = SecretString::new(p.clone());
-        p.zeroize();
-        sec
+    let secret_password = if let Some(p) = password {
+        SecretString::new(p)
     } else {
         SecretString::new(String::new())
     };
@@ -1554,14 +1366,7 @@ async fn update_account(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultSummary, String> {
-    let mut password = password;
-    let new_secret_pwd = if let Some(ref mut p) = password {
-        let sec = SecretString::new(p.clone());
-        p.zeroize();
-        Some(sec)
-    } else {
-        None
-    };
+    let new_secret_pwd = password.map(SecretString::new);
 
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
@@ -1782,7 +1587,7 @@ async fn import_vault_backup(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ImportVaultResult, String> {
-    let mut password = password;
+    let password = Zeroizing::new(password);
     if password.trim().is_empty() {
         return Err("يرجى إدخال كلمة المرور الخاصة بالخزنة المستوردة للتحقق من سلامة التشفير.".to_string());
     }
@@ -1799,12 +1604,10 @@ async fn import_vault_backup(
         // 1. فحص الحجم المسموح به لمنع استهلاك الذاكرة (بين الحد الأدنى و50 ميجابايت كحد أقصى)
         let file_meta = std::fs::metadata(source_path).map_err(|e| format!("فشل قراءة معلومات الملف: {}", e))?;
         if (file_meta.len() as usize) < kinana_core::crypto::MIN_VAULT_FILE_SIZE {
-            password.zeroize();
             return Err("الملف المختار تالف أو ليس ملف خزنة كنانة صالح.".to_string());
         }
         const MAX_VAULT_IMPORT_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
         if file_meta.len() > MAX_VAULT_IMPORT_BYTES {
-            password.zeroize();
             return Err("حجم الملف المختار يتجاوز الحد الأقصى المسموح به (50 ميجابايت).".to_string());
         }
 
@@ -1913,13 +1716,11 @@ async fn import_vault_backup(
         if let Err(e) = std::fs::rename(&tmp_import_path, &vault_path) {
             let _ = std::fs::remove_file(&tmp_import_path);
             let _ = journal.rollback_and_cleanup(&journal_path);
-            password.zeroize();
             return Err(format!("فشل تثبيت ملف الخزنة المستوردة: {}", e));
         }
 
         // 8. تحديث ملف الاسترداد للخزنة المستوردة بمفتاح الاسترداد الخاص بها مع معالجة الفشل
         if let Err(err_rec) = write_recovery_file(&app, &password, &rec_code) {
-            password.zeroize();
             if had_existing_vault {
                 // حالة استبدال خزنة سابقة: استعادة الخزنة وملف الاسترداد السابقين مع فحص نتائج الاستعادة بدقة
                 let restore_vault_res = std::fs::copy(&backup_safety, &vault_path);
@@ -1975,7 +1776,6 @@ async fn import_vault_backup(
         if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
             *rec_lock = None;
         }
-        password.zeroize();
 
         // 2. تأكيد إتمام المعاملة رسمياً على القرص بحالة Committed قبل المساس بنسخ الأمان
         journal.commit(&journal_path)
@@ -2030,7 +1830,6 @@ async fn import_vault_backup(
             warning,
         })
     } else {
-        password.zeroize();
         Ok(ImportVaultResult {
             success: false,
             source_path: None,
@@ -2159,7 +1958,7 @@ fn main() {
     {
         let flags = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
         std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
-        unsafe { delete_recovery_code_wincred(); }
+        unsafe { wincred::delete_recovery_code_wincred(); }
     }
 
     #[cfg(windows)]
@@ -2197,6 +1996,7 @@ fn main() {
             last_activity: Mutex::new(std::time::Instant::now()),
             auto_lock_timeout_secs: Mutex::new(Some(300)),
             current_recovery_key: Mutex::new(None),
+            last_clipboard_seq: Mutex::new(None),
         })
         .on_window_event(|window, event| {
             match event {
@@ -2345,6 +2145,13 @@ fn main() {
                         }
                         if let Ok(mut rec_guard) = state.current_recovery_key.lock() {
                             *rec_guard = None;
+                        }
+                        if let Ok(mut seq_lock) = state.last_clipboard_seq.lock() {
+                            if let Some(expected_seq) = seq_lock.take() {
+                                unsafe {
+                                    clipboard::clear_clipboard_if_sequence_matches(expected_seq);
+                                }
+                            }
                         }
                         let _ = app_handle.emit("vault-auto-locked", ());
                     }

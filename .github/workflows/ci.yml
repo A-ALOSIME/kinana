@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Build & Test (Windows)
@@ -15,10 +18,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -28,15 +31,28 @@ jobs:
       - name: Cache Cargo & Node dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build UI (TypeScript + Vite)
+      - name: Install UI Dependencies & Run Tests
         working-directory: ./ui
         run: |
           npm ci
+          npm test
+
+      - name: Run UI Security Audit
+        working-directory: ./ui
+        run: |
+          npm audit --audit-level=critical
+
+      - name: Build UI (TypeScript + Vite)
+        working-directory: ./ui
+        run: |
           npm run build
 
       - name: Run Cargo Workspace Tests
         run: |
           cargo test --workspace --verbose
+
+      - name: Run Cargo Security Audit
+        uses: actions-rust-lang/audit@v1
 
       - name: Run Cargo Release Check
         run: |
