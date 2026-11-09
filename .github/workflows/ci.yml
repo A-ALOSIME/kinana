@@ -51,8 +51,14 @@ jobs:
         run: |
           cargo test --workspace --verbose
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
       - name: Run Cargo Security Audit
-        uses: actions-rust-lang/audit@v1
+        run: |
+          cargo audit --file Cargo.lock
 
       - name: Run Cargo Release Check
         run: |
