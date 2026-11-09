@@ -1537,6 +1537,8 @@ export default function App() {
       await invoke("recover_vault_with_key", { recoveryCode: inputRecoveryKey.trim() });
       setInputRecoveryKey("");
       setShowRecoveryModal(false);
+      sessionEpochRef.current += 1;
+      isUnlockedRef.current = true;
       await fetchSummary();
       setError("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
     } catch (err: any) {

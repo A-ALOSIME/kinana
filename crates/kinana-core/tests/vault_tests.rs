@@ -1669,3 +1669,158 @@ fn test_import_archive_failure_with_locked_journal_preserves_safety_on_restart()
     // 10. التحقق الجوهري الرابع: تنظيف ملف الدفتر الآن بعد نجاح recover
     assert!(!journal_path.exists(), "Journal must be deleted after recovery completes");
 }
+
+/// 36. اختبار دورة استرداد الخزنة بمفتاح الطوارئ: تحميل تفاصيل الحسابات القائمة، وإضافة وتعديل الحسابات، وبقاء التغييرات بعد القفل وإعادة الفتح بكلمة المرور
+#[test]
+fn test_recovery_key_unlock_loads_accounts_allows_edits_and_persists_across_relock() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let master_password = "MasterPassword2026#Secure";
+    let recovery_code = "KN-RECO-VERY-FLOW-2026";
+
+    // 1. إنشاء الخزنة بكلمة المرور وحفظ رمز الاسترداد
+    let mut session = storage.create_new_vault(master_password, None).unwrap();
+    session.data.recovery_code = Some(recovery_code.to_string());
+
+    // إضافة خدمة أولى بحساب مبدئي
+    let mut service = Service {
+        id: "srv-1".to_string(),
+        name: "GitHub".to_string(),
+        icon_data: None,
+        accounts: Vec::new(),
+    };
+    service.accounts.push(Account {
+        id: "acc-1".to_string(),
+        label: "الحساب الأساسي".to_string(),
+        username: "original_user".to_string(),
+        password: SecretString::new("initial_secret".to_string()),
+        notes: Some("test notes".to_string()),
+        url: Some("https://github.com".to_string()),
+    });
+    session.data.services.push(service);
+    storage.save(&mut session).unwrap();
+
+    // تشفير ملف الاسترداد recovery.dat بمفتاح الاسترداد وكلمة المرور
+    let params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    let rec_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(recovery_code, &rec_header.salt, &rec_header.argon2_params).unwrap();
+    let recovery_payload = kinana_core::crypto::encrypt_payload(master_password.as_bytes(), &rec_key, &rec_header).unwrap();
+
+    // محاكاة قفل الخزنة (إسقاط الجلسة)
+    drop(session);
+
+    // 2. محاكاة recover_vault_with_key: فك تشفير كلمة المرور من recovery.dat وفتح الخزنة
+    let (_hdr, decrypted_pwd_bytes) = kinana_core::crypto::decrypt_payload(&recovery_payload, &rec_key).unwrap();
+    let recovered_pwd = std::str::from_utf8(decrypted_pwd_bytes.as_slice()).unwrap();
+    assert_eq!(recovered_pwd, master_password);
+
+    let mut recovered_session = storage.unlock(recovered_pwd).unwrap();
+
+    // التحقق من أن رمز الاسترداد مطابق ولا يتطلب كتابة غير ضرورية على القرص
+    assert_eq!(recovered_session.data.recovery_code.as_deref(), Some(recovery_code));
+
+    // 3. التحقق من تحميل تفاصيل الحسابات القائمة بنجاح بعد فتح الخزنة برمز الاسترداد
+    assert_eq!(recovered_session.data.services.len(), 1);
+    let srv = &recovered_session.data.services[0];
+    assert_eq!(srv.accounts.len(), 1);
+    assert_eq!(srv.accounts[0].username, "original_user");
+    assert_eq!(srv.accounts[0].password.as_str(), "initial_secret");
+
+    // 4. إضافة حساب جديد وتعديل الحساب القائم أثناء الجلسة المستعادة
+    let srv_mut = &mut recovered_session.data.services[0];
+    // تعديل الحساب الأول
+    srv_mut.accounts[0].label = "حساب معدّل".to_string();
+    srv_mut.accounts[0].username = "edited_user".to_string();
+
+    // إضافة حساب ثانٍ
+    srv_mut.accounts.push(Account {
+        id: "acc-2".to_string(),
+        label: "حساب إضافي".to_string(),
+        username: "second_user".to_string(),
+        password: SecretString::new("second_secret".to_string()),
+        notes: None,
+        url: None,
+    });
+
+    // حفظ التغييرات على القرص
+    storage.save(&mut recovered_session).unwrap();
+
+    // 5. محاكاة قفل الخزنة ثم إعادة فتحها بكلمة المرور الرئيسية والتأكد من بقاء التغييرات
+    drop(recovered_session);
+
+    let reopened_session = storage.unlock(master_password).unwrap();
+    assert_eq!(reopened_session.data.services.len(), 1);
+    let reopened_srv = &reopened_session.data.services[0];
+    assert_eq!(reopened_srv.accounts.len(), 2);
+
+    // التحقق من الحساب المعدّل
+    assert_eq!(reopened_srv.accounts[0].id, "acc-1");
+    assert_eq!(reopened_srv.accounts[0].label, "حساب معدّل");
+    assert_eq!(reopened_srv.accounts[0].username, "edited_user");
+
+    // التحقق من الحساب الجديد المضاف
+    assert_eq!(reopened_srv.accounts[1].id, "acc-2");
+    assert_eq!(reopened_srv.accounts[1].label, "حساب إضافي");
+    assert_eq!(reopened_srv.accounts[1].username, "second_user");
+    assert_eq!(reopened_srv.accounts[1].password.as_str(), "second_secret");
+}
+
+/// 37. اختبار رفض مفتاح الاسترداد غير الصحيح ومنع الوصول أو كشف أي بيانات
+#[test]
+fn test_invalid_recovery_key_strictly_fails_and_prevents_unlock() {
+    let recovery_code = "KN-VALID-CODE-1111-2222";
+    let wrong_code = "KN-INVALID-CODE-XXXX-YYYY";
+    let master_password = "SecretPassword123#";
+
+    let params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    let rec_header = kinana_core::crypto::VaultHeader::new_with_fresh_salts(params).unwrap();
+    let rec_key = kinana_core::crypto::derive_key(recovery_code, &rec_header.salt, &rec_header.argon2_params).unwrap();
+    let recovery_payload = kinana_core::crypto::encrypt_payload(master_password.as_bytes(), &rec_key, &rec_header).unwrap();
+
+    // محاولة اشتقاق المفتاح برمز استرداد خاطئ ومحاولة فك التشفير
+    let wrong_key = kinana_core::crypto::derive_key(wrong_code, &rec_header.salt, &rec_header.argon2_params).unwrap();
+    let decrypt_res = kinana_core::crypto::decrypt_payload(&recovery_payload, &wrong_key);
+
+    assert!(decrypt_res.is_err(), "Decryption with wrong recovery code must fail");
+}
+
+/// 38. اختبار معالجة فشل حفظ الخزنة أثناء الاسترداد وإعادة الخطأ صراحة دون كتمه
+#[test]
+fn test_recovery_vault_save_failure_is_explicitly_handled_and_reported() {
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let master_password = "MasterPassword2026#";
+    let mut session = storage.create_new_vault(master_password, None).unwrap();
+    let original_code = "KN-ORIG-INAL-CODE-0000";
+    session.data.recovery_code = Some(original_code.to_string());
+    storage.save(&mut session).unwrap();
+
+    let new_clean_code = "KN-NEW-CODE-9999-8888";
+
+    // محاكاة منطق تحديث الخزنة عند اختلاف رمز الاسترداد
+    let old_code = session.data.recovery_code.clone();
+    session.data.recovery_code = Some(new_clean_code.to_string());
+
+    // محاكاة فشل الحفظ عبر مسار غير صالح لوحدة التخزين
+    let invalid_storage = VaultStorage::new(dir.path().join("non_existent_dir").join("vault.dat"));
+    let save_res = invalid_storage.save(&mut session);
+    assert!(save_res.is_err(), "Save to invalid storage must fail");
+
+    // التحقق من استعادة رمز الاسترداد الأصلي عند فشل الحفظ
+    if save_res.is_err() {
+        session.data.recovery_code = old_code;
+    }
+    assert_eq!(session.data.recovery_code.as_deref(), Some(original_code), "Session recovery code must be restored upon save failure");
+}

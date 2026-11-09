@@ -1145,10 +1145,14 @@ async fn recover_vault_with_key(
     let storage = VaultStorage::new(&vault_path);
     let mut session = storage.unlock(&master_pwd).map_err(|e| e.to_string())?;
 
-    // Ensure session data recovery code matches the key used
+    // Ensure session data recovery code matches the key used; avoid unnecessary disk writes if already matching.
     if session.data.recovery_code.as_deref() != Some(&clean_code) {
+        let old_code = session.data.recovery_code.clone();
         session.data.recovery_code = Some(clean_code.clone());
-        let _ = storage.save(&mut session);
+        if let Err(e) = storage.save(&mut session) {
+            session.data.recovery_code = old_code;
+            return Err(format!("فشل تحديث رمز الاسترداد في الخزنة: {}", e));
+        }
     }
 
     // Keep recovery key in memory for this session and delete any old unencrypted WinCred entry
