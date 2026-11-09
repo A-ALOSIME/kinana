@@ -11,12 +11,42 @@ permissions:
 
 jobs:
   test:
-    name: Build & Test (Windows)
-    runs-on: windows-latest
+    name: Build & Test (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Windows
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+          - name: macOS
+            os: macos-latest
+            rust-target: aarch64-apple-darwin
+          - name: Linux
+            os: ubuntu-22.04
+            rust-target: x86_64-unknown-linux-gnu
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2 \
+            squashfs-tools \
+            patchelf \
+            libssl-dev \
+            build-essential \
+            curl \
+            wget \
+            file
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
@@ -26,7 +56,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.platform.rust-target }}
 
       - name: Cache Cargo & Node dependencies
         uses: Swatinem/rust-cache@v2
@@ -63,3 +93,7 @@ jobs:
       - name: Run Cargo Release Check
         run: |
           cargo check --release --verbose
+
+      - name: Build Tauri Application & Verify Bundling
+        run: |
+          npx --prefix ui tauri build

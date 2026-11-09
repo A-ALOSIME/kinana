@@ -1824,3 +1824,71 @@ fn test_recovery_vault_save_failure_is_explicitly_handled_and_reported() {
     }
     assert_eq!(session.data.recovery_code.as_deref(), Some(original_code), "Session recovery code must be restored upon save failure");
 }
+
+/// 39. اختبار توافق التشفير وتنسيق الخزنة عبر المنصات (Windows, macOS, Linux)
+#[test]
+fn test_cross_platform_synthetic_vault_compatibility_roundtrip() {
+    let dir = tempdir().unwrap();
+    let original_vault_path = dir.path().join("source_vault.dat");
+    let export_vault_path = dir.path().join("exported_backup.dat");
+    let target_vault_path = dir.path().join("target_platform_vault.dat");
+
+    let master_password = "CrossPlatformMasterPassword2026!#$";
+    let recovery_code = "KN-XPLAT-2026-TEST-CODE";
+
+    // 1. إنشاء خزنة اصطناعية تحاكي بيانات حقيقية مع نصوص عربية ومحارف خاصة
+    let storage = VaultStorage::new(&original_vault_path);
+    let mut session = storage.create_new_vault(master_password, None).unwrap();
+    session.data.recovery_code = Some(recovery_code.to_string());
+
+    let account = kinana_core::models::Account {
+        id: "acc_xplat_1".to_string(),
+        label: "الحساب الرئيسي".to_string(),
+        username: "مستخدم_تجريبي@مثال.السعودية".to_string(),
+        password: kinana_core::models::SecretString::new("VeryComplexPassword_!@#$_2026".to_string()),
+        notes: Some("ملاحظات مشفرة: رمز سري 9876".to_string()),
+        url: Some("https://kinana.local".to_string()),
+    };
+
+    let service = kinana_core::models::Service {
+        id: "srv_xplat_1".to_string(),
+        name: "بوابة الخدمات السحابية المشتركة".to_string(),
+        icon_data: None,
+        accounts: vec![account],
+    };
+    session.data.services.push(service);
+
+    storage.save(&mut session).unwrap();
+
+    // 2. التحقق من الترويسة المعيارية والبيانات المشفرة على القرص
+    let vault_bytes = std::fs::read(&original_vault_path).unwrap();
+    assert!(vault_bytes.len() >= kinana_core::crypto::MIN_VAULT_FILE_SIZE);
+    assert_eq!(&vault_bytes[0..8], kinana_core::crypto::MAGIC_BYTES);
+
+    let header = kinana_core::crypto::VaultHeader::from_bytes(&vault_bytes[0..kinana_core::crypto::HEADER_SIZE]).unwrap();
+    assert_eq!(header.version, kinana_core::crypto::CURRENT_VERSION);
+    let default_params = kinana_core::crypto::Argon2Parameters::default();
+    assert_eq!(header.argon2_params.m_cost, default_params.m_cost);
+    assert_eq!(header.argon2_params.t_cost, default_params.t_cost);
+    assert_eq!(header.argon2_params.p_cost, default_params.p_cost);
+
+    // 3. تصدير نسخة احتياطية واستيرادها في مسار جديد (كما يحدث عند نقل الخزنة بين منصات تشغيل مختلفة)
+    std::fs::copy(&original_vault_path, &export_vault_path).unwrap();
+    std::fs::copy(&export_vault_path, &target_vault_path).unwrap();
+
+    let target_storage = VaultStorage::new(&target_vault_path);
+    let target_session = target_storage.unlock(master_password).unwrap();
+
+    // 4. مطابقة دقيقة لكافة البيانات المستعادة عبر التشفير المعياري
+    assert_eq!(target_session.data.services.len(), 1);
+    let target_srv = &target_session.data.services[0];
+    assert_eq!(target_srv.name, "بوابة الخدمات السحابية المشتركة");
+    assert_eq!(target_srv.accounts.len(), 1);
+    let target_acc = &target_srv.accounts[0];
+    assert_eq!(target_acc.label, "الحساب الرئيسي");
+    assert_eq!(target_acc.username, "مستخدم_تجريبي@مثال.السعودية");
+    assert_eq!(target_acc.password.as_str(), "VeryComplexPassword_!@#$_2026");
+    assert_eq!(target_acc.notes.as_deref(), Some("ملاحظات مشفرة: رمز سري 9876"));
+    assert_eq!(target_acc.url.as_deref(), Some("https://kinana.local"));
+    assert_eq!(target_session.data.recovery_code.as_deref(), Some(recovery_code));
+}

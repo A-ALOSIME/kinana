@@ -292,6 +292,7 @@ export default function App() {
 
   // Auto-unlock status & Settings (Disabled by default: requires user to opt-in)
   const [autoUnlockActive, setAutoUnlockActive] = useState<boolean>(false);
+  const [isAutoUnlockSupported, setIsAutoUnlockSupported] = useState<boolean>(true);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [importPassword, setImportPassword] = useState<string>("");
@@ -755,7 +756,13 @@ export default function App() {
       const isExist = await invoke<boolean>("vault_exists");
       setExists(isExist);
 
-      const isAutoEnabled = await invoke<boolean>("is_auto_unlock_enabled");
+      const isSupported = await invoke<boolean>("is_auto_unlock_supported").catch(() => false);
+      setIsAutoUnlockSupported(isSupported);
+
+      let isAutoEnabled = false;
+      if (isSupported) {
+        isAutoEnabled = await invoke<boolean>("is_auto_unlock_enabled").catch(() => false);
+      }
       setAutoUnlockActive(isAutoEnabled);
 
       // Sync saved auto-lock timeout with backend
@@ -2170,7 +2177,7 @@ export default function App() {
                       <span>فتح الخزنة</span>
                     </Button>
 
-                    {autoUnlockActive && (
+                    {autoUnlockActive && isAutoUnlockSupported && (
                       <Button
                         type="button"
                         variant="secondary"
@@ -5294,85 +5301,87 @@ export default function App() {
               </div>
             )}
 
-            {/* Section 1: Auto-Unlock Toggle */}
-            <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Shield className="w-6 h-6 text-white" />
-                  <div>
-                    <h4 className="text-lg font-bold text-foreground">
-                      الفتح التلقائي (Passwordless by default)
-                    </h4>
-                    <p className="text-sm text-muted-foreground mt-0.5">
-                      {autoUnlockActive
-                        ? "مفعّل: يتم فتح كنانة تلقائياً عبر مخزن ويندوز الآمن."
-                        : "معطّل: سيُطلب منك رمز الدخول في كل مرة تشغّل فيها التطبيق."}
+            {/* Section 1: Auto-Unlock Toggle (Supported on Windows) */}
+            {isAutoUnlockSupported && (
+              <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Shield className="w-6 h-6 text-white" />
+                    <div>
+                      <h4 className="text-lg font-bold text-foreground">
+                        الفتح التلقائي (Passwordless by default)
+                      </h4>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        {autoUnlockActive
+                          ? "مفعّل: يتم فتح كنانة تلقائياً عبر مخزن ويندوز الآمن."
+                          : "معطّل: سيُطلب منك رمز الدخول في كل مرة تشغّل فيها التطبيق."}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant={autoUnlockActive ? "destructive" : "default"}
+                    onClick={handleToggleAutoUnlock}
+                    className="rounded-xl font-bold h-11 px-5 shadow-sm"
+                  >
+                    {autoUnlockActive ? "تعطيل الفتح التلقائي" : "تفعيل الفتح التلقائي"}
+                  </Button>
+                </div>
+
+                {/* Security Warning: Windows Credential Manager */}
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
+                  <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-amber-300">
+                      تنبيه: يتم حفظ رمز الدخول محلياً في Windows Credential Manager.
+                    </p>
+                    <p className="text-xs text-amber-200/90 leading-relaxed">
+                      هذا يعني إمكانية الوصول إليه من أي برنامج يعمل بنفس صلاحياتك.
+                      إذا كنت تفضل الأمان الأعلى، قم بتعطيل الفتح التلقائي.
                     </p>
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  variant={autoUnlockActive ? "destructive" : "default"}
-                  onClick={handleToggleAutoUnlock}
-                  className="rounded-xl font-bold h-11 px-5 shadow-sm"
-                >
-                  {autoUnlockActive ? "تعطيل الفتح التلقائي" : "تفعيل الفتح التلقائي"}
-                </Button>
-              </div>
 
-              {/* Security Warning: Windows Credential Manager */}
-              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
-                <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-bold text-amber-300">
-                    تنبيه: يتم حفظ رمز الدخول محلياً في Windows Credential Manager.
-                  </p>
-                  <p className="text-xs text-amber-200/90 leading-relaxed">
-                    هذا يعني إمكانية الوصول إليه من أي برنامج يعمل بنفس صلاحياتك.
-                    إذا كنت تفضل الأمان الأعلى، قم بتعطيل الفتح التلقائي.
-                  </p>
-                </div>
-              </div>
-
-              {/* Reveal current password if available */}
-              {autoUnlockActive && (
-                <div className="pt-3 border-t border-border/40 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">الرمز المحفوظ حالياً في ويندوز:</span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-sans font-bold bg-background px-3 py-1 rounded-lg border border-border">
-                      {showSavedPassword && savedPasswordHint ? savedPasswordHint : "••••••••••••"}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        if (showSavedPassword) {
-                          setShowSavedPassword(false);
-                          setSavedPasswordHint(null);
-                        } else {
-                          try {
-                            const saved = await invoke<string>("get_current_saved_password");
-                            setSavedPasswordHint(saved);
-                            setShowSavedPassword(true);
-                          } catch {
-                            setSavedPasswordHint(null);
+                {/* Reveal current password if available */}
+                {autoUnlockActive && (
+                  <div className="pt-3 border-t border-border/40 flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">الرمز المحفوظ حالياً في ويندوز:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-sans font-bold bg-background px-3 py-1 rounded-lg border border-border">
+                        {showSavedPassword && savedPasswordHint ? savedPasswordHint : "••••••••••••"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          if (showSavedPassword) {
                             setShowSavedPassword(false);
+                            setSavedPasswordHint(null);
+                          } else {
+                            try {
+                              const saved = await invoke<string>("get_current_saved_password");
+                              setSavedPasswordHint(saved);
+                              setShowSavedPassword(true);
+                            } catch {
+                              setSavedPasswordHint(null);
+                              setShowSavedPassword(false);
+                            }
                           }
-                        }
-                      }}
-                      className="h-8 w-8 p-0"
-                    >
-                      {showSavedPassword ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </Button>
+                        }}
+                        className="h-8 w-8 p-0"
+                      >
+                        {showSavedPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Section: Inactivity Auto-Lock Timeout */}
             <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">

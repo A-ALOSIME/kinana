@@ -4,7 +4,7 @@
 mod clipboard;
 mod wincred;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -179,6 +179,11 @@ async fn auto_unlock_vault(
     update_activity(&state);
 
     Ok(true)
+}
+
+#[tauri::command]
+fn is_auto_unlock_supported() -> bool {
+    cfg!(target_os = "windows")
 }
 
 #[tauri::command]
@@ -1841,22 +1846,68 @@ async fn import_vault_backup(
 #[tauri::command]
 async fn open_vault_folder(app: AppHandle) -> Result<(), String> {
     let vault_path = get_vault_path(&app)?;
-    if vault_path.exists() {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", vault_path.to_string_lossy()))
-            .spawn()
-            .map_err(|e| format!("فشل فتح متصفح الملفات: {}", e))?;
-    } else {
-        let app_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("فشل تحديد المجلد: {}", e))?;
-        let _ = std::fs::create_dir_all(&app_dir);
-        std::process::Command::new("explorer")
-            .arg(&app_dir)
+    reveal_path_in_file_manager(&vault_path, &app)
+}
+
+fn reveal_path_in_file_manager(vault_path: &Path, app: &AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        if vault_path.exists() {
+            std::process::Command::new("explorer")
+                .arg(format!("/select,{}", vault_path.to_string_lossy()))
+                .spawn()
+                .map_err(|e| format!("فشل فتح متصفح الملفات: {}", e))?;
+        } else {
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("فشل تحديد المجلد: {}", e))?;
+            let _ = std::fs::create_dir_all(&app_dir);
+            std::process::Command::new("explorer")
+                .arg(&app_dir)
+                .spawn()
+                .map_err(|e| format!("فشل فتح متصفح الملفات: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if vault_path.exists() {
+            std::process::Command::new("open")
+                .args(["-R", &vault_path.to_string_lossy()])
+                .spawn()
+                .map_err(|e| format!("فشل فتح Finder: {}", e))?;
+        } else {
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("فشل تحديد المجلد: {}", e))?;
+            let _ = std::fs::create_dir_all(&app_dir);
+            std::process::Command::new("open")
+                .arg(&app_dir)
+                .spawn()
+                .map_err(|e| format!("فشل فتح Finder: {}", e))?;
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let target_dir = if vault_path.exists() {
+            vault_path.parent().unwrap_or(vault_path)
+        } else {
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("فشل تحديد المجلد: {}", e))?;
+            let _ = std::fs::create_dir_all(&app_dir);
+            &app_dir
+        };
+        std::process::Command::new("xdg-open")
+            .arg(target_dir)
             .spawn()
             .map_err(|e| format!("فشل فتح متصفح الملفات: {}", e))?;
     }
+
     Ok(())
 }
 
@@ -1866,14 +1917,21 @@ async fn open_url(url: String) -> Result<(), String> {
     if !target.starts_with("http://") && !target.starts_with("https://") {
         target = format!("https://{}", target);
     }
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     {
         std::process::Command::new("rundll32")
             .args(["url.dll,FileProtocolHandler", &target])
             .spawn()
             .map_err(|e| format!("فشل فتح الرابط في المتصفح: {}", e))?;
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("فشل فتح الرابط في المتصفح: {}", e))?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         std::process::Command::new("xdg-open")
             .arg(&target)
@@ -2161,6 +2219,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             vault_exists,
+            is_auto_unlock_supported,
             auto_unlock_vault,
             is_auto_unlock_enabled,
             disable_auto_unlock,
