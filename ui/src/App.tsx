@@ -2,7 +2,14 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SessionGuard } from "./session";
+import {
+  SessionGuard,
+  unlockWithPassword,
+  unlockWithRecoveryKey,
+  unlockWithAutoUnlock,
+  lockVault,
+  processAccountResponse,
+} from "./session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
@@ -718,8 +725,9 @@ export default function App() {
     try {
       setLoadingAccounts(true);
       const accs = await invoke<AccountDetail[]>("get_service_accounts", { serviceId });
-      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
-      setServiceAccounts(accs);
+      processAccountResponse(sessionGuardRef.current, epoch, accs, (validAccs) => {
+        setServiceAccounts(validAccs);
+      });
     } catch (err: any) {
       if (!sessionGuardRef.current.isResponseValid(epoch)) return;
       setError(err?.toString() || "فشل جلب تفاصيل الحسابات");
@@ -758,10 +766,14 @@ export default function App() {
       }
 
       if (isExist && isAutoEnabled) {
-        const unlockedViaStore = await invoke<boolean>("auto_unlock_vault");
+        const unlockedViaStore = await unlockWithAutoUnlock(
+          sessionGuardRef.current,
+          invoke,
+          async () => {
+            await fetchSummary();
+          }
+        );
         if (unlockedViaStore) {
-          sessionGuardRef.current.unlock();
-          await fetchSummary();
           return;
         }
       }
@@ -1392,10 +1404,10 @@ export default function App() {
     if (!password) return;
     try {
       setError(null);
-      await invoke("unlock_vault", { password });
-      setPassword("");
-      sessionGuardRef.current.unlock();
-      await fetchSummary();
+      await unlockWithPassword(sessionGuardRef.current, invoke, password, async () => {
+        setPassword("");
+        await fetchSummary();
+      });
     } catch (err: any) {
       setError(err?.toString() || "فشل فتح الخزنة: كلمة المرور غير صحيحة");
     }
@@ -1403,8 +1415,9 @@ export default function App() {
 
   const handleLock = async () => {
     try {
-      await invoke("lock_vault");
-      purgeAllSensitiveState();
+      await lockVault(sessionGuardRef.current, invoke, () => {
+        purgeAllSensitiveState();
+      });
       invoke("trim_app_memory").catch(() => {});
       setError(null);
     } catch (err: any) {
@@ -1512,16 +1525,6 @@ export default function App() {
     }
   };
 
-  // Fetch Saved Password (silently populates savedPasswordHint if available without error toast)
-  const handleFetchSavedPassword = async () => {
-    try {
-      const saved = await invoke<string>("get_current_saved_password");
-      setSavedPasswordHint(saved);
-    } catch {
-      setSavedPasswordHint(null);
-    }
-  };
-
   // Fetch Emergency Recovery Key
   const handleFetchRecoveryKey = async () => {
     try {
@@ -1539,12 +1542,12 @@ export default function App() {
     if (!inputRecoveryKey.trim()) return;
     try {
       setError(null);
-      await invoke("recover_vault_with_key", { recoveryCode: inputRecoveryKey.trim() });
-      setInputRecoveryKey("");
-      setShowRecoveryModal(false);
-      sessionGuardRef.current.unlock();
-      await fetchSummary();
-      setError("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
+      await unlockWithRecoveryKey(sessionGuardRef.current, invoke, inputRecoveryKey, async () => {
+        setInputRecoveryKey("");
+        setShowRecoveryModal(false);
+        await fetchSummary();
+        setError("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
+      });
     } catch (err: any) {
       setError(err?.toString() || "فشل الاستعادة: مفتاح الطوارئ غير صحيح أو غير مطابق");
     }
@@ -2174,11 +2177,14 @@ export default function App() {
                         className="w-full h-14 text-base font-semibold rounded-2xl gap-2 border border-border/60"
                         onClick={async () => {
                           try {
-                            const ok = await invoke<boolean>("auto_unlock_vault");
-                            if (ok) {
-                              sessionGuardRef.current.unlock();
-                              await fetchSummary();
-                            } else {
+                            const ok = await unlockWithAutoUnlock(
+                              sessionGuardRef.current,
+                              invoke,
+                              async () => {
+                                await fetchSummary();
+                              }
+                            );
+                            if (!ok) {
                               setError("فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ");
                             }
                           } catch (e: any) {

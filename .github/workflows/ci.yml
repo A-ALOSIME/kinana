@@ -40,7 +40,7 @@ jobs:
       - name: Run UI Security Audit
         working-directory: ./ui
         run: |
-          npm audit --audit-level=critical
+          npm audit --audit-level=high
 
       - name: Build UI (TypeScript + Vite)
         working-directory: ./ui

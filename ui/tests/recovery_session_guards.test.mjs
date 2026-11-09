@@ -1,294 +1,134 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SessionGuard } from '../src/session.ts';
+import {
+  SessionGuard,
+  unlockWithPassword,
+  unlockWithRecoveryKey,
+  unlockWithAutoUnlock,
+  lockVault,
+  processAccountResponse,
+} from '../src/session.ts';
 
 /**
- * Regression tests for Kinana React session guards across all unlock paths:
- * 1. Successful manual Auto-Unlock updates React session guards (sessionGuard).
- * 2. Existing service account details load correctly following manual Auto-Unlock.
- * 3. Adding and editing account data works when session guards are unlocked.
- * 4. Manual Auto-Unlock with unavailable/failed credentials never unlocks or exposes details.
- * 5. Startup Auto-Unlock updates session guards and accepts account details.
- * 6. Successful Recovery Key unlock continues working.
- * 7. Delayed responses after locking are rejected by the session guard.
+ * Regression tests for Kinana session controllers and guards.
+ * All tests execute the exact shared production controller functions from ui/src/session.ts.
+ *
+ * Test coverage:
+ * 1. Successful master password unlock updates session guards and triggers callback.
+ * 2. Failed master password unlock leaves session guards locked.
+ * 3. Successful Recovery Key unlock updates session guards and accepts account details.
+ * 4. Invalid Recovery Key fails unlock, preserves locked guard, and rejects account details.
+ * 5. Successful manual Auto-Unlock updates session guards and accepts account details.
+ * 6. Manual Auto-Unlock with unavailable credentials returns false and keeps guard locked.
+ * 7. Startup Auto-Unlock updates session guards and accepts account details.
+ * 8. Explicit lockVault locks session guard and purges state.
+ * 9. Stale in-flight account response rejected when vault is locked during request.
  */
 
+test('successful master password unlock updates session guards and triggers callback', async () => {
+  const guard = new SessionGuard();
+  let summaryLoaded = false;
+  let clearedPassword = null;
+
+  const mockInvoke = async (cmd, args) => {
+    if (cmd === 'unlock_vault') {
+      if (args.password === 'correct_master_password') return;
+      throw new Error('كلمة المرور غير صحيحة');
+    }
+    throw new Error(`Unknown command ${cmd}`);
+  };
+
+  assert.equal(guard.isUnlocked, false);
+  assert.equal(guard.epoch, 0);
+
+  let inputPassword = 'correct_master_password';
+  await unlockWithPassword(guard, mockInvoke, inputPassword, async () => {
+    clearedPassword = '';
+    summaryLoaded = true;
+  });
+
+  assert.equal(guard.epoch, 1, 'SessionGuard epoch must increment upon password unlock');
+  assert.equal(guard.isUnlocked, true, 'SessionGuard must be unlocked upon password unlock');
+  assert.equal(summaryLoaded, true, 'onSuccess callback must have run');
+  assert.equal(clearedPassword, '');
+});
+
+test('failed master password unlock leaves session guards locked', async () => {
+  const guard = new SessionGuard();
+  let summaryLoaded = false;
+  let errorCaught = null;
+
+  const mockInvoke = async (cmd, args) => {
+    if (cmd === 'unlock_vault') {
+      throw new Error('فشل فتح الخزنة: كلمة المرور غير صحيحة');
+    }
+    throw new Error(`Unknown command ${cmd}`);
+  };
+
+  try {
+    await unlockWithPassword(guard, mockInvoke, 'wrong_password', async () => {
+      summaryLoaded = true;
+    });
+  } catch (err) {
+    errorCaught = err?.message || String(err);
+  }
+
+  assert.equal(guard.isUnlocked, false, 'SessionGuard must remain locked on wrong password');
+  assert.equal(guard.epoch, 0, 'SessionGuard epoch must not increment on failure');
+  assert.equal(summaryLoaded, false, 'onSuccess callback must not run on failure');
+  assert.ok(errorCaught && errorCaught.includes('غير صحيحة'), 'Error must be propagated');
+});
+
 test('successful recovery key unlock updates session guards and accepts service account details', async () => {
-  const sessionGuard = new SessionGuard();
-  let unlockedState = false;
-  let serviceAccounts = [];
+  const guard = new SessionGuard();
   let summary = null;
-  let error = null;
+  let serviceAccounts = [];
 
   const mockInvoke = async (cmd, args) => {
     if (cmd === 'recover_vault_with_key') {
-      if (args.recoveryCode === 'KN-VALID-RECO-VERY-CODE') {
-        return; // Success
-      }
+      if (args.recoveryCode === 'KN-VALID-RECO-VERY-CODE') return;
       throw new Error('Invalid recovery key');
     }
     if (cmd === 'get_vault_summary') {
-      return {
-        version: 1,
-        services: [{ id: 'srv-1', name: 'GitHub', account_count: 1 }],
-      };
+      return { version: 1, services: [{ id: 'srv-1', name: 'GitHub', account_count: 1 }] };
     }
     if (cmd === 'get_service_accounts') {
       if (args.serviceId === 'srv-1') {
-        return [
-          {
-            id: 'acc-1',
-            label: 'Main Account',
-            username: 'developer',
-            email: 'dev@example.com',
-            url: 'https://github.com',
-            has_password: true,
-            has_recovery_key: false,
-            has_notes: false,
-            has_pin: false,
-            password: null,
-            recovery_key: null,
-            notes: null,
-          },
-        ];
+        return [{ id: 'acc-1', username: 'developer', email: 'dev@example.com' }];
       }
       return [];
     }
     throw new Error(`Unknown command ${cmd}`);
   };
 
-  const handleRecoverVault = async (inputKey) => {
-    try {
-      error = null;
-      await mockInvoke('recover_vault_with_key', { recoveryCode: inputKey.trim() });
-      sessionGuard.unlock();
-      const data = await mockInvoke('get_vault_summary');
-      summary = data;
-      unlockedState = true;
-    } catch (err) {
-      error = err?.message || String(err);
-    }
-  };
+  assert.equal(guard.isUnlocked, false);
+  assert.equal(guard.epoch, 0);
 
-  const fetchServiceAccounts = async (serviceId) => {
-    const epoch = sessionGuard.epoch;
-    try {
-      const accs = await mockInvoke('get_service_accounts', { serviceId });
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      serviceAccounts = accs;
-    } catch (err) {
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      error = err?.message || String(err);
-    }
-  };
+  await unlockWithRecoveryKey(guard, mockInvoke, '  KN-VALID-RECO-VERY-CODE  ', async () => {
+    summary = await mockInvoke('get_vault_summary');
+  });
 
-  assert.equal(sessionGuard.isUnlocked, false);
-  assert.equal(sessionGuard.epoch, 0);
-
-  await handleRecoverVault('KN-VALID-RECO-VERY-CODE');
-
-  assert.equal(sessionGuard.epoch, 1, 'sessionGuard epoch must increment upon recovery');
-  assert.equal(sessionGuard.isUnlocked, true, 'sessionGuard must be unlocked upon recovery');
-  assert.equal(unlockedState, true, 'unlocked state must be true');
+  assert.equal(guard.epoch, 1, 'SessionGuard epoch must increment upon recovery unlock');
+  assert.equal(guard.isUnlocked, true, 'SessionGuard must be unlocked upon recovery');
   assert.ok(summary, 'Summary must be loaded');
 
-  await fetchServiceAccounts('srv-1');
+  // Fetch accounts with session guard validation
+  const epoch = guard.epoch;
+  const accs = await mockInvoke('get_service_accounts', { serviceId: 'srv-1' });
+  const processed = processAccountResponse(guard, epoch, accs, (validAccs) => {
+    serviceAccounts = validAccs;
+  });
 
+  assert.equal(processed, true);
   assert.equal(serviceAccounts.length, 1);
   assert.equal(serviceAccounts[0].username, 'developer');
-  assert.equal(serviceAccounts[0].email, 'dev@example.com');
 });
 
-test('successful manual auto-unlock updates session guards and accepts service account details', async () => {
-  const sessionGuard = new SessionGuard();
-  let unlockedState = false;
+test('invalid recovery key fails unlock and leaves session guards locked', async () => {
+  const guard = new SessionGuard();
+  let summaryLoaded = false;
   let serviceAccounts = [];
-  let summary = null;
-  let error = null;
-
-  const mockInvoke = async (cmd, args) => {
-    if (cmd === 'auto_unlock_vault') {
-      return true; // Successfully unlocked via Windows Credential Manager
-    }
-    if (cmd === 'get_vault_summary') {
-      return {
-        version: 1,
-        services: [{ id: 'srv-1', name: 'GitHub', account_count: 1 }],
-      };
-    }
-    if (cmd === 'get_service_accounts') {
-      if (args.serviceId === 'srv-1') {
-        return [
-          {
-            id: 'acc-1',
-            label: 'Auto Account',
-            username: 'auto_user',
-            email: 'auto@example.com',
-            url: 'https://github.com',
-            has_password: true,
-            has_recovery_key: false,
-            has_notes: false,
-            has_pin: false,
-            password: null,
-            recovery_key: null,
-            notes: null,
-          },
-        ];
-      }
-      return [];
-    }
-    throw new Error(`Unknown command ${cmd}`);
-  };
-
-  // Replicate manual Auto-Unlock button handler from ui/src/App.tsx
-  const handleManualAutoUnlock = async () => {
-    try {
-      const ok = await mockInvoke('auto_unlock_vault');
-      if (ok) {
-        sessionGuard.unlock();
-        const data = await mockInvoke('get_vault_summary');
-        summary = data;
-        unlockedState = true;
-      } else {
-        error = 'فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ';
-      }
-    } catch (e) {
-      error = e?.message || String(e);
-    }
-  };
-
-  const fetchServiceAccounts = async (serviceId) => {
-    const epoch = sessionGuard.epoch;
-    try {
-      const accs = await mockInvoke('get_service_accounts', { serviceId });
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      serviceAccounts = accs;
-    } catch (err) {
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      error = err?.message || String(err);
-    }
-  };
-
-  assert.equal(sessionGuard.isUnlocked, false);
-  assert.equal(sessionGuard.epoch, 0);
-
-  // Click manual auto-unlock
-  await handleManualAutoUnlock();
-
-  // Verify session guards are updated
-  assert.equal(sessionGuard.epoch, 1, 'sessionGuard epoch must increment upon manual auto-unlock');
-  assert.equal(sessionGuard.isUnlocked, true, 'sessionGuard must be unlocked upon manual auto-unlock');
-  assert.equal(unlockedState, true, 'unlocked state must be true');
-  assert.ok(summary, 'Summary must be loaded');
-
-  // Verify service accounts load and are accepted by the guard
-  await fetchServiceAccounts('srv-1');
-  assert.equal(serviceAccounts.length, 1);
-  assert.equal(serviceAccounts[0].username, 'auto_user');
-  assert.equal(serviceAccounts[0].label, 'Auto Account');
-});
-
-test('manual auto-unlock with unavailable credentials never unlocks or exposes details', async () => {
-  const sessionGuard = new SessionGuard();
-  let unlockedState = false;
-  let serviceAccounts = [];
-  let error = null;
-
-  const mockInvoke = async (cmd, args) => {
-    if (cmd === 'auto_unlock_vault') {
-      return false; // No saved credentials in store
-    }
-    if (cmd === 'get_service_accounts') {
-      return [{ id: 'leak-1', username: 'should_not_leak' }];
-    }
-    throw new Error(`Unknown command ${cmd}`);
-  };
-
-  const handleManualAutoUnlock = async () => {
-    try {
-      const ok = await mockInvoke('auto_unlock_vault');
-      if (ok) {
-        sessionGuard.unlock();
-        unlockedState = true;
-      } else {
-        error = 'فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ';
-      }
-    } catch (e) {
-      error = e?.message || String(e);
-    }
-  };
-
-  const fetchServiceAccounts = async (serviceId) => {
-    const epoch = sessionGuard.epoch;
-    try {
-      const accs = await mockInvoke('get_service_accounts', { serviceId });
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      serviceAccounts = accs;
-    } catch (err) {
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      error = err?.message || String(err);
-    }
-  };
-
-  await handleManualAutoUnlock();
-
-  assert.equal(sessionGuard.isUnlocked, false, 'sessionGuard must remain locked when auto-unlock fails');
-  assert.equal(sessionGuard.epoch, 0, 'sessionGuard epoch must not increment when auto-unlock fails');
-  assert.equal(unlockedState, false, 'Vault must remain locked');
-  assert.ok(error && error.includes('فشل الفتح التلقائي'), 'Error message must be reported');
-
-  await fetchServiceAccounts('srv-1');
-  assert.equal(serviceAccounts.length, 0, 'No account details must be accepted while locked');
-});
-
-test('startup auto-unlock updates guards and accepts service account details', async () => {
-  const sessionGuard = new SessionGuard();
-  let unlockedState = false;
-  let serviceAccounts = [];
-
-  const mockInvoke = async (cmd, args) => {
-    if (cmd === 'is_auto_unlock_enabled') return true;
-    if (cmd === 'auto_unlock_vault') return true;
-    if (cmd === 'get_vault_summary') return { version: 1, services: [{ id: 'srv-1', name: 'Srv' }] };
-    if (cmd === 'get_service_accounts') return [{ id: 'acc-1', username: 'startup_user' }];
-    throw new Error(`Unknown command ${cmd}`);
-  };
-
-  // Replicate startup auto-unlock from App.tsx
-  const checkInitialVaultState = async () => {
-    const isAutoEnabled = await mockInvoke('is_auto_unlock_enabled');
-    if (isAutoEnabled) {
-      const unlockedViaStore = await mockInvoke('auto_unlock_vault');
-      if (unlockedViaStore) {
-        sessionGuard.unlock();
-        unlockedState = true;
-      }
-    }
-  };
-
-  const fetchServiceAccounts = async (serviceId) => {
-    const epoch = sessionGuard.epoch;
-    const accs = await mockInvoke('get_service_accounts', { serviceId });
-    if (!sessionGuard.isResponseValid(epoch)) return;
-    serviceAccounts = accs;
-  };
-
-  await checkInitialVaultState();
-
-  assert.equal(sessionGuard.epoch, 1);
-  assert.equal(sessionGuard.isUnlocked, true);
-  assert.equal(unlockedState, true);
-
-  await fetchServiceAccounts('srv-1');
-  assert.equal(serviceAccounts.length, 1);
-  assert.equal(serviceAccounts[0].username, 'startup_user');
-});
-
-test('invalid recovery key never unlocks vault or exposes service accounts', async () => {
-  const sessionGuard = new SessionGuard();
-  let unlockedState = false;
-  let serviceAccounts = [];
-  let error = null;
+  let errorCaught = null;
 
   const mockInvoke = async (cmd, args) => {
     if (cmd === 'recover_vault_with_key') {
@@ -300,43 +140,158 @@ test('invalid recovery key never unlocks vault or exposes service accounts', asy
     throw new Error(`Unknown command ${cmd}`);
   };
 
-  const handleRecoverVault = async (inputKey) => {
-    try {
-      error = null;
-      await mockInvoke('recover_vault_with_key', { recoveryCode: inputKey.trim() });
-      sessionGuard.unlock();
-      unlockedState = true;
-    } catch (err) {
-      error = err?.message || String(err);
-    }
-  };
+  try {
+    await unlockWithRecoveryKey(guard, mockInvoke, 'KN-INVALID-KEY-0000-0000', async () => {
+      summaryLoaded = true;
+    });
+  } catch (err) {
+    errorCaught = err?.message || String(err);
+  }
 
-  const fetchServiceAccounts = async (serviceId) => {
-    const epoch = sessionGuard.epoch;
-    try {
-      const accs = await mockInvoke('get_service_accounts', { serviceId });
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      serviceAccounts = accs;
-    } catch (err) {
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      error = err?.message || String(err);
-    }
-  };
+  assert.equal(guard.isUnlocked, false, 'SessionGuard must remain locked on invalid recovery key');
+  assert.equal(guard.epoch, 0, 'SessionGuard epoch must not increment on failure');
+  assert.equal(summaryLoaded, false, 'Summary must not be loaded on failure');
+  assert.ok(errorCaught && errorCaught.includes('غير مطابق'), 'Error must be propagated');
 
-  await handleRecoverVault('KN-WRONG-KEY-0000-0000');
+  const epoch = guard.epoch;
+  const accs = await mockInvoke('get_service_accounts', { serviceId: 'srv-1' });
+  const processed = processAccountResponse(guard, epoch, accs, (validAccs) => {
+    serviceAccounts = validAccs;
+  });
 
-  assert.equal(sessionGuard.isUnlocked, false, 'sessionGuard must remain locked on failure');
-  assert.equal(sessionGuard.epoch, 0, 'sessionGuard epoch must not increment on failure');
-  assert.equal(unlockedState, false, 'vault must remain locked');
-  assert.ok(error && error.includes('غير مطابق'), 'Error message must be reported');
-
-  await fetchServiceAccounts('srv-1');
+  assert.equal(processed, false, 'processAccountResponse must reject data while locked');
   assert.equal(serviceAccounts.length, 0, 'No account details must be accepted while locked');
 });
 
+test('successful manual auto-unlock updates session guards and accepts service account details', async () => {
+  const guard = new SessionGuard();
+  let summary = null;
+  let serviceAccounts = [];
+
+  const mockInvoke = async (cmd, args) => {
+    if (cmd === 'auto_unlock_vault') return true;
+    if (cmd === 'get_vault_summary') return { version: 1, services: [{ id: 'srv-1', name: 'GitHub' }] };
+    if (cmd === 'get_service_accounts') return [{ id: 'acc-1', username: 'auto_user' }];
+    throw new Error(`Unknown command ${cmd}`);
+  };
+
+  assert.equal(guard.isUnlocked, false);
+  assert.equal(guard.epoch, 0);
+
+  const ok = await unlockWithAutoUnlock(guard, mockInvoke, async () => {
+    summary = await mockInvoke('get_vault_summary');
+  });
+
+  assert.equal(ok, true, 'unlockWithAutoUnlock must return true on success');
+  assert.equal(guard.epoch, 1, 'SessionGuard epoch must increment upon auto-unlock');
+  assert.equal(guard.isUnlocked, true, 'SessionGuard must be unlocked');
+  assert.ok(summary, 'Summary must be loaded');
+
+  const epoch = guard.epoch;
+  const accs = await mockInvoke('get_service_accounts', { serviceId: 'srv-1' });
+  const processed = processAccountResponse(guard, epoch, accs, (validAccs) => {
+    serviceAccounts = validAccs;
+  });
+
+  assert.equal(processed, true);
+  assert.equal(serviceAccounts.length, 1);
+  assert.equal(serviceAccounts[0].username, 'auto_user');
+});
+
+test('manual auto-unlock with unavailable credentials returns false and keeps guard locked', async () => {
+  const guard = new SessionGuard();
+  let summaryLoaded = false;
+  let serviceAccounts = [];
+
+  const mockInvoke = async (cmd, args) => {
+    if (cmd === 'auto_unlock_vault') return false; // No saved credentials
+    if (cmd === 'get_service_accounts') return [{ id: 'leak-1', username: 'should_not_leak' }];
+    throw new Error(`Unknown command ${cmd}`);
+  };
+
+  const ok = await unlockWithAutoUnlock(guard, mockInvoke, async () => {
+    summaryLoaded = true;
+  });
+
+  assert.equal(ok, false, 'unlockWithAutoUnlock must return false when no credentials saved');
+  assert.equal(guard.isUnlocked, false, 'SessionGuard must remain locked');
+  assert.equal(guard.epoch, 0, 'SessionGuard epoch must not increment');
+  assert.equal(summaryLoaded, false);
+
+  const epoch = guard.epoch;
+  const accs = await mockInvoke('get_service_accounts', { serviceId: 'srv-1' });
+  const processed = processAccountResponse(guard, epoch, accs, (validAccs) => {
+    serviceAccounts = validAccs;
+  });
+
+  assert.equal(processed, false);
+  assert.equal(serviceAccounts.length, 0);
+});
+
+test('startup auto-unlock updates guards and accepts service account details', async () => {
+  const guard = new SessionGuard();
+  let summary = null;
+  let serviceAccounts = [];
+
+  const mockInvoke = async (cmd, args) => {
+    if (cmd === 'is_auto_unlock_enabled') return true;
+    if (cmd === 'auto_unlock_vault') return true;
+    if (cmd === 'get_vault_summary') return { version: 1, services: [{ id: 'srv-1', name: 'Srv' }] };
+    if (cmd === 'get_service_accounts') return [{ id: 'acc-1', username: 'startup_user' }];
+    throw new Error(`Unknown command ${cmd}`);
+  };
+
+  const isAutoEnabled = await mockInvoke('is_auto_unlock_enabled');
+  if (isAutoEnabled) {
+    await unlockWithAutoUnlock(guard, mockInvoke, async () => {
+      summary = await mockInvoke('get_vault_summary');
+    });
+  }
+
+  assert.equal(guard.epoch, 1);
+  assert.equal(guard.isUnlocked, true);
+  assert.ok(summary);
+
+  const epoch = guard.epoch;
+  const accs = await mockInvoke('get_service_accounts', { serviceId: 'srv-1' });
+  processAccountResponse(guard, epoch, accs, (validAccs) => {
+    serviceAccounts = validAccs;
+  });
+
+  assert.equal(serviceAccounts.length, 1);
+  assert.equal(serviceAccounts[0].username, 'startup_user');
+});
+
+test('explicit lockVault locks session guard and executes purge callback', async () => {
+  const guard = new SessionGuard();
+  guard.unlock(); // Initially unlocked: epoch = 1, isUnlocked = true
+  assert.equal(guard.isUnlocked, true);
+  assert.equal(guard.epoch, 1);
+
+  let backendLockInvoked = false;
+  let purgeStateExecuted = false;
+
+  const mockInvoke = async (cmd) => {
+    if (cmd === 'lock_vault') {
+      backendLockInvoked = true;
+      return;
+    }
+    throw new Error(`Unknown command ${cmd}`);
+  };
+
+  await lockVault(guard, mockInvoke, () => {
+    purgeStateExecuted = true;
+  });
+
+  assert.equal(backendLockInvoked, true, 'Backend lock_vault must be called');
+  assert.equal(purgeStateExecuted, true, 'Purge callback must be executed');
+  assert.equal(guard.isUnlocked, false, 'SessionGuard must be locked');
+  assert.equal(guard.epoch, 2, 'SessionGuard epoch must increment upon lock');
+});
+
 test('stale in-flight account response rejected when vault is locked during request', async () => {
-  const sessionGuard = new SessionGuard();
-  sessionGuard.unlock(); // epoch = 1, isUnlocked = true
+  const guard = new SessionGuard();
+  guard.unlock(); // epoch = 1, isUnlocked = true
   let serviceAccounts = [];
 
   let resolveBackendCall;
@@ -345,11 +300,12 @@ test('stale in-flight account response rejected when vault is locked during requ
   });
 
   const fetchServiceAccounts = async (serviceId) => {
-    const epoch = sessionGuard.epoch;
+    const epoch = guard.epoch;
     try {
       const accs = await backendPromise;
-      if (!sessionGuard.isResponseValid(epoch)) return;
-      serviceAccounts = accs;
+      processAccountResponse(guard, epoch, accs, (validAccs) => {
+        serviceAccounts = validAccs;
+      });
     } catch (err) {
       // Ignore
     }
@@ -358,7 +314,7 @@ test('stale in-flight account response rejected when vault is locked during requ
   const fetchPromise = fetchServiceAccounts('srv-1');
 
   // Vault is locked while request is still pending
-  sessionGuard.lock(); // epoch = 2, isUnlocked = false
+  guard.lock(); // epoch = 2, isUnlocked = false
 
   resolveBackendCall([{ id: 'acc-1', username: 'stale_user' }]);
   await fetchPromise;
