@@ -1,0 +1,64 @@
+name: Bug Report
+description: Create a report to help us improve Kinana
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue. Please provide as much context as possible.
+        If this is a security vulnerability, please do NOT use this form; refer to SECURITY.md instead.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - Windows 11 (x86_64)
+        - Windows 10 (x86_64)
+        - macOS Apple Silicon (arm64)
+        - macOS Intel (x86_64)
+        - Linux Ubuntu / Debian (.deb)
+        - Linux AppImage
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kinana Version
+      description: What version of Kinana are you running? (e.g. 0.1.2)
+      placeholder: "0.1.2"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Open Kinana
+        2. Unlock vault
+        3. Click on '...'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Screenshots
+      description: Paste any console logs or attach screenshots (remember to redact any sensitive credentials).
