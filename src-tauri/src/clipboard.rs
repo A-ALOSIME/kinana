@@ -14,6 +14,7 @@
 //!     before clearing. If the user copied something else in the interim, their new clipboard data is preserved.
 //!   * Zeroization of intermediate text buffers where supported.
 
+#[cfg(target_os = "windows")]
 use zeroize::Zeroize;
 
 #[cfg(target_os = "windows")]

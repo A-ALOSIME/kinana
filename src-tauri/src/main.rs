@@ -1892,18 +1892,18 @@ fn reveal_path_in_file_manager(vault_path: &Path, app: &AppHandle) -> Result<(),
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let target_dir = if vault_path.exists() {
-            vault_path.parent().unwrap_or(vault_path)
+        let target_dir: std::path::PathBuf = if vault_path.exists() {
+            vault_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| vault_path.to_path_buf())
         } else {
             let app_dir = app
                 .path()
                 .app_data_dir()
                 .map_err(|e| format!("فشل تحديد المجلد: {}", e))?;
             let _ = std::fs::create_dir_all(&app_dir);
-            &app_dir
+            app_dir
         };
         std::process::Command::new("xdg-open")
-            .arg(target_dir)
+            .arg(&target_dir)
             .spawn()
             .map_err(|e| format!("فشل فتح متصفح الملفات: {}", e))?;
     }
