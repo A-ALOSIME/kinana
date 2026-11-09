@@ -2171,8 +2171,13 @@ export default function App() {
                         onClick={async () => {
                           try {
                             const ok = await invoke<boolean>("auto_unlock_vault");
-                            if (ok) await fetchSummary();
-                            else setError("فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ");
+                            if (ok) {
+                              sessionEpochRef.current += 1;
+                              isUnlockedRef.current = true;
+                              await fetchSummary();
+                            } else {
+                              setError("فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ");
+                            }
                           } catch (e: any) {
                             const errStr = e?.toString() || "";
                             if (errStr.includes("No saved credential")) {
