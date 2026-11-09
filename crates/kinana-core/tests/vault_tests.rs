@@ -1558,10 +1558,9 @@ fn test_import_success_with_archiving_failure_yields_valid_vault() {
     );
     assert!(archive_res.is_err(), "Archiving must fail when target directory does not exist");
 
-    // تطبيق المنطق الإنتاجي: عند فشل الأرشفة، تُحذف الإشارة إليها من الدفتر لمنع حذفها أثناء التنظيف
+    // تطبيق المنطق الإنتاجي: عند فشل الأرشفة، تُفك نسخ الأمان وتُحدّث نسخة الدفتر على القرص فوراً
     if archive_res.is_err() {
-        journal.vault_safety = None;
-        journal.recovery_safety = None;
+        journal.release_safety_backups(&journal_path).unwrap();
     }
 
     // تنظيف الدفتر
@@ -1580,4 +1579,93 @@ fn test_import_success_with_archiving_failure_yields_valid_vault() {
     // التحقق الجوهري الثالث: الخزنة المستوردة تعمل وتفتح بكلمة المرور المستوردة الجديدة
     let imported_unlock = storage.unlock(imported_pwd);
     assert!(imported_unlock.is_ok(), "Imported vault must remain active and functional");
+}
+
+/// 35. اختبار فشل الأرشفة الوقائية مع تعذر حذف الدفتر: الحفاظ على نسخ الأمان حتى بعد إعادة تشغيل التطبيق والتعافي
+#[test]
+fn test_import_archive_failure_with_locked_journal_preserves_safety_on_restart() {
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let rec_path = dir.path().join("recovery.dat");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let journal_path = dir.path().join("vault.tx.journal");
+
+    let old_pwd = "PreviousVaultPassword1#";
+    let imported_pwd = "ImportedVaultPassword2#";
+
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault(old_pwd, None).unwrap();
+    storage.save(&mut session).unwrap();
+
+    // 1. حفظ نسخة الأمان الأصلية للخزنة السابقة
+    fs::copy(&vault_path, &vault_safety).unwrap();
+    let mut journal = kinana_core::TransactionJournal::new(
+        "import",
+        vault_path.clone(),
+        rec_path.clone(),
+        Some(vault_safety.clone()),
+        None,
+        false,
+    ).unwrap();
+    journal.write_to_disk(&journal_path).unwrap();
+
+    // 2. كتابة الخزنة المستوردة الجديدة وتوثيق إتمام المعاملة بنجاح Committed
+    fs::remove_file(&vault_path).unwrap();
+    let mut imported_session = storage.create_new_vault(imported_pwd, None).unwrap();
+    storage.save(&mut imported_session).unwrap();
+    journal.commit(&journal_path).unwrap();
+
+    // 3. محاكاة فشل كتابة الأرشيف الوقائي عبر مسار وجهة غير صالح
+    let invalid_vault_target = dir.path().join("non_existent_subdir").join("vault.dat");
+    let archive_res = kinana_core::create_pre_import_archive(
+        &invalid_vault_target,
+        &vault_safety,
+        &rec_path,
+        None,
+    );
+    assert!(archive_res.is_err(), "Archiving must fail when target directory does not exist");
+
+    // 4. تطبيق المنطق الإنتاجي: فك ارتباط نسخ الأمان وتحديث الدفتر على القرص فوراً
+    journal.release_safety_backups(&journal_path).unwrap();
+
+    // 5. محاكاة تعذر حذف الدفتر عبر قفل ملف الدفتر لمنع حذفه
+    #[cfg(windows)]
+    let locked_journal = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&journal_path)
+        .unwrap();
+
+    let cleanup_res = journal.cleanup(&journal_path);
+    #[cfg(windows)]
+    {
+        assert!(cleanup_res.is_err(), "Cleanup must fail when journal is locked");
+        assert!(journal_path.exists(), "Journal must remain on disk when cleanup fails");
+    }
+
+    // 6. محاكاة إعادة تشغيل التطبيق: زوال القفل وتشغيل recover()
+    #[cfg(windows)]
+    drop(locked_journal);
+
+    let recover_res = kinana_core::TransactionJournal::recover(&journal_path);
+    assert!(recover_res.is_ok(), "Recover must succeed for committed transaction");
+    assert!(!recover_res.unwrap(), "Committed transaction does not trigger rollback");
+
+    // 7. التحقق الجوهري الأول: نسخة الأمان الأصلية ظلت محفوظة على القرص ولم تحذفها recover()
+    assert!(vault_safety.exists(), "Safety backup MUST remain intact on disk after restart and recovery");
+
+    // 8. التحقق الجوهري الثاني: إمكانية استرجاع الخزنة السابقة بالكامل من نسخة الأمان بكلمة المرور القديمة
+    let safety_storage = VaultStorage::new(&vault_safety);
+    let recovered_previous = safety_storage.unlock(old_pwd);
+    assert!(recovered_previous.is_ok(), "Safety backup must successfully unlock with previous password");
+
+    // 9. التحقق الجوهري الثالث: الخزنة المستوردة تعمل وتفتح بكلمة المرور المستوردة الجديدة
+    let imported_unlock = storage.unlock(imported_pwd);
+    assert!(imported_unlock.is_ok(), "Imported vault must remain active and functional");
+
+    // 10. التحقق الجوهري الرابع: تنظيف ملف الدفتر الآن بعد نجاح recover
+    assert!(!journal_path.exists(), "Journal must be deleted after recovery completes");
 }

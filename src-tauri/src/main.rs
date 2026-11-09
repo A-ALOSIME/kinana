@@ -1992,10 +1992,12 @@ async fn import_vault_backup(
         }
 
         // إذا تعذرت الأرشفة الوقائية لأي سبب، نحافظ قطعياً على نسخ الأمان الأصلية على القرص
-        // ولا نحذفها أثناء التنظيف لضمان تمكن المستخدم من استرجاع خزنته السابقة.
+        // ونفك ارتباطها من دفتر المعاملات ونحفظ الدفتر المحدّث على القرص فوراً لمنع أي عملية تنظيف
+        // لاحقة أو عملية recover() عند إعادة تشغيل التطبيق من حذف نسخ الأمان إذا تعذر حذف الدفتر.
         if archive_err.is_some() {
-            journal.vault_safety = None;
-            journal.recovery_safety = None;
+            if let Err(e) = journal.release_safety_backups(&journal_path) {
+                eprintln!("WARNING: Failed to persist safety backup release to journal: {}", e);
+            }
         }
 
         // 4. الآن وبعد إتمام الأرشفة، ننظف دفتر المعاملة (وحذف ملفات الأمان فقط إن كانت الأرشفة قد نجحت)

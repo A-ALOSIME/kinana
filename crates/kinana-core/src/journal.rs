@@ -178,6 +178,17 @@ impl TransactionJournal {
         self.write_to_disk(journal_path)
     }
 
+    /// Disassociates safety backups from the journal and immediately persists this change to disk.
+    /// This guarantees that lingering journal files (e.g. if journal deletion fails) will never
+    /// delete the preserved safety backups during future cleanups or application restarts.
+    pub fn release_safety_backups(&mut self, journal_path: &Path) -> Result<(), VaultError> {
+        self.vault_safety = None;
+        self.recovery_safety = None;
+        self.vault_safety_sha256 = None;
+        self.recovery_safety_sha256 = None;
+        self.write_to_disk(journal_path)
+    }
+
     /// Cleans up the journal file and any safety backup files on disk.
     /// Attempts to delete all transaction artifacts, collecting any failures so that
     /// every possible file is cleaned up, and returns an error reporting all leftover files
