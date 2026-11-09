@@ -17,13 +17,16 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - name: Windows
+          - name: Windows-x64
             os: windows-latest
             rust-target: x86_64-pc-windows-msvc
-          - name: macOS
+          - name: macOS-arm64
             os: macos-latest
             rust-target: aarch64-apple-darwin
-          - name: Linux
+          - name: macOS-x64
+            os: macos-15-intel
+            rust-target: x86_64-apple-darwin
+          - name: Linux-x64
             os: ubuntu-22.04
             rust-target: x86_64-unknown-linux-gnu
 
@@ -97,3 +100,13 @@ jobs:
       - name: Build Tauri Application & Verify Bundling
         run: |
           npx --prefix ui tauri build
+
+      - name: Upload CI Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-bundle-${{ matrix.platform.name }}
+          path: |
+            target/release/bundle/*/*
+            target/*/release/bundle/*/*
+          if-no-files-found: warn
+          retention-days: 3
