@@ -140,7 +140,7 @@ mod imp {
 
     pub fn delete_credential() -> Result<(), String> {
         if let Ok(entry) = Entry::new(SERVICE_NAME, USER_NAME) {
-            match entry.delete_password() {
+            match entry.delete_credential() {
                 Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
                 Err(e) => Err(format!("Failed to delete credential from Secret Service: {}", e)),
             }

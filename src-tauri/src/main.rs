@@ -1950,10 +1950,13 @@ fn reveal_path_in_file_manager(vault_path: &Path, app: &AppHandle) -> Result<(),
             }
         }
 
-        return Err("تعذر فتح مدير الملفات على النظام. يرجى فتح المجلد يدوياً.".to_string());
+        Err("تعذر فتح مدير الملفات على النظام. يرجى فتح المجلد يدوياً.".to_string())
     }
 
-    Ok(())
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        Ok(())
+    }
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]

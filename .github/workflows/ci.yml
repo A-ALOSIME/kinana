@@ -46,6 +46,8 @@ jobs:
             squashfs-tools \
             patchelf \
             libssl-dev \
+            libdbus-1-dev \
+            pkg-config \
             build-essential \
             curl \
             wget \
