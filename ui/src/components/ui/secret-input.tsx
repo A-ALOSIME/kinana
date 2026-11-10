@@ -4,14 +4,8 @@ import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-
-function extractTextSizeClasses(className?: string): string {
-  if (!className) return "text-sm";
-  const matches = className.match(
-    /\b(?:[a-z]+:)?text-(?:xs|sm|base|lg|xl|2xl|3xl)\b/g
-  );
-  return matches && matches.length > 0 ? matches.join(" ") : "text-sm";
-}
+import { PlaceholderOverlay } from "@/components/ui/placeholder-overlay";
+import { extractTextSizeClasses } from "@/lib/input-classes";
 
 export interface SecretInputProps
   extends Omit<React.ComponentProps<"input">, "type"> {
@@ -127,31 +121,22 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
         />
 
         {!hasValue && placeholder && (
-          <span
-            aria-hidden="true"
-            className={cn(
-              "pointer-events-none select-none absolute inset-y-0 flex items-center text-muted-foreground font-sans font-normal tracking-normal overflow-hidden",
-              sizeClasses,
-              "leading-[2]",
-              disabled && "opacity-50",
-              hasStrikeThrough && "line-through",
+          <PlaceholderOverlay
+            placeholder={placeholder}
+            sizeClasses={sizeClasses}
+            paddingClasses={
               alignCenteredPlaceholder
                 ? isLarge
-                  ? "inset-x-16 justify-center text-center"
-                  : "inset-x-14 justify-center text-center"
+                  ? "px-16"
+                  : "px-14"
                 : isLarge
-                  ? "rtl:right-4 rtl:left-16 ltr:left-4 ltr:right-16 justify-start text-start"
-                  : "rtl:right-4 rtl:left-14 ltr:left-4 ltr:right-14 justify-start text-start"
-            )}
-          >
-            <span
-              dir="auto"
-              style={{ lineHeight: 2 }}
-              className="block max-w-full truncate py-1"
-            >
-              {placeholder}
-            </span>
-          </span>
+                  ? "rtl:pr-4 rtl:pl-16 ltr:pl-4 ltr:pr-16"
+                  : "rtl:pr-4 rtl:pl-14 ltr:pl-4 ltr:pr-14"
+            }
+            centered={alignCenteredPlaceholder}
+            disabled={disabled}
+            strikeThrough={hasStrikeThrough}
+          />
         )}
 
         <Button

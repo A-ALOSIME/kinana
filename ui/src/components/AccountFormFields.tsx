@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FormLabel } from "@/components/ui/form-label";
 import { Input } from "@/components/ui/input";
 import { SecretInput } from "@/components/ui/secret-input";
+import { PasswordStrengthIndicator } from "@/components/ui/password-strength-indicator";
 import type { AccountFormMode } from "@/accountForm";
 
 export interface AccountFormFieldsProps {
@@ -424,6 +425,9 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           onChange={(e) => onPasswordChange(e.target.value)}
           className="text-base font-bold rounded-xl border-2"
         />
+        {password.length > 0 && (
+          <PasswordStrengthIndicator password={password} className="mt-2" />
+        )}
         {isEdit && (
           <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
             اتركه فارغاً للإبقاء على كلمة المرور الحالية

@@ -1867,10 +1867,8 @@ export default function App() {
       }
       if (target === "add") {
         setAccPassword(generated);
-        setShowAccPassword(true);
       } else {
         setEditPassword(generated);
-        setShowEditPassword(true);
       }
     } catch (err: any) {
       const msg = err?.toString() || "فشل توليد كلمة المرور";
@@ -5612,7 +5610,7 @@ export default function App() {
                 placeholder="KN-XXXX-XXXX-XXXX-XXXX"
                 value={inputRecoveryKey}
                 onChange={(e) => setInputRecoveryKey(e.target.value)}
-                className="h-14 text-lg sm:text-xl font-bold rounded-xl border-2"
+                className="min-h-14 text-lg sm:text-xl font-bold rounded-xl border-2"
                 autoFocus
                 required
               />

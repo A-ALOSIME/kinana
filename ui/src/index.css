@@ -76,6 +76,7 @@
   input::placeholder,
   textarea::placeholder {
     font-family: 'Thamaniah', 'thmanyah sans', 'Noto Sans Arabic', 'Segoe UI', 'SF Arabic', 'Tahoma', sans-serif;
+    font-weight: 400;
     letter-spacing: normal;
     line-height: 2;
     unicode-bidi: plaintext;

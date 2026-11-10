@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.7] - 2026-11-10
+
+### Changed
+- Added the shared 4-segment `<PasswordStrengthIndicator />` underneath the account password field in `<AccountFormFields />` for both Add and Edit login accounts, updating live during manual entry and password generation, remaining hidden when the password input is empty (without evaluating stored passwords on Edit or imposing mandatory strength limits), and keeping password fields masked by default.
+
+### Fixed
+- Globally eliminated bottom Arabic placeholder descender clipping across both `<Input />` and `<SecretInput />` by extracting a shared accessible `<PlaceholderOverlay />` component (bypassing WebKitGTK's constrained native `RenderTextControlSingleLine` shadow placeholder box and inherited bold weights), removing outer vertical `overflow-hidden` clipping around `inset-0`, reserving extra `line-height: 2.15` + `pt-0.5 pb-1.5` descender breathing room inside horizontal truncation bounds, enforcing `font-weight: 400` on `::placeholder`, and converting `recovery-key-input` to `min-h-14`.
+
+---
+
 ## [0.1.6] - 2026-11-10
 
 ### Changed

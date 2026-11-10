@@ -24,6 +24,10 @@ import {
   evaluatePasswordStrength,
   validateMasterPasswordForm,
 } from "../src/passwordValidation.ts";
+import {
+  extractHorizontalPaddingClasses,
+  extractTextSizeClasses,
+} from "../src/lib/input-classes.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(__dirname, "..");
@@ -121,6 +125,15 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   const cardSrc = fs.readFileSync(path.join(uiRoot, "src/components/ui/card.tsx"), "utf8");
   assert.ok(!cardSrc.includes("tracking-tight"), "CardTitle must not apply tracking-tight to Arabic text");
 
+  const placeholderOverlaySrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/ui/placeholder-overlay.tsx"),
+    "utf8"
+  );
+  assert.ok(placeholderOverlaySrc.includes('dir="auto"'), "Shared placeholder overlay must auto-detect RTL/LTR direction cleanly");
+  assert.ok(placeholderOverlaySrc.includes("lineHeight: 2.15"), "Shared placeholder overlay must reserve vertical line-height headroom above and below Arabic baselines");
+  assert.ok(placeholderOverlaySrc.includes("pt-0.5 pb-1.5"), "Shared placeholder overlay must include extra bottom descender clearance inside horizontal truncation");
+  assert.ok(!placeholderOverlaySrc.includes("inset-y-0 flex items-center text-muted-foreground font-sans font-normal tracking-normal overflow-hidden"), "Outer inset-0 placeholder wrapper must not apply vertical overflow-hidden clipping");
+
   const secretInputSrc = fs.readFileSync(
     path.join(uiRoot, "src/components/ui/secret-input.tsx"),
     "utf8"
@@ -129,10 +142,9 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.ok(secretInputSrc.includes("codeStyleWhenFilled && hasValue"), "Code font/tracking must apply only when non-empty");
   assert.ok(!secretInputSrc.includes('dir="ltr"'), "Input must not set HTML dir=ltr attribute over Tailwind rtl: selectors");
   assert.ok(secretInputSrc.includes("aria-placeholder={placeholder}"), "SecretInput must expose accessible placeholder semantics while avoiding native WebKit password shadow placeholder glyph corruption");
-  assert.ok(secretInputSrc.includes('dir="auto"'), "SecretInput placeholder overlay must auto-detect RTL/LTR direction cleanly");
+  assert.ok(secretInputSrc.includes("PlaceholderOverlay"), "SecretInput must render placeholders through shared PlaceholderOverlay");
   assert.ok(secretInputSrc.includes("rtl:pl-14"), "SecretInput must reserve clearance for eye toggle icon");
   assert.ok(secretInputSrc.includes("min-h-12") && secretInputSrc.includes("min-h-16"), "SecretInput must use min-h controls rather than clipping tall Arabic glyphs");
-  assert.ok(secretInputSrc.includes("leading-[2]") && secretInputSrc.includes("lineHeight: 2"), "SecretInput placeholder overlay must reserve vertical clearance for Arabic descenders and bold glyphs");
 
   const inputSrc = fs.readFileSync(
     path.join(uiRoot, "src/components/ui/input.tsx"),
@@ -142,6 +154,7 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.ok(inputSrc.includes("leading-[2]"), "Input base style must enforce sufficient vertical line height for Arabic descenders and diacritics");
   assert.ok(inputSrc.includes("min-h-10"), "Input base style must avoid rigid clipping height constraints");
   assert.ok(inputSrc.includes("px-4"), "Input base style must provide comfortable horizontal padding");
+  assert.ok(inputSrc.includes("PlaceholderOverlay"), "Input must share PlaceholderOverlay so ordinary Arabic placeholders bypass WebKitGTK shadow-placeholder clipping");
 
   const formLabelSrc = fs.readFileSync(
     path.join(uiRoot, "src/components/ui/form-label.tsx"),
@@ -152,6 +165,7 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
 
   const cssSrc = fs.readFileSync(path.join(uiRoot, "src/index.css"), "utf8");
   assert.ok(cssSrc.includes("input::placeholder"), "Placeholder font/tracking reset must exist");
+  assert.ok(cssSrc.includes("font-weight: 400;"), "Native placeholders must not inherit bold descender bounds");
   assert.ok(cssSrc.includes("unicode-bidi: plaintext"), "Placeholders must use plaintext bidi direction");
   assert.ok(cssSrc.includes("line-height: 2;"), "Global input/placeholder CSS must enforce 2.0 line height to prevent descender clipping");
   assert.ok(!cssSrc.includes("overflow: visible !important"), "Must not use blanket overflow: visible hacks");
@@ -217,8 +231,19 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
     );
   }
 
-  // AccountFormFields must unify Add & Edit layouts and restrict placeholders to account label, card label, and cardholder name
+  // AccountFormFields must unify Add & Edit layouts, restrict placeholders, and attach informational PasswordStrengthIndicator solely to non-empty login account passwords
   assert.ok(appSrcNoComments.includes('<AccountFormFields') && appSrcNoComments.includes('idPrefix="add"') && appSrcNoComments.includes('idPrefix="edit"'), "Both Add and Edit modals must reuse unified AccountFormFields component");
+  assert.equal((accountFormFieldsSrc.match(/<PasswordStrengthIndicator/g) || []).length, 1, "AccountFormFields must render PasswordStrengthIndicator solely beneath the login account password field");
+  assert.ok(
+    accountFormFieldsSrc.includes("password.length > 0") &&
+      accountFormFieldsSrc.indexOf("mode === \"card\"") < accountFormFieldsSrc.indexOf("<PasswordStrengthIndicator"),
+    "Account password strength indicator must only show when a new/replacement login password is entered or generated (never for card fields or blank edit password)"
+  );
+  assert.ok(
+    !appSrcNoComments.includes("setShowAccPassword(true)") &&
+      !appSrcNoComments.includes("setShowEditPassword(true)"),
+    "Account password fields must remain masked by default even after generating a password"
+  );
   const accountPlaceholders = [...accountFormFieldsSrc.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
   assert.deepEqual(
     accountPlaceholders,
@@ -362,4 +387,13 @@ test("validateMasterPasswordForm enforces minimum length, deferred mismatch disp
     isSubmitting: true,
   });
   assert.equal(validBusy.canSubmit, false);
+});
+
+test("PlaceholderOverlay helpers extract horizontal padding and text sizes for custom inputs without clipping", () => {
+  assert.equal(extractTextSizeClasses("min-h-10 text-xs pr-9 pl-8 rounded-xl"), "text-xs");
+  assert.equal(extractTextSizeClasses("min-h-14 text-lg sm:text-xl font-bold"), "text-lg sm:text-xl");
+  assert.equal(extractTextSizeClasses("min-h-12 font-bold"), "text-sm");
+  assert.equal(extractHorizontalPaddingClasses("min-h-10 text-xs pr-9 pl-8 rounded-xl"), "pr-9 pl-8");
+  assert.equal(extractHorizontalPaddingClasses("min-h-12 text-base font-bold rounded-xl"), "px-4");
+  assert.equal(extractHorizontalPaddingClasses("rtl:pl-14 rtl:pr-4 ltr:pr-14 ltr:pl-4"), "rtl:pl-14 rtl:pr-4 ltr:pr-14 ltr:pl-4");
 });
