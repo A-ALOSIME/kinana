@@ -120,7 +120,12 @@ jobs:
             exit 1
           fi
           echo "Running installation smoke test via apt..."
-          sudo apt-get update && sudo apt-get install -y "$DEB_FILE"
+          if [[ "$DEB_FILE" != /* && "$DEB_FILE" != ./* ]]; then
+            LOCAL_DEB="./$DEB_FILE"
+          else
+            LOCAL_DEB="$DEB_FILE"
+          fi
+          sudo apt-get update && sudo apt-get install -y "$LOCAL_DEB"
           echo "Verifying installed binary..."
           which kinana
           ls -la /usr/bin/kinana
