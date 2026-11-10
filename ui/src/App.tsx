@@ -10,8 +10,15 @@ import {
   lockVault,
   processAccountResponse,
 } from "./session";
+import { clampZoomLevel, computeZoomMetrics } from "./zoom";
+import {
+  getVisibleRecoveryKeyText,
+  revealVaultRecoveryKey,
+  copyVaultRecoveryKeySecurely,
+} from "./recoveryKeyState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -430,6 +437,8 @@ export default function App() {
   const [showAccRecoveryKey, setShowAccRecoveryKey] = useState<boolean>(false);
   const [showEditPassword, setShowEditPassword] = useState<boolean>(false);
   const [showEditRecoveryKey, setShowEditRecoveryKey] = useState<boolean>(false);
+  const [showNewMasterPassword, setShowNewMasterPassword] = useState<boolean>(false);
+  const [showConfirmMasterPassword, setShowConfirmMasterPassword] = useState<boolean>(false);
 
   // Change Password state
   const [newMasterPassword, setNewMasterPassword] = useState<string>("");
@@ -438,12 +447,15 @@ export default function App() {
 
   // Emergency Recovery Key state
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [showVaultRecoveryKey, setShowVaultRecoveryKey] = useState<boolean>(false);
   const [copiedRecoveryKey, setCopiedRecoveryKey] = useState<boolean>(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
   const [inputRecoveryKey, setInputRecoveryKey] = useState<string>("");
+  const [showInputRecoveryKey, setShowInputRecoveryKey] = useState<boolean>(false);
 
   // Zoom level state & HUD indicator
   const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const zoomMetrics = useMemo(() => computeZoomMetrics(zoomLevel), [zoomLevel]);
   const zoomLevelRef = useRef<number>(zoomLevel);
   useEffect(() => {
     zoomLevelRef.current = zoomLevel;
@@ -603,6 +615,7 @@ export default function App() {
   const [cardPin, setCardPin] = useState<string>("");
   const [showCardNumber, setShowCardNumber] = useState<boolean>(false);
   const [showCardCvv, setShowCardCvv] = useState<boolean>(false);
+  const [showCardPin, setShowCardPin] = useState<boolean>(false);
   const [revealedCardNumbers, setRevealedCardNumbers] = useState<Record<string, boolean>>({});
   const [revealedCardCvvs, setRevealedCardCvvs] = useState<Record<string, boolean>>({});
   const [revealedCardPins, setRevealedCardPins] = useState<Record<string, boolean>>({});
@@ -730,7 +743,7 @@ export default function App() {
 
   // Zoom management helper with on-screen HUD toast
   const applyZoom = (newLevel: number) => {
-    const clamped = Math.max(0.7, Math.min(2.0, parseFloat(newLevel.toFixed(2))));
+    const clamped = clampZoomLevel(newLevel);
     setZoomLevel(clamped);
     zoomLevelRef.current = clamped;
     const pct = `${Math.round(clamped * 100)}%`;
@@ -775,12 +788,28 @@ export default function App() {
   };
 
   useEffect(() => {
+    setRevealedAccountPasswords({});
+    setRevealedAccountRecoveryKeys({});
+    setRevealedCardNumbers({});
+    setRevealedCardCvvs({});
+    setRevealedCardPins({});
+    setRevealedCardPinValues({});
+
     if (selectedServiceId) {
       fetchServiceAccounts(selectedServiceId);
     } else {
       setServiceAccounts([]);
     }
   }, [selectedServiceId]);
+
+  // Always hide and clear displayed application recovery key when locking or closing settings
+  useEffect(() => {
+    if (!unlocked || !showSettings) {
+      setShowVaultRecoveryKey(false);
+      setRecoveryKey(null);
+      setCopiedRecoveryKey(false);
+    }
+  }, [unlocked, showSettings]);
 
   // Initial startup logic: Check vault existence, sync auto-lock timeout, and attempt auto-unlock
   const initApp = async () => {
@@ -849,9 +878,14 @@ export default function App() {
     setAutoUnlockPassword("");
     setShowAutoUnlockPassword(false);
     setRecoveryKey(null);
+    setShowVaultRecoveryKey(false);
+    setCopiedRecoveryKey(false);
     setInputRecoveryKey("");
+    setShowInputRecoveryKey(false);
     setNewMasterPassword("");
     setConfirmMasterPassword("");
+    setShowNewMasterPassword(false);
+    setShowConfirmMasterPassword(false);
     setAccPassword("");
     setAccRecoveryKey("");
     setAccNotes("");
@@ -886,6 +920,7 @@ export default function App() {
     setShowEditRecoveryKey(false);
     setShowCardNumber(false);
     setShowCardCvv(false);
+    setShowCardPin(false);
     setShowAddService(false);
     setShowEditService(false);
     setShowAddAccount(false);
@@ -906,7 +941,7 @@ export default function App() {
     const unlistenPromise = listen("vault-auto-locked", () => {
       purgeAllSensitiveState();
       invoke("trim_app_memory").catch(() => {});
-      setError("تم إقفال كنانة تلقائياً بسبب الخمول لحماية بياناتك.");
+      setWarning("تم إقفال كنانة تلقائياً بسبب الخمول لحماية بياناتك.");
     });
 
     const syncFullscreen = async () => {
@@ -922,6 +957,8 @@ export default function App() {
     const handleBlur = () => {
       setShowSavedPassword(false);
       setSavedPasswordHint(null);
+      setShowVaultRecoveryKey(false);
+      setRecoveryKey(null);
     };
     window.addEventListener("blur", handleBlur);
 
@@ -1578,14 +1615,39 @@ export default function App() {
     }
   };
 
-  // Fetch Emergency Recovery Key
-  const handleFetchRecoveryKey = async () => {
+  // Toggle Reveal/Hide Application Emergency Recovery Key (masked by default)
+  const handleToggleVaultRecoveryKey = async () => {
+    if (showVaultRecoveryKey) {
+      setShowVaultRecoveryKey(false);
+      setRecoveryKey(null);
+      return;
+    }
     try {
-      setError(null);
-      const key = await invoke<string>("get_or_generate_recovery_key");
-      setRecoveryKey(key);
+      setSettingsFeedback(null);
+      const revealed = await revealVaultRecoveryKey(sessionGuardRef.current, invoke);
+      if (revealed) {
+        setRecoveryKey(revealed.value);
+        setShowVaultRecoveryKey(revealed.revealed);
+      }
     } catch (err: any) {
-      setError(err?.toString() || "فشل توليد أو استرجاع مفتاح الطوارئ");
+      setSettingsFeedback({
+        type: "error",
+        message: err?.toString() || "فشل استرجاع مفتاح الطوارئ",
+      });
+    }
+  };
+
+  // Copy Application Recovery Key via backend clipboard without revealing it in UI
+  const handleCopyVaultRecoveryKey = async () => {
+    try {
+      await copyVaultRecoveryKeySecurely(invoke);
+      setCopiedRecoveryKey(true);
+      setTimeout(() => setCopiedRecoveryKey(false), 2000);
+    } catch (err: any) {
+      setSettingsFeedback({
+        type: "error",
+        message: err?.toString() || "فشل نسخ مفتاح الطوارئ",
+      });
     }
   };
 
@@ -1597,9 +1659,10 @@ export default function App() {
       setError(null);
       await unlockWithRecoveryKey(sessionGuardRef.current, invoke, inputRecoveryKey, async () => {
         setInputRecoveryKey("");
+        setShowInputRecoveryKey(false);
         setShowRecoveryModal(false);
         await fetchSummary();
-        setError("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
+        setSuccess("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
       });
     } catch (err: any) {
       setError(err?.toString() || "فشل الاستعادة: مفتاح الطوارئ غير صحيح أو غير مطابق");
@@ -1853,6 +1916,11 @@ export default function App() {
       setAccPassword("");
     }
 
+    setShowCardNumber(false);
+    setShowCardCvv(false);
+    setShowCardPin(false);
+    setShowAccPassword(false);
+    setShowAccRecoveryKey(false);
     setAddAccountError(null);
     setShowAddAccount(true);
   };
@@ -1880,6 +1948,11 @@ export default function App() {
       setEditUrl(acc.url || "");
       setEditNotes(acc.notes || "");
     }
+    setShowCardNumber(false);
+    setShowCardCvv(false);
+    setShowCardPin(false);
+    setShowEditPassword(false);
+    setShowEditRecoveryKey(false);
     setClearRecoveryKey(false);
     setClearCardPin(false);
     setEditAccountError(null);
@@ -2161,38 +2234,32 @@ export default function App() {
             <CardContent className="px-6 sm:px-10 pb-8 pt-2">
               {!exists ? (
                 <form onSubmit={handleCreate} className="space-y-6">
-                  <div className="p-5 rounded-2xl bg-muted/40 border border-border/50 text-base text-muted-foreground leading-relaxed flex items-start gap-3">
+                  <div className="p-5 rounded-2xl bg-muted/40 border border-border/50 text-base text-muted-foreground leading-relaxed flex items-start gap-3 text-start">
                     <ShieldCheck className="w-6 h-6 text-primary shrink-0 mt-0.5" />
                     <span>
-                      لم يتم العثور على خزنة سابقة. قم بإنشاء خزنتك الآن بتعيين كلمة مرور رئيسية أو رمز
-                      PIN قوي:
+                      لم يتم العثور على خزنة سابقة. قم بإنشاء خزنتك الآن بتعيين كلمة مرور رئيسية أو رمز{" "}
+                      <bdi dir="ltr">PIN</bdi> قوي:
                     </span>
                   </div>
 
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-2.5">
-                      كلمة المرور الرئيسية أو رمز PIN:
+                    <label className="block text-base font-bold text-foreground mb-2.5 text-start">
+                      كلمة المرور الرئيسية أو رمز <bdi dir="ltr">PIN</bdi>:
                     </label>
-                    <div className="relative">
-                      <Input
-                        type={showCreatePassword ? "text" : "password"}
-                        placeholder="أدخل كلمة مرور قوية أو رمز PIN"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="h-16 text-xl text-center rounded-2xl tracking-wider font-sans border-2 pl-14"
-                        autoFocus
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setShowCreatePassword(!showCreatePassword)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 text-muted-foreground hover:text-foreground"
-                        title={showCreatePassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
-                      >
-                        {showCreatePassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </Button>
-                    </div>
+                    <SecretInput
+                      buttonSize="lg"
+                      centered
+                      revealed={showCreatePassword}
+                      onToggleReveal={() => setShowCreatePassword(!showCreatePassword)}
+                      revealLabel="إظهار كلمة المرور"
+                      hideLabel="إخفاء كلمة المرور"
+                      filledTrackingClass="tracking-wider"
+                      placeholder="أدخل كلمة مرور قوية أو رمز PIN"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="text-xl rounded-2xl border-2"
+                      autoFocus
+                    />
                   </div>
 
                   <Button
@@ -2210,7 +2277,9 @@ export default function App() {
                       className="text-sm font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Upload className="w-4 h-4 text-primary" />
-                      <span>هل لديك نسخة سابقة من جهاز آخر؟ استيراد الخزنة (.dat)</span>
+                      <span>
+                        هل لديك نسخة سابقة من جهاز آخر؟ استيراد الخزنة (<bdi dir="ltr">.dat</bdi>)
+                      </span>
                     </button>
                   </div>
                 </form>
@@ -2220,26 +2289,20 @@ export default function App() {
                     <label className="block text-base font-bold text-foreground text-center mb-2.5">
                       أدخل رمز الدخول أو كلمة المرور الرئيسية:
                     </label>
-                    <div className="relative">
-                      <Input
-                        type={showUnlockPassword ? "text" : "password"}
-                        placeholder="••••••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="h-16 text-2xl text-center tracking-widest font-sans rounded-2xl border-2 pl-14"
-                        autoFocus
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setShowUnlockPassword(!showUnlockPassword)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 text-muted-foreground hover:text-foreground"
-                        title={showUnlockPassword ? "إخفاء الرمز" : "إظهار الرمز"}
-                      >
-                        {showUnlockPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </Button>
-                    </div>
+                    <SecretInput
+                      buttonSize="lg"
+                      centered
+                      revealed={showUnlockPassword}
+                      onToggleReveal={() => setShowUnlockPassword(!showUnlockPassword)}
+                      revealLabel="إظهار الرمز"
+                      hideLabel="إخفاء الرمز"
+                      filledTrackingClass="tracking-widest"
+                      placeholder="••••••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="text-2xl rounded-2xl border-2"
+                      autoFocus
+                    />
                   </div>
 
                   <div className="space-y-3.5 pt-2">
@@ -2271,7 +2334,7 @@ export default function App() {
                           } catch (e: any) {
                             const errStr = e?.toString() || "";
                             if (errStr.includes("No saved credential")) {
-                              setError("لم يتم العثور على رمز دخول محفوظ في مخزن ويندوز. يرجى إدخال الرمز يدوياً.");
+                              setError("لم يتم العثور على رمز دخول محفوظ في مخزن النظام الآمن. يرجى إدخال الرمز يدوياً.");
                             } else {
                               setError(errStr || "فشل الفتح التلقائي");
                             }
@@ -2301,7 +2364,7 @@ export default function App() {
                       className="text-xs font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Upload className="w-3.5 h-3.5 text-primary" />
-                      <span>استيراد أو تبديل الخزنة من ملف (.dat)</span>
+                      <span>استيراد أو تبديل الخزنة من ملف (<bdi dir="ltr">.dat</bdi>)</span>
                     </button>
                   </div>
                 </form>
@@ -2488,7 +2551,7 @@ export default function App() {
               </div>
 
               {/* Left: Action Buttons (Fullscreen button removed, F11 shortcut works) */}
-              <div className="flex items-center space-x-2 space-x-reverse shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {/* Quick Export Vault */}
                 <Button
                   variant="outline"
@@ -2513,13 +2576,13 @@ export default function App() {
                   <Upload className="w-4 h-4 text-white" />
                 </Button>
 
-                {/* Open Vault Folder in Windows */}
+                {/* Open Vault Folder */}
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={handleOpenVaultFolder}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
-                  title="فتح مسار ملف الخزنة في ويندوز (Explorer)"
+                  title="فتح مجلد الخزنة"
                 >
                   <FolderOpen className="w-4 h-4 text-white" />
                 </Button>
@@ -2530,8 +2593,10 @@ export default function App() {
                   size="icon"
                   onClick={() => {
                     setSettingsFeedback(null);
+                    setShowVaultRecoveryKey(false);
+                    setRecoveryKey(null);
+                    setCopiedRecoveryKey(false);
                     setShowSettings(true);
-                    handleFetchRecoveryKey();
                   }}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
                   title="إعدادات الأمان واستعادة الخزنة"
@@ -2552,10 +2617,14 @@ export default function App() {
             </header>
           )}
 
-          {/* Main Services View: Zoom applied only to content so Header stays pinned and crisp! */}
+          {/* Main Services View: Zoom scales grid tracks, cards, icons, and typography proportionally without CSS zoom bugs */}
           <main
-            style={{ zoom: zoomLevel }}
-            className="flex-1 p-8 sm:p-10 max-w-7xl mx-auto w-full transition-[zoom] duration-150 min-h-[calc(100vh-80px)] select-none"
+            style={{
+              "--vault-zoom": zoomLevel,
+              maxWidth: zoomMetrics.containerMaxWidthCss,
+              padding: `${zoomMetrics.mainPaddingPx}px`,
+            } as React.CSSProperties}
+            className="flex-1 mx-auto w-full min-h-[calc(100vh-80px)] select-none"
           >
             {summary && summary.services.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-28 space-y-5">
@@ -2576,7 +2645,13 @@ export default function App() {
               </div>
             ) : viewMode === "netflix" ? (
               /* Option 1: Netflix Widescreen Cover Grid (Pointer Drag, Selection Checkbox, ContextMenu) */
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-7">
+              <div
+                style={{
+                  gridTemplateColumns: zoomMetrics.gridTemplateColumnsCss,
+                  gap: `${zoomMetrics.gridGapPx}px`,
+                }}
+                className="grid w-full"
+              >
                 {displayedServices.map((service) => (
                   <ContextMenu key={service.id}>
                     <ContextMenuTrigger asChild>
@@ -2584,7 +2659,7 @@ export default function App() {
                         data-service-id={service.id}
                         onPointerDown={(e) => handlePointerDown(e, service.id)}
                         onClick={() => handleCardClick(service.id)}
-                        className={`group cursor-grab active:cursor-grabbing border-2 transition-all duration-200 bg-card rounded-2xl overflow-hidden relative aspect-video flex flex-col justify-end shadow-md ${
+                        className={`kinana-service-card group cursor-grab active:cursor-grabbing border-2 transition-all duration-200 bg-card rounded-2xl overflow-hidden relative aspect-video flex flex-col justify-end shadow-md ${
                           draggedServiceId === service.id
                             ? "opacity-30 scale-95 border-dashed border-primary ring-4 ring-primary/40 shadow-2xl"
                             : selectionMode && selectedServiceIds.includes(service.id)
@@ -2595,7 +2670,7 @@ export default function App() {
                         {/* Pinned Badge (Top Left in RTL) */}
                         {pinnedServiceIds.includes(service.id) && (
                           <div
-                            className="absolute top-3 left-3 z-20 bg-black/70 backdrop-blur-md text-white p-1.5 rounded-xl border border-white/20 shadow-md flex items-center justify-center pointer-events-none"
+                            className="kinana-card-badge-pos kinana-card-pin absolute z-20 bg-black/80 text-white rounded-xl border border-white/20 shadow-md flex items-center justify-center pointer-events-none"
                             title="خدمة مثبتة في البداية"
                           >
                             <Pin className="w-3.5 h-3.5 fill-white text-white rotate-45" />
@@ -2609,7 +2684,7 @@ export default function App() {
                               e.stopPropagation();
                               toggleSelectService(service.id);
                             }}
-                            className="absolute top-3 right-3 z-30 transition-transform active:scale-90"
+                            className="kinana-card-badge-pos kinana-card-select absolute z-30 transition-transform active:scale-90"
                           >
                             <div
                               className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all shadow-lg ${
@@ -2627,7 +2702,7 @@ export default function App() {
                           </div>
                         )}
 
-                        {/* Cover Background: Blurred ambient glow backdrop + object-contain foreground */}
+                        {/* Cover Background: Ambient glow backdrop + object-contain foreground */}
                         {service.icon_data ? (
                           <div className="absolute inset-0 w-full h-full overflow-hidden bg-zinc-950 flex items-center justify-center pointer-events-none select-none">
                             {/* Ambient glow blurred backdrop */}
@@ -2643,7 +2718,7 @@ export default function App() {
                               src={service.icon_data}
                               alt={service.name}
                               draggable={false}
-                              className="relative z-0 w-full h-full object-contain p-3 group-hover:scale-105 transition-transform duration-500 drop-shadow-md pointer-events-none select-none"
+                              className="kinana-card-logo relative z-0 w-full h-full object-contain group-hover:scale-105 transition-transform duration-500 drop-shadow-md pointer-events-none select-none"
                             />
                             {/* Gradient overlay */}
                             <div
@@ -2659,7 +2734,7 @@ export default function App() {
                             )} flex items-center justify-center group-hover:scale-105 transition-transform duration-500 pointer-events-none select-none`}
                           >
                             <div className="absolute inset-0 bg-black/20 pointer-events-none select-none" />
-                            <span className="relative text-7xl font-black text-white/90 font-thamaniah drop-shadow-2xl select-none pointer-events-none">
+                            <span className="kinana-card-monogram relative font-black text-white/90 font-thamaniah drop-shadow-2xl select-none pointer-events-none">
                               {service.name.charAt(0).toUpperCase()}
                             </span>
                             <div
@@ -2672,11 +2747,14 @@ export default function App() {
 
                         {/* Service Title Bar: Always visible if showCardTitles, or revealed on hover */}
                         <div
-                          className={`relative z-10 px-5 py-4 w-full flex items-center transition-opacity duration-300 pointer-events-none select-none ${
+                          className={`kinana-card-titlebar relative z-10 w-full flex items-center min-w-0 transition-opacity duration-300 pointer-events-none select-none ${
                             showCardTitles ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                           }`}
                         >
-                          <h4 className="text-2xl font-black font-thamaniah text-white drop-shadow-lg truncate pointer-events-none select-none">
+                          <h4
+                            dir="auto"
+                            className="kinana-card-title font-black font-thamaniah text-white drop-shadow-lg truncate min-w-0 w-full text-start pointer-events-none select-none"
+                          >
                             {service.name}
                           </h4>
                         </div>
@@ -2735,8 +2813,11 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              /* Option 2: Compact List View with Small Images & Account Count Badge & Action Buttons */
-              <div className="space-y-4 max-w-5xl mx-auto">
+              /* Option 2: Compact List View with Scaled Icons, Labels & Action Buttons */
+              <div
+                style={{ gap: `${zoomMetrics.listRowGapPx}px` }}
+                className="flex flex-col max-w-5xl mx-auto w-full"
+              >
                 {displayedServices.map((service) => (
                   <ContextMenu key={service.id}>
                     <ContextMenuTrigger asChild>
@@ -2744,7 +2825,10 @@ export default function App() {
                         data-service-id={service.id}
                         onPointerDown={(e) => handlePointerDown(e, service.id)}
                         onClick={() => handleCardClick(service.id)}
-                        className={`group cursor-grab active:cursor-grabbing p-5 rounded-2xl border-2 bg-card/90 hover:bg-card transition-all duration-200 hover:shadow-lg flex items-center justify-between gap-6 ${
+                        style={{
+                          padding: `${zoomMetrics.listRowPaddingY}px ${zoomMetrics.listRowPaddingX}px`,
+                        }}
+                        className={`group cursor-grab active:cursor-grabbing rounded-2xl border-2 bg-card hover:bg-muted/20 transition-all duration-200 hover:shadow-lg flex items-center justify-between gap-4 sm:gap-6 ${
                           draggedServiceId === service.id
                             ? "opacity-30 scale-[0.98] border-dashed border-primary ring-4 ring-primary/40 shadow-2xl"
                             : selectionMode && selectedServiceIds.includes(service.id)
@@ -2752,7 +2836,7 @@ export default function App() {
                             : "border-border/70 hover:border-primary/80"
                         }`}
                       >
-                        <div className="flex items-center gap-5 min-w-0 pointer-events-none select-none">
+                        <div className="flex items-center gap-4 sm:gap-5 min-w-0 flex-1 pointer-events-none select-none">
                           {/* Selection Checkbox in List Row */}
                           {selectionMode && (
                             <div
@@ -2780,7 +2864,13 @@ export default function App() {
 
                           <GripVertical className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 pointer-events-none" />
                           {service.icon_data ? (
-                            <div className="w-16 h-16 rounded-xl overflow-hidden p-1.5 bg-zinc-950/80 border border-border/50 shrink-0 shadow-sm group-hover:scale-105 transition-transform flex items-center justify-center pointer-events-none">
+                            <div
+                              style={{
+                                width: `${zoomMetrics.listIconSizePx}px`,
+                                height: `${zoomMetrics.listIconSizePx}px`,
+                              }}
+                              className="rounded-xl overflow-hidden p-1.5 bg-zinc-950/80 border border-border/50 shrink-0 shadow-sm group-hover:scale-105 transition-transform flex items-center justify-center pointer-events-none"
+                            >
                               <img
                                 src={service.icon_data}
                                 alt={service.name}
@@ -2790,17 +2880,26 @@ export default function App() {
                             </div>
                           ) : (
                             <div
-                              className={`w-16 h-16 rounded-xl bg-gradient-to-br ${getServiceGradient(
+                              style={{
+                                width: `${zoomMetrics.listIconSizePx}px`,
+                                height: `${zoomMetrics.listIconSizePx}px`,
+                                fontSize: `${Math.max(1.1, zoomMetrics.listTitleFontRem)}rem`,
+                              }}
+                              className={`rounded-xl bg-gradient-to-br ${getServiceGradient(
                                 service.name
-                              )} flex items-center justify-center text-white text-2xl font-black font-thamaniah shrink-0 shadow-sm group-hover:scale-105 transition-transform pointer-events-none`}
+                              )} flex items-center justify-center text-white font-black font-thamaniah shrink-0 shadow-sm group-hover:scale-105 transition-transform pointer-events-none`}
                             >
                               {service.name.charAt(0).toUpperCase()}
                             </div>
                           )}
 
-                          <div className="truncate pointer-events-none">
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-2xl font-bold font-thamaniah text-foreground group-hover:text-primary transition-colors truncate pointer-events-none">
+                          <div className="min-w-0 flex-1 pointer-events-none">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <h4
+                                dir="auto"
+                                style={{ fontSize: `${zoomMetrics.listTitleFontRem}rem` }}
+                                className="font-bold font-thamaniah text-foreground group-hover:text-primary transition-colors truncate min-w-0 text-start pointer-events-none leading-snug"
+                              >
                                 {service.name}
                               </h4>
                               {pinnedServiceIds.includes(service.id) && (
@@ -2813,7 +2912,10 @@ export default function App() {
                                 </span>
                               )}
                             </div>
-                            <span className="text-sm text-muted-foreground font-medium pointer-events-none">
+                            <span
+                              style={{ fontSize: `${zoomMetrics.listSubtitleFontRem}rem` }}
+                              className="text-muted-foreground font-medium pointer-events-none block truncate text-start"
+                            >
                               انقر لفتح الحسابات وإدارة كلمات المرور
                             </span>
                           </div>
@@ -3092,7 +3194,7 @@ export default function App() {
           disabled={isProcessingBackup}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>تصدير نسخة الخزنة (.dat)</span>
+          <span>تصدير نسخة الخزنة (<bdi dir="ltr">.dat</bdi>)</span>
           <Download className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuItem
@@ -3100,7 +3202,7 @@ export default function App() {
           disabled={isProcessingBackup}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>استيراد نسخة خزنة (.dat)</span>
+          <span>استيراد نسخة خزنة (<bdi dir="ltr">.dat</bdi>)</span>
           <Upload className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuSeparator className="my-1 bg-border/60" />
@@ -3127,12 +3229,12 @@ export default function App() {
         open={Boolean(selectedService)}
         onOpenChange={(open) => !open && setSelectedServiceId(null)}
       >
-        <DialogContent className="max-w-4xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl p-6 sm:p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
           {selectedService && (
-            <div className="space-y-8">
+            <div className="flex flex-col flex-1 min-h-0 space-y-6">
               {/* Service Header Info */}
-              <div className="flex items-center justify-between pb-6 border-b border-border/70">
-                <div className="flex items-center gap-5">
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-border/70 shrink-0 rtl:pl-8 ltr:pr-8">
+                <div className="flex items-center gap-5 min-w-0">
                   {selectedService.icon_data ? (
                     <div className="w-20 h-20 rounded-2xl overflow-hidden p-2 bg-muted/50 border border-border/60 shadow-sm shrink-0">
                       <img
@@ -3150,18 +3252,21 @@ export default function App() {
                       {selectedService.name.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <div>
-                    <h3 className="text-3xl font-black font-thamaniah text-foreground">
+                  <div className="min-w-0 text-start">
+                    <DialogTitle
+                      dir="auto"
+                      className="text-3xl font-black font-thamaniah text-foreground truncate text-start"
+                    >
                       {selectedService.name}
-                    </h3>
-                    <p className="text-sm font-semibold text-muted-foreground mt-1">
+                    </DialogTitle>
+                    <DialogDescription className="text-sm font-semibold text-muted-foreground mt-1 text-start">
                       {serviceAccounts.length} حساب مسجل
-                    </p>
+                    </DialogDescription>
                   </div>
                 </div>
 
                 {/* Service Header Actions */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <Button
                     variant="outline"
                     size="default"
@@ -3207,8 +3312,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Accounts List (Multi-Field with Dedicated One-Click Copy for Every Item) */}
-              <div className="space-y-5 max-h-[60vh] overflow-y-auto px-1">
+              {/* Accounts List (Single scroll container without nested backdrop-blur or CSS blur-3xl layers) */}
+              <div className="space-y-5 flex-1 min-h-0 overflow-y-auto px-1 pb-1">
                 {loadingAccounts ? (
                   <div className="py-12 text-center text-muted-foreground flex items-center justify-center gap-2">
                     <RefreshCw className="w-5 h-5 animate-spin text-primary" />
@@ -3262,9 +3367,15 @@ export default function App() {
                           key={acc.id}
                           className="relative rounded-3xl p-6 sm:p-7 shadow-xl border-2 border-border/80 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white space-y-4"
                         >
-                          {/* Ambient background glows */}
-                          <div className="absolute top-0 right-0 w-80 h-80 bg-primary/20 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-                          <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
+                          {/* Lightweight gradient ambient glows (replaces heavy blur-3xl filters that trigger WebKitGTK tile glitches) */}
+                          <div
+                            aria-hidden="true"
+                            className="absolute inset-0 pointer-events-none"
+                            style={{
+                              background:
+                                "radial-gradient(circle at 88% 12%, rgba(99, 102, 241, 0.22), transparent 46%), radial-gradient(circle at 12% 88%, rgba(79, 70, 229, 0.16), transparent 46%)",
+                            }}
+                          />
 
                           {/* Top Header: Chip, Contactless, Card Label, Network Badge & Actions */}
                           <div className="relative z-10 flex items-center justify-between border-b border-white/10 pb-4">
@@ -3294,7 +3405,7 @@ export default function App() {
                             </div>
 
                             <div className="flex items-center gap-2">
-                              <Badge className="px-3.5 py-1 text-xs font-black tracking-widest bg-white/10 text-white border border-white/20 backdrop-blur-md rounded-xl">
+                              <Badge className="px-3.5 py-1 text-xs font-black tracking-widest bg-white/15 text-white border border-white/20 rounded-xl" dir="ltr">
                                 {brand.badge}
                               </Badge>
                               <Button
@@ -3336,12 +3447,12 @@ export default function App() {
                           </div>
 
                           {/* Card Number Section (Large, spaced 4-4-4-4) */}
-                          <div className="relative z-10 my-4 bg-black/35 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block mb-1">
-                                رقم البطاقة (Card Number)
+                          <div className="relative z-10 my-4 bg-black/45 p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-4">
+                            <div className="flex-1 min-w-0 text-start">
+                              <span className="text-[11px] tracking-normal text-slate-400 font-bold block mb-1">
+                                رقم البطاقة (<bdi dir="ltr">Card Number</bdi>)
                               </span>
-                              <div className="font-mono text-xl sm:text-2xl font-bold tracking-[0.25em] text-white">
+                              <div className="font-mono text-xl sm:text-2xl font-bold tracking-[0.22em] text-white text-start" dir="ltr">
                                 {revealedAccountPasswords[acc.id] && acc.password
                                   ? acc.password.replace(/(.{4})/g, "$1 ").trim()
                                   : "•••• •••• •••• ••••"}
@@ -3386,12 +3497,12 @@ export default function App() {
                           {/* Bottom Info Grid: Cardholder, Expiry, CVV, PIN */}
                           <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                             {/* Cardholder */}
-                            <div className="bg-black/25 p-3 rounded-xl border border-white/10 flex items-center justify-between">
-                              <div className="min-w-0 pr-1 flex-1">
-                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
+                              <div className="min-w-0 pe-1 flex-1 text-start">
+                                <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
                                   حامل البطاقة
                                 </span>
-                                <span className="font-sans font-bold text-white tracking-wide block truncate uppercase">
+                                <span dir="auto" className="font-sans font-bold text-white tracking-normal block truncate uppercase">
                                   {acc.username || "—"}
                                 </span>
                               </div>
@@ -3413,12 +3524,12 @@ export default function App() {
                             </div>
 
                             {/* Expiry Date */}
-                            <div className="bg-black/25 p-3 rounded-xl border border-white/10 flex items-center justify-between">
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
+                              <div className="text-start">
+                                <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
                                   تنتهي في
                                 </span>
-                                <span className="font-mono font-bold text-white block">
+                                <span dir="ltr" className="font-mono font-bold text-white block">
                                   {acc.url || "MM/YY"}
                                 </span>
                               </div>
@@ -3436,12 +3547,12 @@ export default function App() {
                             </div>
 
                             {/* CVV */}
-                            <div className="bg-black/25 p-3 rounded-xl border border-white/10 flex items-center justify-between">
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">
-                                  رمز الأمان CVV
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
+                              <div className="text-start">
+                                <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
+                                  رمز الأمان <bdi dir="ltr">CVV</bdi>
                                 </span>
-                                <span className="font-mono font-bold text-amber-300 block">
+                                <span dir="ltr" className="font-mono font-bold text-amber-300 block">
                                   {isCvvRevealed ? (acc.recovery_key || "•••") : (acc.has_recovery_key ? "•••" : "—")}
                                 </span>
                               </div>
@@ -3471,12 +3582,12 @@ export default function App() {
 
                             {/* PIN */}
                             {acc.has_pin ? (
-                              <div className="bg-black/25 p-3 rounded-xl border border-white/10 flex items-center justify-between">
-                                <div>
-                                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">
-                                    الرمز السري PIN
+                              <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
+                                <div className="text-start">
+                                  <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
+                                    الرمز السري <bdi dir="ltr">PIN</bdi>
                                   </span>
-                                  <span className="font-mono font-bold text-emerald-400 block">
+                                  <span dir="ltr" className="font-mono font-bold text-emerald-400 block">
                                     {isPinRevealed ? (revealedCardPinValues[acc.id] || "••••") : "••••"}
                                   </span>
                                 </div>
@@ -3502,12 +3613,12 @@ export default function App() {
                                 </div>
                               </div>
                             ) : (
-                              <div className="bg-black/25 p-3 rounded-xl border border-white/10">
-                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block mb-0.5">
+                              <div className="bg-black/30 p-3 rounded-xl border border-white/10 text-start">
+                                <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
                                   حالة الحماية
                                 </span>
                                 <span className="font-sans font-bold text-emerald-400 text-xs block">
-                                  ✓ مشفرة ومؤمنة
+                                  مشفرة ومؤمنة
                                 </span>
                               </div>
                             )}
@@ -3516,7 +3627,7 @@ export default function App() {
                           {/* Extra Notes */}
                           {cleanNotes && (
                             <div className="relative z-10 pt-3 border-t border-white/10 text-xs text-slate-300 flex items-center justify-between">
-                              <span className="truncate pr-1"><strong className="text-slate-400">ملاحظات:</strong> {cleanNotes}</span>
+                              <span dir="auto" className="truncate pe-2 text-start"><strong className="text-slate-400">ملاحظات:</strong> {cleanNotes}</span>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -3534,7 +3645,7 @@ export default function App() {
                     return (
                     <div
                       key={acc.id}
-                      className="p-6 rounded-2xl border-2 border-border/70 bg-card/90 shadow-sm space-y-4 hover:border-primary/50 transition-colors"
+                      className="p-6 rounded-2xl border-2 border-border/70 bg-card shadow-sm space-y-4 hover:border-primary/50 transition-colors"
                     >
                       {/* Account Card Header */}
                       <div className="flex items-center justify-between border-b border-border/40 pb-3">
@@ -3775,14 +3886,15 @@ export default function App() {
                         {/* URL */}
                         {acc.url && (
                           <div className="flex items-center justify-between bg-muted/40 p-3.5 rounded-xl border border-border/50 md:col-span-2">
-                            <div className="min-w-0 pr-1 flex-1">
+                            <div className="min-w-0 pe-2 flex-1 text-start">
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
-                                رابط تسجيل الدخول (URL)
+                                رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi>)
                               </span>
                               <button
                                 type="button"
+                                dir="ltr"
                                 onClick={() => handleOpenUrl(acc.url)}
-                                className="text-primary hover:underline text-sm font-semibold truncate block text-right cursor-pointer bg-transparent border-0 p-0"
+                                className="text-primary hover:underline text-sm font-semibold truncate block max-w-full text-start cursor-pointer bg-transparent border-0 p-0"
                                 title="فتح الرابط في المتصفح الافتراضي"
                               >
                                 {acc.url}
@@ -3824,11 +3936,14 @@ export default function App() {
                         {/* Notes */}
                         {acc.notes && (
                           <div className="bg-muted/40 p-3.5 rounded-xl border border-border/50 md:col-span-2 flex items-start justify-between gap-3">
-                            <div className="min-w-0 pr-1 flex-1">
+                            <div className="min-w-0 pe-2 flex-1 text-start">
                               <span className="text-xs font-bold text-muted-foreground block mb-1">
                                 ملاحظات
                               </span>
-                              <p className="text-sm font-medium text-foreground/90 whitespace-pre-wrap leading-relaxed select-all">
+                              <p
+                                dir="auto"
+                                className="text-sm font-medium text-foreground/90 whitespace-pre-wrap leading-relaxed select-all text-start [overflow-wrap:anywhere]"
+                              >
                                 {acc.notes}
                               </p>
                             </div>
@@ -4138,11 +4253,11 @@ export default function App() {
                 type="button"
                 variant="outline"
                 onClick={() => setShowAddService(false)}
-                className="h-13 px-6 rounded-xl text-base font-bold"
+                className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
-              <Button type="submit" className="h-13 px-8 rounded-xl text-base font-bold shadow-lg">
+              <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
                 حفظ الخدمة
               </Button>
             </div>
@@ -4423,11 +4538,11 @@ export default function App() {
                 type="button"
                 variant="outline"
                 onClick={() => setShowEditService(false)}
-                className="h-13 px-6 rounded-xl text-base font-bold"
+                className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
-              <Button type="submit" className="h-13 px-8 rounded-xl text-base font-bold shadow-lg">
+              <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
                 حفظ التعديلات
               </Button>
             </div>
@@ -4436,14 +4551,26 @@ export default function App() {
       </Dialog>
 
       {/* ================= MODAL: ADD ACCOUNT (MULTI-FIELD ALL OPTIONAL) ================= */}
-      <Dialog open={showAddAccount} onOpenChange={setShowAddAccount}>
+      <Dialog
+        open={showAddAccount}
+        onOpenChange={(open) => {
+          setShowAddAccount(open);
+          if (!open) {
+            setShowCardNumber(false);
+            setShowCardCvv(false);
+            setShowCardPin(false);
+            setShowAccPassword(false);
+            setShowAccRecoveryKey(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
-              <Plus className="w-7 h-7 text-primary" />
+            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
+              <Plus className="w-7 h-7 text-primary shrink-0" />
               <span>{accountFormMode === "card" ? `إضافة بطاقة جديدة إلى ${selectedService?.name}` : `إضافة حساب جديد إلى ${selectedService?.name}`}</span>
             </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground pt-1">
+            <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
               {accountFormMode === "card"
                 ? "قالب بطاقات بنكية مخصص: املأ بيانات البطاقة لتشفيرها وحفظها بأمان فائق."
                 : "جميع الخانات اختيارية ويمكنك ملء البيانات التي ترغب بحفظها."}
@@ -4516,20 +4643,20 @@ export default function App() {
                     </Badge>
                   </div>
 
-                  <div className="my-4 font-mono text-lg sm:text-xl font-bold tracking-[0.2em] text-center text-white/90 select-none">
+                  <div className="my-4 font-mono text-lg sm:text-xl font-bold tracking-[0.2em] text-center text-white/90 select-none" dir="ltr">
                     {cardNumber ? cardNumber : "•••• •••• •••• ••••"}
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-slate-300 pt-2 border-t border-white/10">
-                    <div>
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">حامل البطاقة</span>
-                      <span className="font-bold tracking-wide uppercase text-white truncate max-w-[160px] block">
+                    <div className="text-start">
+                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">حامل البطاقة</span>
+                      <span dir="auto" className="font-bold tracking-normal uppercase text-white truncate max-w-[160px] block">
                         {cardHolder || "CARDHOLDER NAME"}
                       </span>
                     </div>
-                    <div className="text-left">
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">تنتهي في</span>
-                      <span className="font-mono font-bold text-white block">
+                    <div className="text-end">
+                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">تنتهي في</span>
+                      <span dir="ltr" className="font-mono font-bold text-white block">
                         {cardExpiry || "MM/YY"}
                       </span>
                     </div>
@@ -4538,26 +4665,26 @@ export default function App() {
 
                 {/* Dedicated Bank Card Form Fields */}
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     تسمية البطاقة (اختياري)
                   </label>
                   <Input
                     placeholder="مثال: بطاقة الراتب، فيزا المشتريات، بطاقة السفر..."
                     value={accLabel}
                     onChange={(e) => setAccLabel(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    اسم حامل البطاقة (Cardholder Name)
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
                   </label>
                   <Input
                     placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية (e.g. MOHAMMED AL-OTAIBI)"
                     value={cardHolder}
                     onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
                   />
                 </div>
 
@@ -4566,39 +4693,33 @@ export default function App() {
                     <label className="text-base font-bold text-foreground">
                       رقم البطاقة (16 رقماً) *
                     </label>
-                    <span className="text-xs font-bold text-primary">
+                    <span className="text-xs font-bold text-primary" dir="ltr">
                       {detectCardBrand(cardNumber, selectedService?.name).badge}
                     </span>
                   </div>
-                  <div className="relative">
-                    <Input
-                      type={showCardNumber ? "text" : "password"}
-                      placeholder="0000 0000 0000 0000"
-                      value={cardNumber}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
-                        const formatted = raw.replace(/(\d{4})(?=\d)/g, "$1 ");
-                        setCardNumber(formatted);
-                      }}
-                      className="h-13 text-lg px-4 font-mono font-bold rounded-xl border-2 tracking-widest pl-12"
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowCardNumber(!showCardNumber)}
-                      className="absolute left-2 top-2.5 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                    >
-                      {showCardNumber ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
+                  <SecretInput
+                    revealed={showCardNumber}
+                    onToggleReveal={() => setShowCardNumber(!showCardNumber)}
+                    revealLabel="إظهار رقم البطاقة"
+                    hideLabel="إخفاء رقم البطاقة"
+                    codeStyleWhenFilled
+                    filledTrackingClass="tracking-widest"
+                    placeholder="0000 0000 0000 0000"
+                    value={cardNumber}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
+                      const formatted = raw.replace(/(\d{4})(?=\d)/g, "$1 ");
+                      setCardNumber(formatted);
+                    }}
+                    className="text-lg font-bold rounded-xl border-2"
+                    required
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5">
-                      تاريخ الانتهاء (MM/YY)
+                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                      تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
                     </label>
                     <Input
                       placeholder="08/29"
@@ -4608,100 +4729,101 @@ export default function App() {
                         const formatted = raw.length >= 3 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
                         setCardExpiry(formatted);
                       }}
-                      className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
+                      className="h-12 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
                     />
                   </div>
 
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
                       <label className="text-base font-bold text-foreground">
-                        رمز الأمان (CVV / CVC)
+                        رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
                       </label>
                       <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
                     </div>
-                    <div className="relative">
-                      <Input
-                        type={showCardCvv ? "text" : "password"}
-                        placeholder="123"
-                        value={cardCvv}
-                        onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest pl-12"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowCardCvv(!showCardCvv)}
-                        className="absolute left-2 top-2.5 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                      >
-                        {showCardCvv ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </Button>
-                    </div>
+                    <SecretInput
+                      revealed={showCardCvv}
+                      onToggleReveal={() => setShowCardCvv(!showCardCvv)}
+                      revealLabel="إظهار رمز الأمان"
+                      hideLabel="إخفاء رمز الأمان"
+                      centered
+                      codeStyleWhenFilled
+                      filledTrackingClass="tracking-widest"
+                      placeholder="123"
+                      value={cardCvv}
+                      onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      className="text-base font-bold rounded-xl border-2"
+                    />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    الرمز السري للبطاقة (PIN - اختياري)
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi> - اختياري)
                   </label>
-                  <Input
-                    type="password"
+                  <SecretInput
+                    revealed={showCardPin}
+                    onToggleReveal={() => setShowCardPin(!showCardPin)}
+                    revealLabel="إظهار الرمز السري"
+                    hideLabel="إخفاء الرمز السري"
+                    centered
+                    codeStyleWhenFilled
+                    filledTrackingClass="tracking-widest"
                     placeholder="رمز الصراف المكون من 4 أرقام"
                     value={cardPin}
                     onChange={(e) => setCardPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest"
+                    className="text-base font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     ملاحظات إضافية (اختياري)
                   </label>
                   <Input
                     placeholder="ملاحظات أو تعليمات خاصة بالبطاقة..."
                     value={accNotes}
                     onChange={(e) => setAccNotes(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     تسمية الحساب (اختياري)
                   </label>
                   <Input
                     placeholder="مثال: الحساب الشخصي، العمل، حساب الألعاب..."
                     value={accLabel}
                     onChange={(e) => setAccLabel(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5">
-                      اسم المستخدم (Username اختياري)
+                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                      اسم المستخدم (<bdi dir="ltr">Username</bdi> اختياري)
                     </label>
                     <Input
                       placeholder="اسم المستخدم في الخدمة"
                       value={accUsername}
                       onChange={(e) => setAccUsername(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5">
-                      البريد الإلكتروني (Email اختياري)
+                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                      البريد الإلكتروني (<bdi dir="ltr">Email</bdi> اختياري)
                     </label>
                     <Input
                       type="email"
                       placeholder="user@example.com"
                       value={accEmail}
                       onChange={(e) => setAccEmail(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                     />
                   </div>
                 </div>
@@ -4720,73 +4842,55 @@ export default function App() {
                       <span>توليد كلمة مرور قوية</span>
                     </Button>
                   </div>
-                  <div className="relative">
-                    <Input
-                      type={showAccPassword ? "text" : "password"}
-                      placeholder="كلمة المرور المشفرة"
-                      value={accPassword}
-                      onChange={(e) => setAccPassword(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowAccPassword(!showAccPassword)}
-                      className="absolute left-2 top-2.5 h-8 w-8 text-muted-foreground hover:text-foreground"
-                      title={showAccPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
-                    >
-                      {showAccPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
+                  <SecretInput
+                    revealed={showAccPassword}
+                    onToggleReveal={() => setShowAccPassword(!showAccPassword)}
+                    revealLabel="إظهار كلمة المرور"
+                    hideLabel="إخفاء كلمة المرور"
+                    placeholder="كلمة المرور المشفرة"
+                    value={accPassword}
+                    onChange={(e) => setAccPassword(e.target.value)}
+                    className="text-base font-bold rounded-xl border-2"
+                  />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    مفتاح استرداد الحساب (Recovery Key اختياري)
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi> اختياري)
                   </label>
-                  <div className="relative">
-                    <Input
-                      type={showAccRecoveryKey ? "text" : "password"}
-                      placeholder="مفتاح استرجاع الحساب الذي يقدمه الموقع للطوارئ"
-                      value={accRecoveryKey}
-                      onChange={(e) => setAccRecoveryKey(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowAccRecoveryKey(!showAccRecoveryKey)}
-                      className="absolute left-2 top-2.5 h-8 w-8 text-muted-foreground hover:text-foreground"
-                      title={showAccRecoveryKey ? "إخفاء مفتاح الاسترداد" : "إظهار مفتاح الاسترداد"}
-                    >
-                      {showAccRecoveryKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
+                  <SecretInput
+                    revealed={showAccRecoveryKey}
+                    onToggleReveal={() => setShowAccRecoveryKey(!showAccRecoveryKey)}
+                    revealLabel="إظهار مفتاح الاسترداد"
+                    hideLabel="إخفاء مفتاح الاسترداد"
+                    placeholder="مفتاح استرجاع الحساب الذي يقدمه الموقع للطوارئ"
+                    value={accRecoveryKey}
+                    onChange={(e) => setAccRecoveryKey(e.target.value)}
+                    className="text-base font-bold rounded-xl border-2"
+                  />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    رابط تسجيل الدخول (URL اختياري)
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi> اختياري)
                   </label>
                   <Input
                     placeholder="https://example.com/login"
                     value={accUrl}
                     onChange={(e) => setAccUrl(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     ملاحظات إضافية (اختياري)
                   </label>
                   <Input
                     placeholder="ملاحظات سرية إضافية..."
                     value={accNotes}
                     onChange={(e) => setAccNotes(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
               </div>
@@ -4797,11 +4901,11 @@ export default function App() {
                 type="button"
                 variant="outline"
                 onClick={() => setShowAddAccount(false)}
-                className="h-13 px-6 rounded-xl text-base font-bold"
+                className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
-              <Button type="submit" className="h-13 px-8 rounded-xl text-base font-bold shadow-lg">
+              <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
                 حفظ الحساب
               </Button>
             </div>
@@ -4812,15 +4916,24 @@ export default function App() {
       {/* ================= MODAL: EDIT ACCOUNT ================= */}
       <Dialog
         open={Boolean(editingAccount)}
-        onOpenChange={(open) => !open && setEditingAccount(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingAccount(null);
+            setShowCardNumber(false);
+            setShowCardCvv(false);
+            setShowCardPin(false);
+            setShowEditPassword(false);
+            setShowEditRecoveryKey(false);
+          }
+        }}
       >
         <DialogContent className="max-w-2xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
-              <Pencil className="w-7 h-7 text-primary" />
+            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
+              <Pencil className="w-7 h-7 text-primary shrink-0" />
               <span>{accountFormMode === "card" ? "تعديل بيانات البطاقة" : "تعديل الحساب"}</span>
             </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground pt-1">
+            <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
               {accountFormMode === "card"
                 ? "تعديل بيانات البطاقة البنكية المشفرة."
                 : "تعديل بيانات حساب تسجيل الدخول."}
@@ -4893,20 +5006,20 @@ export default function App() {
                     </Badge>
                   </div>
 
-                  <div className="my-4 font-mono text-lg sm:text-xl font-bold tracking-[0.2em] text-center text-white/90 select-none">
+                  <div className="my-4 font-mono text-lg sm:text-xl font-bold tracking-[0.2em] text-center text-white/90 select-none" dir="ltr">
                     {cardNumber ? cardNumber : "•••• •••• •••• ••••"}
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-slate-300 pt-2 border-t border-white/10">
-                    <div>
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">حامل البطاقة</span>
-                      <span className="font-bold tracking-wide uppercase text-white truncate max-w-[160px] block">
+                    <div className="text-start">
+                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">حامل البطاقة</span>
+                      <span dir="auto" className="font-bold tracking-normal uppercase text-white truncate max-w-[160px] block">
                         {cardHolder || "CARDHOLDER NAME"}
                       </span>
                     </div>
-                    <div className="text-left">
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">تنتهي في</span>
-                      <span className="font-mono font-bold text-white block">
+                    <div className="text-end">
+                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">تنتهي في</span>
+                      <span dir="ltr" className="font-mono font-bold text-white block">
                         {cardExpiry || "MM/YY"}
                       </span>
                     </div>
@@ -4915,26 +5028,26 @@ export default function App() {
 
                 {/* Dedicated Bank Card Form Fields */}
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     تسمية البطاقة (اختياري)
                   </label>
                   <Input
                     placeholder="مثال: بطاقة الراتب، فيزا المشتريات، بطاقة السفر..."
                     value={editLabel}
                     onChange={(e) => setEditLabel(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
-                    اسم حامل البطاقة (Cardholder Name)
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
                   </label>
                   <Input
                     placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية"
                     value={cardHolder}
                     onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
                   />
                 </div>
 
@@ -4943,38 +5056,32 @@ export default function App() {
                     <label className="text-base font-bold text-foreground">
                       رقم البطاقة الجديد (16 رقماً - اختياري)
                     </label>
-                    <span className="text-xs font-bold text-primary">
+                    <span className="text-xs font-bold text-primary" dir="ltr">
                       {detectCardBrand(cardNumber, selectedService?.name).badge}
                     </span>
                   </div>
-                  <div className="relative">
-                    <Input
-                      type={showCardNumber ? "text" : "password"}
-                      placeholder="اتركه فارغاً للإبقاء على رقم البطاقة الحالي"
-                      value={cardNumber}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
-                        const formatted = raw.replace(/(\d{4})(?=\d)/g, "$1 ");
-                        setCardNumber(formatted);
-                      }}
-                      className="h-13 text-lg px-4 font-mono font-bold rounded-xl border-2 tracking-widest pl-12"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowCardNumber(!showCardNumber)}
-                      className="absolute left-2 top-2.5 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                    >
-                      {showCardNumber ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
+                  <SecretInput
+                    revealed={showCardNumber}
+                    onToggleReveal={() => setShowCardNumber(!showCardNumber)}
+                    revealLabel="إظهار رقم البطاقة"
+                    hideLabel="إخفاء رقم البطاقة"
+                    codeStyleWhenFilled
+                    filledTrackingClass="tracking-widest"
+                    placeholder="اتركه فارغاً للإبقاء على رقم البطاقة الحالي"
+                    value={cardNumber}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
+                      const formatted = raw.replace(/(\d{4})(?=\d)/g, "$1 ");
+                      setCardNumber(formatted);
+                    }}
+                    className="text-lg font-bold rounded-xl border-2"
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5">
-                      تاريخ الانتهاء (MM/YY)
+                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                      تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
                     </label>
                     <Input
                       placeholder="08/29"
@@ -4984,14 +5091,14 @@ export default function App() {
                         const formatted = raw.length >= 3 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
                         setCardExpiry(formatted);
                       }}
-                      className="h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
+                      className="h-12 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
                     />
                   </div>
 
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
                       <label className="text-base font-bold text-foreground">
-                        رمز الأمان (CVV / CVC)
+                        رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
                       </label>
                       <div className="flex items-center gap-2">
                         {editingAccount?.has_recovery_key && (
@@ -5012,40 +5119,34 @@ export default function App() {
                               }}
                               className="text-xs text-rose-400 hover:text-rose-300 font-bold"
                             >
-                              إزالة CVV
+                              إزالة <bdi dir="ltr">CVV</bdi>
                             </button>
                           )
                         )}
                         <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
                       </div>
                     </div>
-                    <div className="relative">
-                      <Input
-                        type={showCardCvv ? "text" : "password"}
-                        placeholder={clearRecoveryKey ? "سيتم حذف رمز CVV عند الحفظ" : "اتركه فارغاً للإبقاء على رمز الأمان الحالي"}
-                        disabled={clearRecoveryKey}
-                        value={clearRecoveryKey ? "" : cardCvv}
-                        onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        className={`h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest pl-12 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={clearRecoveryKey}
-                        onClick={() => setShowCardCvv(!showCardCvv)}
-                        className="absolute left-2 top-2.5 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                      >
-                        {showCardCvv ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </Button>
-                    </div>
+                    <SecretInput
+                      revealed={showCardCvv}
+                      onToggleReveal={() => setShowCardCvv(!showCardCvv)}
+                      revealLabel="إظهار رمز الأمان"
+                      hideLabel="إخفاء رمز الأمان"
+                      centered
+                      codeStyleWhenFilled
+                      filledTrackingClass="tracking-widest"
+                      placeholder={clearRecoveryKey ? "سيتم حذف رمز CVV عند الحفظ" : "اتركه فارغاً للإبقاء على رمز الأمان الحالي"}
+                      disabled={clearRecoveryKey}
+                      value={clearRecoveryKey ? "" : cardCvv}
+                      onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      className={`text-base font-bold rounded-xl border-2 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
+                    />
                   </div>
                 </div>
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-base font-bold text-foreground">
-                      الرمز السري للبطاقة (PIN - اختياري)
+                      الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi> - اختياري)
                     </label>
                     {editingAccount?.has_pin && (
                       clearCardPin ? (
@@ -5070,62 +5171,68 @@ export default function App() {
                       )
                     )}
                   </div>
-                  <Input
-                    type="password"
+                  <SecretInput
+                    revealed={showCardPin}
+                    onToggleReveal={() => setShowCardPin(!showCardPin)}
+                    revealLabel="إظهار الرمز السري"
+                    hideLabel="إخفاء الرمز السري"
+                    centered
+                    codeStyleWhenFilled
+                    filledTrackingClass="tracking-widest"
                     placeholder={clearCardPin ? "سيتم حذف الرمز السري عند الحفظ" : "اتركه فارغاً للإبقاء على الرمز السري الحالي"}
                     disabled={clearCardPin}
                     value={clearCardPin ? "" : cardPin}
                     onChange={(e) => setCardPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className={`h-13 text-base px-4 font-mono font-bold rounded-xl border-2 text-center tracking-widest ${clearCardPin ? "opacity-50 line-through bg-destructive/10" : ""}`}
+                    className={`text-base font-bold rounded-xl border-2 ${clearCardPin ? "opacity-50 line-through bg-destructive/10" : ""}`}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     ملاحظات إضافية (اختياري)
                   </label>
                   <Input
                     placeholder="ملاحظات أو تعليمات خاصة بالبطاقة..."
                     value={editNotes}
                     onChange={(e) => setEditNotes(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                     تسمية الحساب
                   </label>
                   <Input
                     value={editLabel}
                     onChange={(e) => setEditLabel(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5">
+                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                       اسم المستخدم
                     </label>
                     <Input
                       value={editUsername}
                       onChange={(e) => setEditUsername(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5">
+                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
                       البريد الإلكتروني
                     </label>
                     <Input
                       type="email"
                       value={editEmail}
                       onChange={(e) => setEditEmail(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                     />
                   </div>
                 </div>
@@ -5146,31 +5253,22 @@ export default function App() {
                       <span>توليد كلمة جديدة</span>
                     </Button>
                   </div>
-                  <div className="relative">
-                    <Input
-                      type={showEditPassword ? "text" : "password"}
-                      placeholder="اتركه فارغاً للإبقاء على كلمة المرور الحالية"
-                      value={editPassword}
-                      onChange={(e) => setEditPassword(e.target.value)}
-                      className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowEditPassword(!showEditPassword)}
-                      className="absolute left-2 top-2.5 h-8 w-8 text-muted-foreground hover:text-foreground"
-                      title={showEditPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
-                    >
-                      {showEditPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
+                  <SecretInput
+                    revealed={showEditPassword}
+                    onToggleReveal={() => setShowEditPassword(!showEditPassword)}
+                    revealLabel="إظهار كلمة المرور"
+                    hideLabel="إخفاء كلمة المرور"
+                    placeholder="اتركه فارغاً للإبقاء على كلمة المرور الحالية"
+                    value={editPassword}
+                    onChange={(e) => setEditPassword(e.target.value)}
+                    className="text-base font-bold rounded-xl border-2"
+                  />
                 </div>
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-base font-bold text-foreground">
-                      مفتاح استرداد الحساب (Recovery Key)
+                      مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi>)
                     </label>
                     {editingAccount?.has_recovery_key && (
                       clearRecoveryKey ? (
@@ -5195,45 +5293,35 @@ export default function App() {
                       )
                     )}
                   </div>
-                  <div className="relative">
-                    <Input
-                      type={showEditRecoveryKey ? "text" : "password"}
-                      placeholder={clearRecoveryKey ? "سيتم حذف مفتاح الاسترداد عند الحفظ" : "اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"}
-                      disabled={clearRecoveryKey}
-                      value={clearRecoveryKey ? "" : editRecoveryKey}
-                      onChange={(e) => setEditRecoveryKey(e.target.value)}
-                      className={`h-13 text-base px-4 font-sans font-bold rounded-xl border-2 pl-12 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={clearRecoveryKey}
-                      onClick={() => setShowEditRecoveryKey(!showEditRecoveryKey)}
-                      className="absolute left-2 top-2.5 h-8 w-8 text-muted-foreground hover:text-foreground"
-                      title={showEditRecoveryKey ? "إخفاء مفتاح الاسترداد" : "إظهار مفتاح الاسترداد"}
-                    >
-                      {showEditRecoveryKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">الرابط</label>
-                  <Input
-                    placeholder="https://..."
-                    value={editUrl}
-                    onChange={(e) => setEditUrl(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                  <SecretInput
+                    revealed={showEditRecoveryKey}
+                    onToggleReveal={() => setShowEditRecoveryKey(!showEditRecoveryKey)}
+                    revealLabel="إظهار مفتاح الاسترداد"
+                    hideLabel="إخفاء مفتاح الاسترداد"
+                    placeholder={clearRecoveryKey ? "سيتم حذف مفتاح الاسترداد عند الحفظ" : "اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"}
+                    disabled={clearRecoveryKey}
+                    value={clearRecoveryKey ? "" : editRecoveryKey}
+                    onChange={(e) => setEditRecoveryKey(e.target.value)}
+                    className={`text-base font-bold rounded-xl border-2 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5">الملاحظات</label>
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">الرابط</label>
+                  <Input
+                    placeholder="https://..."
+                    value={editUrl}
+                    onChange={(e) => setEditUrl(e.target.value)}
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">الملاحظات</label>
                   <Input
                     value={editNotes}
                     onChange={(e) => setEditNotes(e.target.value)}
-                    className="h-13 text-base px-4 font-sans font-bold rounded-xl border-2"
+                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
               </div>
@@ -5243,12 +5331,19 @@ export default function App() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setEditingAccount(null)}
-                className="h-13 px-6 rounded-xl text-base font-bold"
+                onClick={() => {
+                  setEditingAccount(null);
+                  setShowCardNumber(false);
+                  setShowCardCvv(false);
+                  setShowCardPin(false);
+                  setShowEditPassword(false);
+                  setShowEditRecoveryKey(false);
+                }}
+                className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
-              <Button type="submit" className="h-13 px-8 rounded-xl text-base font-bold shadow-lg">
+              <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
                 حفظ التعديلات
               </Button>
             </div>
@@ -5271,7 +5366,7 @@ export default function App() {
             <Trash2 className="w-8 h-8" />
           </div>
 
-          <DialogHeader className="text-center space-y-2">
+          <DialogHeader className="text-center pe-0 space-y-2">
             <DialogTitle className="text-2xl font-black font-thamaniah text-foreground text-center">
               {serviceToDelete ? "تأكيد حذف الخدمة" : "تأكيد حذف الحساب"}
             </DialogTitle>
@@ -5334,13 +5429,20 @@ export default function App() {
           if (!open) {
             setShowSavedPassword(false);
             setSavedPasswordHint(null);
+            setShowVaultRecoveryKey(false);
+            setRecoveryKey(null);
+            setCopiedRecoveryKey(false);
+            setShowNewMasterPassword(false);
+            setShowConfirmMasterPassword(false);
+            setNewMasterPassword("");
+            setConfirmMasterPassword("");
           }
         }}
       >
         <DialogContent className="max-w-3xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
-              <Settings className="w-8 h-8 text-white" />
+            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
+              <Settings className="w-8 h-8 text-white shrink-0" />
               <span>إعدادات الأمان واستعادة الخزنة</span>
             </DialogTitle>
             <DialogDescription className="sr-only">
@@ -5561,12 +5663,12 @@ export default function App() {
                   </Button>
                 </div>
                 {autoLockTimeout !== null && (
-                  <span className="text-xs font-semibold text-emerald-400 mr-auto">
+                  <span className="text-xs font-semibold text-emerald-400 ms-auto">
                     الحالي: {Math.round(autoLockTimeout / 60)} دقيقة
                   </span>
                 )}
                 {autoLockTimeout === null && (
-                  <span className="text-xs font-semibold text-amber-300 mr-auto">
+                  <span className="text-xs font-semibold text-amber-300 ms-auto">
                     الحالي: معطل بالكامل (أبداً)
                   </span>
                 )}
@@ -5583,28 +5685,34 @@ export default function App() {
               <form onSubmit={handleChangeMasterPassword} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-bold text-foreground mb-1.5">
+                    <label className="block text-sm font-bold text-foreground mb-1.5 text-start">
                       الرمز أو كلمة المرور الجديدة:
                     </label>
-                    <Input
-                      type="password"
+                    <SecretInput
+                      revealed={showNewMasterPassword}
+                      onToggleReveal={() => setShowNewMasterPassword((prev) => !prev)}
+                      revealLabel="إظهار الرمز الجديد"
+                      hideLabel="إخفاء الرمز الجديد"
                       placeholder="أدخل الرمز الجديد"
                       value={newMasterPassword}
                       onChange={(e) => setNewMasterPassword(e.target.value)}
-                      className="h-12 text-base font-sans font-bold rounded-xl border-2"
+                      className="text-base font-bold rounded-xl border-2"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-foreground mb-1.5">
+                    <label className="block text-sm font-bold text-foreground mb-1.5 text-start">
                       تأكيد الرمز الجديد:
                     </label>
-                    <Input
-                      type="password"
+                    <SecretInput
+                      revealed={showConfirmMasterPassword}
+                      onToggleReveal={() => setShowConfirmMasterPassword((prev) => !prev)}
+                      revealLabel="إظهار تأكيد الرمز"
+                      hideLabel="إخفاء تأكيد الرمز"
                       placeholder="أعد إدخال الرمز للتأكيد"
                       value={confirmMasterPassword}
                       onChange={(e) => setConfirmMasterPassword(e.target.value)}
-                      className="h-12 text-base font-sans font-bold rounded-xl border-2"
+                      className="text-base font-bold rounded-xl border-2"
                       required
                     />
                   </div>
@@ -5624,31 +5732,52 @@ export default function App() {
 
             {/* Section 3: Emergency Recovery Key */}
             <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
-              <div className="flex items-center gap-3">
-                <KeyRound className="w-6 h-6 text-white" />
-                <div>
+              <div className="flex items-start gap-3">
+                <KeyRound className="w-6 h-6 text-white shrink-0 mt-0.5" />
+                <div className="min-w-0 text-start">
                   <h4 className="text-lg font-bold text-foreground">
-                    مفتاح استرداد الطوارئ (Emergency Recovery Key)
+                    مفتاح استرداد الطوارئ (<bdi dir="ltr">Emergency Recovery Key</bdi>)
                   </h4>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    احفظ هذا المفتاح في مكان آمن. يتيح لك استعادة كامل الخزنة في حال نسيت رمز الدخول!
+                  <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
+                    احفظ هذا المفتاح في مكان آمن. يتيح لك استعادة كامل الخزنة في حال نسيت رمز الدخول. يبقى مخفيًا افتراضيًا ويمكنك إظهاره أو نسخه بأمان.
                   </p>
                 </div>
               </div>
 
-              {recoveryKey ? (
-                <div className="flex items-center gap-4 bg-background p-4 rounded-2xl border-2 border-primary/40 shadow-inner">
-                  <div className="flex-1 font-sans text-xl font-bold tracking-widest text-primary text-center select-all">
-                    {recoveryKey}
-                  </div>
+              <div className="flex flex-wrap items-center gap-3 bg-background p-3.5 sm:p-4 rounded-2xl border-2 border-primary/40 shadow-inner">
+                <div
+                  dir="ltr"
+                  className={`flex-1 min-w-[200px] font-mono text-lg sm:text-xl font-bold tracking-widest text-center break-all ${
+                    showVaultRecoveryKey && recoveryKey
+                      ? "text-primary select-all"
+                      : "text-muted-foreground select-none"
+                  }`}
+                >
+                  {getVisibleRecoveryKeyText({
+                    value: recoveryKey,
+                    revealed: showVaultRecoveryKey,
+                  })}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleToggleVaultRecoveryKey}
+                    aria-label={showVaultRecoveryKey ? "إخفاء مفتاح الطوارئ" : "إظهار مفتاح الطوارئ"}
+                    aria-pressed={showVaultRecoveryKey}
+                    title={showVaultRecoveryKey ? "إخفاء مفتاح الطوارئ" : "إظهار مفتاح الطوارئ"}
+                    className="h-11 w-11 p-0 rounded-xl shrink-0"
+                  >
+                    {showVaultRecoveryKey ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </Button>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => {
-                      invoke("copy_secure_text", { text: recoveryKey }).catch(() => navigator.clipboard.writeText(recoveryKey));
-                      setCopiedRecoveryKey(true);
-                      setTimeout(() => setCopiedRecoveryKey(false), 2000);
-                    }}
+                    onClick={handleCopyVaultRecoveryKey}
                     className="h-11 px-5 rounded-xl font-bold gap-2 shrink-0"
                   >
                     {copiedRecoveryKey ? (
@@ -5664,17 +5793,7 @@ export default function App() {
                     )}
                   </Button>
                 </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleFetchRecoveryKey}
-                  className="rounded-xl font-bold h-11 px-5 gap-2"
-                >
-                  <KeyRound className="w-4 h-4" />
-                  <span>توليد / عرض مفتاح الطوارئ</span>
-                </Button>
-              )}
+              </div>
             </div>
 
             {/* Section 4: Vault Backup & Migration (Export / Import between PC and Laptop) */}
@@ -5685,8 +5804,8 @@ export default function App() {
                   <h4 className="text-lg font-bold text-foreground">
                     النسخ الاحتياطي ونقل الخزنة (بين البي سي واللابتوب)
                   </h4>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    يمكنك تصدير الخزنة المشفرة كملف احتياطي (.dat) لنقلها إلى لابتوب أو فلاش USB، أو استيراد نسخة سابقة.
+                  <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
+                    يمكنك تصدير الخزنة المشفرة كملف احتياطي (<bdi dir="ltr">.dat</bdi>) لنقلها إلى لابتوب أو فلاش <bdi dir="ltr">USB</bdi>، أو استيراد نسخة سابقة.
                   </p>
                 </div>
               </div>
@@ -5717,7 +5836,7 @@ export default function App() {
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <Download className="w-4 h-4 text-white" />
-                  <span>تصدير نسخة احتياطية مشفرة (.dat)</span>
+                  <span>تصدير نسخة احتياطية مشفرة (<bdi dir="ltr">.dat</bdi>)</span>
                 </Button>
 
                 <Button
@@ -5728,7 +5847,7 @@ export default function App() {
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <Upload className="w-4 h-4 text-white" />
-                  <span>استيراد خزنة من ملف (.dat)</span>
+                  <span>استيراد خزنة من ملف (<bdi dir="ltr">.dat</bdi>)</span>
                 </Button>
 
                 <Button
@@ -5738,7 +5857,7 @@ export default function App() {
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <FolderOpen className="w-4 h-4 text-white" />
-                  <span>فتح مسار ملف الخزنة في ويندوز</span>
+                  <span>فتح مسار مجلد الخزنة</span>
                 </Button>
               </div>
             </div>
@@ -5758,22 +5877,32 @@ export default function App() {
       </Dialog>
 
       {/* ================= MODAL: ENABLE AUTO UNLOCK PROMPT ================= */}
-      <Dialog open={showAutoUnlockModal} onOpenChange={setShowAutoUnlockModal}>
+      <Dialog
+        open={showAutoUnlockModal}
+        onOpenChange={(open) => {
+          setShowAutoUnlockModal(open);
+          if (!open) {
+            setAutoUnlockPassword("");
+            setShowAutoUnlockPassword(false);
+            setAutoUnlockModalError(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-md p-6 sm:p-7 rounded-3xl bg-card border-2 border-border/80 shadow-2xl z-[70]">
-          <DialogHeader className="text-right">
-            <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-2.5 text-foreground justify-start">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-2.5 text-foreground text-start">
               <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5" />
               </div>
               <span>تفعيل الفتح التلقائي</span>
             </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed text-right">
-              أدخل رمز الدخول (PIN) أو كلمة المرور الرئيسية ليتم حفظها وتشفيرها في مخزن الاعتمادات الآمن بالنظام ({autoUnlockStatus.platform_name}).
+            <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed text-start">
+              أدخل رمز الدخول (<bdi dir="ltr">PIN</bdi>) أو كلمة المرور الرئيسية ليتم حفظها وتشفيرها في مخزن الاعتمادات الآمن بالنظام (<bdi dir="ltr">{autoUnlockStatus.platform_name}</bdi>).
             </DialogDescription>
           </DialogHeader>
 
           {autoUnlockModalError && (
-            <div className="p-3.5 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive-foreground text-sm font-bold flex items-center gap-2.5">
+            <div className="p-3.5 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive-foreground text-sm font-bold flex items-center gap-2.5 text-start">
               <ShieldAlert className="w-4 h-4 shrink-0 text-destructive" />
               <span>{autoUnlockModalError}</span>
             </div>
@@ -5781,37 +5910,27 @@ export default function App() {
 
           <form onSubmit={handleConfirmEnableAutoUnlock} className="space-y-4 pt-2">
             <div>
-              <label className="block text-xs font-bold text-foreground mb-1.5 text-right">
+              <label className="block text-xs font-bold text-foreground mb-1.5 text-start">
                 أدخل رمز الدخول أو كلمة المرور الحالية:
               </label>
-              <div className="relative">
-                <Input
-                  type={showAutoUnlockPassword ? "text" : "password"}
-                  placeholder="أدخل الرمز..."
-                  value={autoUnlockPassword}
-                  onChange={(e) => {
-                    setAutoUnlockPassword(e.target.value);
-                    if (autoUnlockModalError) setAutoUnlockModalError(null);
-                  }}
-                  autoFocus
-                  className="h-12 text-base font-sans font-bold rounded-xl border-2 pl-12 pr-4 text-center tracking-widest"
-                  disabled={autoUnlockModalLoading}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowAutoUnlockPassword(!showAutoUnlockPassword)}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 rounded-lg text-muted-foreground hover:text-foreground"
-                  title={showAutoUnlockPassword ? "إخفاء الرمز" : "إظهار الرمز"}
-                >
-                  {showAutoUnlockPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </Button>
-              </div>
+              <SecretInput
+                revealed={showAutoUnlockPassword}
+                onToggleReveal={() => setShowAutoUnlockPassword((prev) => !prev)}
+                revealLabel="إظهار الرمز"
+                hideLabel="إخفاء الرمز"
+                centered
+                codeStyleWhenFilled
+                filledTrackingClass="tracking-widest"
+                placeholder="أدخل الرمز..."
+                value={autoUnlockPassword}
+                onChange={(e) => {
+                  setAutoUnlockPassword(e.target.value);
+                  if (autoUnlockModalError) setAutoUnlockModalError(null);
+                }}
+                autoFocus
+                className="text-base font-bold rounded-xl border-2"
+                disabled={autoUnlockModalLoading}
+              />
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border/40">
@@ -5851,28 +5970,44 @@ export default function App() {
       </Dialog>
 
       {/* ================= MODAL: EMERGENCY RECOVERY (LOCK SCREEN) ================= */}
-      <Dialog open={showRecoveryModal} onOpenChange={setShowRecoveryModal}>
+      <Dialog
+        open={showRecoveryModal}
+        onOpenChange={(open) => {
+          setShowRecoveryModal(open);
+          if (!open) {
+            setInputRecoveryKey("");
+            setShowInputRecoveryKey(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
-              <KeyRound className="w-7 h-7 text-primary" />
+            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
+              <KeyRound className="w-7 h-7 text-primary shrink-0" />
               <span>استعادة الخزنة عبر مفتاح الطوارئ</span>
             </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground pt-1">
-              أدخل مفتاح الاسترداد الخاص بك (مثال: KN-XXXX-XXXX-XXXX-XXXX) لاستعادة الخزنة فوراً.
+            <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
+              أدخل مفتاح الاسترداد الخاص بك (مثال: <bdi dir="ltr">KN-XXXX-XXXX-XXXX-XXXX</bdi>) لاستعادة الخزنة فوراً.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleRecoverVault} className="space-y-6 pt-4">
             <div>
-              <label className="block text-base font-bold text-foreground mb-2">
-                مفتاح الاسترداد (Recovery Key):
+              <label className="block text-base font-bold text-foreground mb-2 text-start">
+                مفتاح الاسترداد (<bdi dir="ltr">Recovery Key</bdi>):
               </label>
-              <Input
+              <SecretInput
+                revealed={showInputRecoveryKey}
+                onToggleReveal={() => setShowInputRecoveryKey((prev) => !prev)}
+                revealLabel="إظهار مفتاح الاسترداد"
+                hideLabel="إخفاء مفتاح الاسترداد"
+                centered
+                codeStyleWhenFilled
+                filledTrackingClass="tracking-widest"
                 placeholder="KN-XXXX-XXXX-XXXX-XXXX"
                 value={inputRecoveryKey}
                 onChange={(e) => setInputRecoveryKey(e.target.value)}
-                className="h-14 text-xl text-center font-sans font-bold tracking-widest rounded-xl border-2"
+                className="h-14 text-lg sm:text-xl font-bold rounded-xl border-2"
                 autoFocus
                 required
               />
@@ -5883,13 +6018,13 @@ export default function App() {
                 type="button"
                 variant="outline"
                 onClick={() => setShowRecoveryModal(false)}
-                className="h-13 px-6 rounded-xl text-base font-bold"
+                className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
               <Button
                 type="submit"
-                className="h-13 px-8 rounded-xl text-base font-bold shadow-lg gap-2"
+                className="h-12 px-8 rounded-xl text-base font-bold shadow-lg gap-2"
               >
                 <Unlock className="w-5 h-5" />
                 <span>استعادة وفتح الخزنة</span>
@@ -5900,50 +6035,52 @@ export default function App() {
       </Dialog>
 
       {/* ================= MODAL: IMPORT VAULT (CRYPTOGRAPHICALLY VERIFIED) ================= */}
-      <Dialog open={showImportModal} onOpenChange={setShowImportModal}>
+      <Dialog
+        open={showImportModal}
+        onOpenChange={(open) => {
+          setShowImportModal(open);
+          if (!open) {
+            setImportPassword("");
+            setShowImportPassword(false);
+            setImportModalError(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-3">
-              <Upload className="w-6 h-6 text-primary" />
+            <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-3 text-start">
+              <Upload className="w-6 h-6 text-primary shrink-0" />
               <span>استيراد واستبدال الخزنة</span>
             </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground pt-1">
+            <DialogDescription className="text-sm text-muted-foreground pt-1 text-start">
               أدخل كلمة مرور ملف الخزنة المستوردة للتحقق التشفيري الكامل من سلامتها وفك تشفيرها قبل استبدال الملفات.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handlePerformImport} className="space-y-6 pt-4">
             {importModalError && (
-              <div className="p-4 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive text-sm font-bold flex items-center gap-2">
+              <div className="p-4 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive text-sm font-bold flex items-center gap-2 text-start">
                 <ShieldAlert className="w-5 h-5 flex-shrink-0" />
                 <span>{importModalError}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-bold text-foreground mb-2">
+              <label className="block text-sm font-bold text-foreground mb-2 text-start">
                 كلمة مرور الخزنة المستوردة:
               </label>
-              <div className="relative">
-                <Input
-                  type={showImportPassword ? "text" : "password"}
-                  placeholder="أدخل كلمة مرور ملف الخزنة..."
-                  value={importPassword}
-                  onChange={(e) => setImportPassword(e.target.value)}
-                  className="h-12 text-base rounded-xl border-2 pr-4 pl-12"
-                  autoFocus
-                  required
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowImportPassword((prev) => !prev)}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                >
-                  {showImportPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </Button>
-              </div>
+              <SecretInput
+                revealed={showImportPassword}
+                onToggleReveal={() => setShowImportPassword((prev) => !prev)}
+                revealLabel="إظهار كلمة مرور الخزنة المستوردة"
+                hideLabel="إخفاء كلمة مرور الخزنة المستوردة"
+                placeholder="أدخل كلمة مرور ملف الخزنة..."
+                value={importPassword}
+                onChange={(e) => setImportPassword(e.target.value)}
+                className="text-base rounded-xl border-2"
+                autoFocus
+                required
+              />
             </div>
 
             <div className="flex justify-end gap-3 pt-2">

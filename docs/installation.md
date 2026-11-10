@@ -77,7 +77,7 @@ xattr -cr /Applications/kinana.app
 - Ubuntu 20.04 LTS / 22.04 LTS / 24.04 LTS, Debian 11 / 12, Linux Mint, or compatible distribution.
 - Dependencies: `libwebkit2gtk-4.1-0` (or `4.0`), `libayatana-appindicator3-1`.
 
-> Note: Starting with v0.1.3, the Debian package strictly conforms to Debian package naming standards (`Package: kinana`) while preserving Arabic localized desktop application branding (`كنانة`).
+> Note: Starting with v0.1.3, the Debian package strictly conforms to Debian package naming standards (`Package: kinana`) while preserving Arabic localized desktop application branding (`كنانة`). Starting with v0.1.4, duplicate Debian dependency declarations were removed and `.deb` packages ship with clean dependency metadata and zero custom maintainer scripts.
 
 #### Installation via Terminal
 ```bash
@@ -91,13 +91,16 @@ sudo apt install ./kinana-linux-x64.deb
 kinana
 ```
 
+#### Note on Linux Mint Graphical Package Installer (`gdebi-gtk`)
+On some Linux Mint systems, installing `.deb` files via the graphical Package Installer (`gdebi-gtk`) may leave the installer window open with an unresponsive close button after `Installation finished`, even though Kinana installed cleanly and contains no maintainer scripts or background installer hooks. Installing from the terminal (`sudo apt install ./kinana-linux-x64.deb`) avoids this issue completely; if a graphical `gdebi-gtk` window remains stuck open after completion, you can safely terminate the installer window with `killall gdebi-gtk`.
+
 ---
 
 ### Universal Standalone Executable (.AppImage)
 
 The AppImage package runs on almost all modern 64-bit Linux distributions without requiring installation.
 
-> Note: Starting with v0.1.3, host process spawning (such as opening the vault directory in Nemo, Nautilus, Dolphin, or Thunar) is isolated from AppImage runtime environment variables to ensure compatibility with host libraries.
+> Note: Starting with v0.1.3, host process spawning (such as opening the vault directory in Nemo, Nautilus, Dolphin, or Thunar) is isolated from AppImage runtime environment variables to ensure compatibility with host libraries. Starting with v0.1.4, Kinana also defaults `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` on Linux (unless overridden in your environment) to prevent intermittent blank/black rectangular compositing glitches in WebKitGTK on affected GPU drivers while stripping that setting from spawned host apps.
 
 #### Requirements
 - FUSE (Filesystem in Userspace) support. On Ubuntu 22.04+, install FUSE 2 if needed:

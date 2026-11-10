@@ -65,8 +65,14 @@
     --ring: 240 4.9% 83.9%;
   }
   * { @apply border-border; }
-  body, button, input, select, textarea {
-    font-family: 'Thamaniah', 'thmanyah sans', sans-serif;
+  html, body, button, input, select, textarea {
+    font-family: 'Thamaniah', 'thmanyah sans', 'Noto Sans Arabic', 'Segoe UI', 'SF Arabic', 'Tahoma', sans-serif;
+    letter-spacing: normal;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    font-family: 'Thamaniah', 'thmanyah sans', 'Noto Sans Arabic', 'Segoe UI', 'SF Arabic', 'Tahoma', sans-serif;
+    letter-spacing: normal;
   }
   body {
     @apply bg-background text-foreground;
@@ -92,5 +98,50 @@
   * {
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+}
+
+@layer components {
+  .kinana-service-card {
+    container-type: inline-size;
+  }
+
+  .kinana-card-logo {
+    padding: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.75rem);
+    padding: clamp(0.5rem, 4.4cqw, 1.75rem);
+  }
+
+  .kinana-card-monogram {
+    font-size: clamp(2.5rem, calc(4.25rem * var(--vault-zoom, 1)), 8.5rem);
+    font-size: clamp(2.5rem, 23cqw, 8.5rem);
+    line-height: 1;
+  }
+
+  .kinana-card-titlebar {
+    padding: clamp(0.65rem, calc(0.95rem * var(--vault-zoom, 1)), 2rem)
+      clamp(0.85rem, calc(1.25rem * var(--vault-zoom, 1)), 2.5rem);
+    padding: clamp(0.65rem, 4.8cqw, 2rem) clamp(0.85rem, 6.2cqw, 2.5rem);
+  }
+
+  .kinana-card-title {
+    font-size: clamp(1rem, calc(1.35rem * var(--vault-zoom, 1)), 2.75rem);
+    font-size: clamp(1rem, 7.6cqw, 2.75rem);
+    line-height: 1.25;
+  }
+
+  .kinana-card-badge-pos {
+    top: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.25rem);
+    top: clamp(0.5rem, 4cqw, 1.25rem);
+  }
+
+  .kinana-card-pin {
+    left: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.25rem);
+    left: clamp(0.5rem, 4cqw, 1.25rem);
+    padding: clamp(0.3rem, 2cqw, 0.6rem);
+  }
+
+  .kinana-card-select {
+    right: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.25rem);
+    right: clamp(0.5rem, 4cqw, 1.25rem);
   }
 }

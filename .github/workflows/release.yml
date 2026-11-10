@@ -252,13 +252,13 @@ jobs:
             Kinana is an offline-first, local desktop password manager built with Rust, Tauri 2, and React. All sensitive data is encrypted locally using AES-256-GCM and Argon2id key derivation, with zero external server telemetry or cloud synchronization.
 
             #### What is New in This Release:
-            - Debian Package Standardization: Fixed Linux .deb package name metadata to compliant ASCII format (Package: kinana), resolving installation errors on Linux Mint, Ubuntu, and Debian.
-            - Linux AppImage File Manager Isolation: Sanitized host process spawning from AppImage runtime to prevent library conflicts (resolving Nemo file manager symbol crashes and browser directory listings).
-            - Native Linux Auto-Unlock: Integrated Freedesktop Secret Service (GNOME Keyring / KWallet) support for optional hardware/session-backed Auto-Unlock on Linux desktops.
-            - RTL Dialog & Layout Enhancements: Centered dialog header title with icon and positioned close button on the opposite side to eliminate header collisions in RTL layouts.
-            - Clear Bulk Delete Feedback: Updated confirmation dialog wording to indicate the exact number of selected services instead of generic delete-all text.
-            - Improved Vault Import Notifications: Added distinct success, warning, and error banners with responsive word wrapping, preventing visual overflow on small window sizes.
-            - Automated Debian Smoke Testing: Added package metadata inspection and apt installation smoke testing in CI/CD release automation.
+            - Cross-Platform Rendering Stability (Linux WebKitGTK): Enabled shared-memory DMA-BUF fallback (`WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`), eliminated nested backdrop blur and heavy `blur-3xl` GPU composite layers inside service details, and normalized host process environment inheritance so intermittent black rectangular artifacts no longer appear while scrolling cards.
+            - Clean Debian Dependencies: Removed duplicate dependency overrides from Linux bundle configuration so `.deb` metadata lists each required runtime library cleanly once.
+            - Proportional Application Zoom Scaling: Replaced non-standard CSS `zoom` with coordinated CSS grid track, container-query card sizing, and list typography scaling, preventing card text clipping at high zoom levels such as 200%.
+            - Arabic Typography & BiDi Normalization: Normalized form control and placeholder `letter-spacing`, added cross-platform Arabic font fallbacks, and wrapped mixed-direction Latin tokens and `.dat` labels with `<bdi dir="ltr">` so cursive Arabic letters render connected without artificial gaps or reversed punctuation.
+            - Unified Secret Input & Toggle Alignment: Standardized sensitive inputs with a vertically centered eye toggle (`top-1/2 -translate-y-1/2`) and directional padding (`rtl:`/`ltr:`), fixing sunken or misaligned eye buttons across Bank Card, Recovery, Auto-Unlock, Import, and Settings dialogs.
+            - RTL Dialog Structure: Fixed shared dialog headers, descriptions, titles, and footer spacing to align consistently to the reading start without left-aligned wrapping on second lines.
+            - Application Emergency Recovery Key Privacy: Masked the vault Emergency Recovery Key by default behind an explicit eye reveal/hide toggle and added reveal-free secure copying via backend clipboard IPC, clearing temporary revealed state automatically upon closing or locking.
 
             #### Download Options:
             - Windows (x64): `kinana-windows-x64-setup.exe` (NSIS Installer)

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-11-10
+
+### Changed
+- Application Emergency Recovery Key in Settings is now masked by default behind an eye reveal/hide toggle and supports reveal-free copying through a dedicated backend IPC command (`copy_vault_recovery_key`), clearing temporary UI reveal state upon locking or closing Settings.
+
+### Fixed
+- Mitigated intermittent black rectangular rendering artifacts on Linux WebKitGTK by defaulting `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` when unset (stripped before spawning host processes), removing `blur-3xl` GPU filter layers and nested `backdrop-blur` surfaces inside the Service Detail modal, and flattening redundant inner scroll containers.
+- Fixed Debian `.deb` bundle configuration by removing duplicate dependency overrides in `tauri.linux.conf.json` so auto-detected dependencies are emitted cleanly once (`control.tar.gz` verified scriptless).
+- Normalized form control and placeholder `letter-spacing` alongside cross-platform Arabic font fallbacks (`Noto Sans Arabic`, `Segoe UI`, `SF Arabic`, `Tahoma`) and `<bdi dir="ltr">` mixed-direction isolation, preventing disjointed or stretched Arabic labels and reversed `.dat` extensions.
+- Replaced non-standard CSS `zoom` with coordinated container-width expansion, CSS grid track scaling, container-query service card scaling, and list view scaling so text no longer clips inside cards at high zoom levels (e.g., 200%).
+- Unified secret input fields under a shared `<SecretInput />` component (`top-1/2 -translate-y-1/2`, RTL/LTR logical toggle placement, valid `h-12`/`h-16` heights, and code styling applied only when filled), resolving misaligned or sunken eye buttons in Bank Card, Auto-Unlock, Recovery, Import, and Settings dialogs.
+- Updated shared RTL dialog headers (`text-start pe-8`), descriptions, titles, and footer gaps to prevent left-aligned wrapping on secondary lines.
+
+---
+
 ## [0.1.3] - 2026-11-10
 
 ### Added

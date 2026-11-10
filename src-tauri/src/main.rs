@@ -1208,6 +1208,14 @@ async fn copy_account_recovery_key(
 }
 
 #[tauri::command]
+async fn copy_vault_recovery_key(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let key = get_or_generate_recovery_key(state.clone()).await?;
+    copy_secure_text(key, state).await
+}
+
+#[tauri::command]
 async fn copy_account_pin(
     service_id: String,
     account_id: String,
@@ -2005,7 +2013,16 @@ fn sanitize_linux_host_command(cmd: &mut std::process::Command) {
             }
         }
     }
+
+    #[cfg(target_os = "linux")]
+    if APP_SET_WEBKIT_FORCE_SHM.load(std::sync::atomic::Ordering::Relaxed) {
+        cmd.env_remove("WEBKIT_DMABUF_RENDERER_FORCE_SHM");
+    }
 }
+
+#[cfg(target_os = "linux")]
+static APP_SET_WEBKIT_FORCE_SHM: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
 async fn open_url(url: String) -> Result<(), String> {
@@ -2109,6 +2126,19 @@ fn trim_app_memory() -> Result<(), String> {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        // Work around WebKitGTK DMA-BUF partial tile corruption on NVIDIA/Mesa X11 compositors
+        // without disabling GPU acceleration or animations globally.
+        if std::env::var_os("WEBKIT_DMABUF_RENDERER_FORCE_SHM").is_none()
+            && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+            && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none()
+        {
+            std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
+            APP_SET_WEBKIT_FORCE_SHM.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     #[cfg(windows)]
     {
         let flags = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
@@ -2348,6 +2378,7 @@ fn main() {
             change_master_password,
             get_current_saved_password,
             get_or_generate_recovery_key,
+            copy_vault_recovery_key,
             recover_vault_with_key,
             get_service_accounts,
             copy_secure_text,

@@ -12,8 +12,24 @@ module.exports = {
     },
     extend: {
       fontFamily: {
-        thamaniah: ["Thamaniah", "thmanyah sans", "sans-serif"],
-        sans: ["Thamaniah", "thmanyah sans", "sans-serif"],
+        thamaniah: [
+          "Thamaniah",
+          "thmanyah sans",
+          "Noto Sans Arabic",
+          "Segoe UI",
+          "SF Arabic",
+          "Tahoma",
+          "sans-serif",
+        ],
+        sans: [
+          "Thamaniah",
+          "thmanyah sans",
+          "Noto Sans Arabic",
+          "Segoe UI",
+          "SF Arabic",
+          "Tahoma",
+          "sans-serif",
+        ],
       },
       colors: {
         border: "hsl(var(--border))",
