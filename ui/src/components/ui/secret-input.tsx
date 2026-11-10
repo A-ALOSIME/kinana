@@ -30,7 +30,19 @@ export interface SecretInputProps
    * Extra tracking utility applied only when a value is entered (never on empty Arabic placeholders).
    */
   filledTrackingClass?: string;
+  /**
+   * Renders safe masked bullet glyphs when a secret already exists in the vault during Edit
+   * without preloading or exposing the stored plaintext secret in input state.
+   */
+  storedSecretMask?: boolean;
+  /**
+   * Transient read-only/preview stored value fetched strictly on demand via explicit reveal.
+   * Never submitted directly as a replacement value until the user types new characters.
+   */
+  revealedStoredValue?: string | null;
 }
+
+const STORED_SECRET_BULLETS = "••••••••••••";
 
 const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
   (
@@ -45,6 +57,9 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
       centeredPlaceholder,
       codeStyleWhenFilled = false,
       filledTrackingClass,
+      storedSecretMask = false,
+      revealedStoredValue = null,
+      autoComplete = "new-password",
       value,
       defaultValue,
       placeholder,
@@ -63,18 +78,41 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
         String(defaultValue).length > 0
     );
 
-    const hasValue =
+    const typedHasValue =
       value !== undefined
         ? value !== null && String(value).length > 0
         : uncontrolledHasValue;
+
+    const showingRevealedStored =
+      !typedHasValue &&
+      revealed &&
+      revealedStoredValue !== null &&
+      revealedStoredValue !== undefined;
+
+    const effectiveValue =
+      showingRevealedStored ? revealedStoredValue : value;
+
+    const hasValue = typedHasValue || showingRevealedStored;
+    const showStoredDotsOverlay = storedSecretMask && !hasValue;
 
     const isLarge = buttonSize === "lg";
     const toggleLabel = revealed ? hideLabel : revealLabel;
     const alignCenteredPlaceholder = centeredPlaceholder ?? centered;
     const sizeClasses = extractTextSizeClasses(className);
     const hasStrikeThrough = Boolean(className?.includes("line-through"));
+    const paddingClasses = alignCenteredPlaceholder
+      ? isLarge
+        ? "px-16"
+        : "px-14"
+      : isLarge
+        ? "rtl:pr-4 rtl:pl-16 ltr:pl-4 ltr:pr-16"
+        : "rtl:pr-4 rtl:pl-14 ltr:pl-4 ltr:pr-14";
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (showingRevealedStored) {
+        // User started replacing the revealed stored secret; avoid editing the fetched string directly
+        // unless backspace/typing changes it, or let controlled caller clear revealed state and capture input.
+      }
       if (value === undefined) {
         setUncontrolledHasValue(e.target.value.length > 0);
       }
@@ -86,7 +124,8 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
         <Input
           ref={ref}
           type={revealed ? "text" : "password"}
-          value={value}
+          autoComplete={autoComplete}
+          value={effectiveValue}
           defaultValue={defaultValue}
           disabled={disabled}
           required={required}
@@ -120,23 +159,31 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
           {...props}
         />
 
-        {!hasValue && placeholder && (
-          <PlaceholderOverlay
-            placeholder={placeholder}
-            sizeClasses={sizeClasses}
-            paddingClasses={
-              alignCenteredPlaceholder
-                ? isLarge
-                  ? "px-16"
-                  : "px-14"
-                : isLarge
-                  ? "rtl:pr-4 rtl:pl-16 ltr:pl-4 ltr:pr-16"
-                  : "rtl:pr-4 rtl:pl-14 ltr:pl-4 ltr:pr-14"
-            }
-            centered={alignCenteredPlaceholder}
-            disabled={disabled}
-            strikeThrough={hasStrikeThrough}
-          />
+        {showStoredDotsOverlay ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none select-none absolute inset-0 flex items-center text-foreground/70 font-sans font-normal text-lg tracking-[0.2em]",
+              alignCenteredPlaceholder ? "justify-center text-center" : "justify-start text-start",
+              paddingClasses,
+              disabled && "opacity-50",
+              hasStrikeThrough && "line-through"
+            )}
+          >
+            {STORED_SECRET_BULLETS}
+          </span>
+        ) : (
+          !hasValue &&
+          placeholder && (
+            <PlaceholderOverlay
+              placeholder={placeholder}
+              sizeClasses={sizeClasses}
+              paddingClasses={paddingClasses}
+              centered={alignCenteredPlaceholder}
+              disabled={disabled}
+              strikeThrough={hasStrikeThrough}
+            />
+          )
         )}
 
         <Button

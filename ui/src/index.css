@@ -115,42 +115,35 @@
   }
 
   .kinana-card-logo {
-    padding: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.75rem);
-    padding: clamp(0.5rem, 4.4cqw, 1.75rem);
+    padding: clamp(0.45rem, min(calc(0.75rem * var(--vault-zoom, 1)), 4.6cqw), 2.5rem);
   }
 
   .kinana-card-monogram {
-    font-size: clamp(2.5rem, calc(4.25rem * var(--vault-zoom, 1)), 8.5rem);
-    font-size: clamp(2.5rem, 23cqw, 8.5rem);
+    font-size: clamp(2rem, min(calc(4.25rem * var(--vault-zoom, 1)), 23cqw), 9rem);
     line-height: 1;
   }
 
   .kinana-card-titlebar {
-    padding: clamp(0.65rem, calc(0.95rem * var(--vault-zoom, 1)), 2rem)
-      clamp(0.85rem, calc(1.25rem * var(--vault-zoom, 1)), 2.5rem);
-    padding: clamp(0.65rem, 4.8cqw, 2rem) clamp(0.85rem, 6.2cqw, 2.5rem);
+    padding: clamp(0.5rem, min(calc(0.9rem * var(--vault-zoom, 1)), 5cqw), 2.25rem)
+      clamp(0.75rem, min(calc(1.2rem * var(--vault-zoom, 1)), 6.4cqw), 2.75rem);
   }
 
   .kinana-card-title {
-    font-size: clamp(1rem, calc(1.35rem * var(--vault-zoom, 1)), 2.75rem);
-    font-size: clamp(1rem, 7.6cqw, 2.75rem);
+    font-size: clamp(0.9rem, min(calc(1.35rem * var(--vault-zoom, 1)), 7.6cqw), 3.75rem);
     line-height: 1.65;
     padding-block: 0.15em;
   }
 
   .kinana-card-badge-pos {
-    top: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.25rem);
-    top: clamp(0.5rem, 4cqw, 1.25rem);
+    top: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
   }
 
   .kinana-card-pin {
-    left: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.25rem);
-    left: clamp(0.5rem, 4cqw, 1.25rem);
-    padding: clamp(0.3rem, 2cqw, 0.6rem);
+    left: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
+    padding: clamp(0.25rem, min(calc(0.35rem * var(--vault-zoom, 1)), 2cqw), 0.75rem);
   }
 
   .kinana-card-select {
-    right: clamp(0.5rem, calc(0.75rem * var(--vault-zoom, 1)), 1.25rem);
-    right: clamp(0.5rem, 4cqw, 1.25rem);
+    right: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
   }
 }

@@ -6,6 +6,8 @@ import {
   buildUpdateAccountPayload,
   extractCardPin,
   extractCleanCardNotes,
+  isBankOrCardService,
+  resolveAccountKind,
 } from "../src/accountForm.ts";
 
 test("buildUpdateAccountPayload clears optional non-secret login fields with empty strings instead of null", () => {
@@ -140,10 +142,73 @@ test("buildAddAccountPayload keeps creation defaults without breaking edit clear
     }
   );
 
+  assert.equal(addCard.accountKind, "card");
   assert.equal(addCard.label, "بطاقة بنكية");
   assert.equal(addCard.password, "4111111111111111");
   assert.equal(addCard.notes, "[CARD]\nPIN: 4321\nATM card");
 
   assert.equal(extractCardPin(addCard.notes), "4321");
   assert.equal(extractCleanCardNotes(addCard.notes), "ATM card");
+});
+
+test("resolveAccountKind honors explicit account_kind in bank and non-bank services and handles legacy records", () => {
+  assert.equal(isBankOrCardService("Al Rajhi Bank"), true);
+  assert.equal(isBankOrCardService("GitLab"), false);
+
+  // Explicit login inside a banking service MUST stay login
+  const bankLoginPayload = buildAddAccountPayload(
+    "svc-rajhi",
+    "login",
+    {
+      label: "Al Mubasher Online",
+      username: "user_rajhi",
+      email: "user@example.com",
+      password: "BankLogin#1234",
+      recoveryKey: "",
+      url: "https://almubasher.com.sa",
+      notes: "Login account inside Al Rajhi Bank",
+    },
+    {
+      label: "",
+      holder: "",
+      number: "",
+      expiry: "",
+      cvv: "",
+      pin: "",
+      notes: "",
+    }
+  );
+  assert.equal(bankLoginPayload.accountKind, "login");
+  assert.equal(
+    resolveAccountKind({
+      account_kind: "login",
+      notes: bankLoginPayload.notes,
+      url: bankLoginPayload.url,
+    }),
+    "login"
+  );
+
+  // Explicit bank card inside Al Rajhi Bank and inside a generic service stay card
+  assert.equal(
+    resolveAccountKind({ account_kind: "card", notes: "[CARD]", url: "08/29" }),
+    "card"
+  );
+  assert.equal(
+    resolveAccountKind({ account_kind: "card", notes: null, url: null }),
+    "card"
+  );
+
+  // Legacy records without explicit account_kind fallback cleanly without using service name
+  assert.equal(
+    resolveAccountKind({ notes: "[CARD]\nPIN: 1234", url: "05/28" }),
+    "card"
+  );
+  assert.equal(
+    resolveAccountKind({ notes: null, url: "12/29" }),
+    "card"
+  );
+  assert.equal(
+    resolveAccountKind({ notes: null, url: "https://alrajhibank.com.sa" }),
+    "login"
+  );
 });

@@ -56,7 +56,9 @@ export interface AccountFormFieldsProps {
   showCardPin: boolean;
   onToggleShowCardPin: () => void;
 
-  // Edit-only secret clearing flags
+  // Edit-only existing-secret & clearing flags (never preload plaintext into React state)
+  hasExistingPassword?: boolean;
+  revealedStoredPassword?: string | null;
   hasExistingRecoveryKey?: boolean;
   clearRecoveryKey?: boolean;
   onSetClearRecoveryKey?: (clear: boolean) => void;
@@ -105,6 +107,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
   onCardPinChange,
   showCardPin,
   onToggleShowCardPin,
+  hasExistingPassword = false,
+  revealedStoredPassword = null,
   hasExistingRecoveryKey = false,
   clearRecoveryKey = false,
   onSetClearRecoveryKey,
@@ -199,6 +203,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             centered
             codeStyleWhenFilled
             filledTrackingClass="tracking-widest"
+            storedSecretMask={isEdit && hasExistingPassword && !cardNumber}
             style={{ direction: "ltr", textAlign: "center" }}
             value={cardNumber}
             onChange={(e) => {
@@ -275,6 +280,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
               centered
               codeStyleWhenFilled
               filledTrackingClass="tracking-widest"
+              storedSecretMask={isEdit && hasExistingRecoveryKey && !clearRecoveryKey && !cardCvv}
               disabled={isEdit && clearRecoveryKey}
               value={isEdit && clearRecoveryKey ? "" : cardCvv}
               onChange={(e) =>
@@ -331,6 +337,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             centered
             codeStyleWhenFilled
             filledTrackingClass="tracking-widest"
+            storedSecretMask={isEdit && hasExistingPin && !clearCardPin && !cardPin}
             disabled={isEdit && clearCardPin}
             value={isEdit && clearCardPin ? "" : cardPin}
             onChange={(e) =>
@@ -421,6 +428,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           onToggleReveal={onToggleShowPassword}
           revealLabel="إظهار كلمة المرور"
           hideLabel="إخفاء كلمة المرور"
+          storedSecretMask={isEdit && hasExistingPassword && password.length === 0}
+          revealedStoredValue={isEdit ? revealedStoredPassword : null}
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
           className="text-base font-bold rounded-xl border-2"
@@ -429,8 +438,14 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           <PasswordStrengthIndicator password={password} className="mt-2" />
         )}
         {isEdit && (
-          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-            اتركه فارغاً للإبقاء على كلمة المرور الحالية
+          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+            {password.length > 0
+              ? hasExistingPassword
+                ? "سيتم استبدال كلمة المرور المحفوظة بالكلمة الجديدة عند الحفظ."
+                : "سيتم حفظ كلمة المرور الجديدة لهذا الحساب."
+              : hasExistingPassword
+              ? "توجد كلمة مرور محفوظة ومخفية — اتركه فارغاً للإبقاء عليها أو اكتب كلمة جديدة للاستبدال."
+              : "لا توجد كلمة مرور محفوظة لهذا الحساب حالياً."}
           </p>
         )}
       </div>
@@ -469,6 +484,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           onToggleReveal={onToggleShowRecoveryKey}
           revealLabel="إظهار مفتاح الاسترداد"
           hideLabel="إخفاء مفتاح الاسترداد"
+          storedSecretMask={isEdit && hasExistingRecoveryKey && !clearRecoveryKey && !recoveryKey}
           disabled={isEdit && clearRecoveryKey}
           value={isEdit && clearRecoveryKey ? "" : recoveryKey}
           onChange={(e) => onRecoveryKeyChange(e.target.value)}

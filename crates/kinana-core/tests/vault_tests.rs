@@ -4,7 +4,7 @@ use tempfile::tempdir;
 use kinana_core::{
     crypto::{Argon2Parameters, MIN_VAULT_FILE_SIZE},
     error::VaultError,
-    models::{Account, SecretString, Service},
+    models::{Account, AccountKind, SecretString, Service, VaultData},
     storage::VaultStorage,
 };
 
@@ -99,6 +99,7 @@ fn test_save_and_unlock_again_preserves_data() {
             password: SecretString::new("P@ssw0rdForSteam!".to_string()),
             notes: Some("Steam guard enabled".to_string()),
             url: Some("https://store.steampowered.com".to_string()),
+            account_kind: Some(AccountKind::Login),
         }],
     });
 
@@ -286,6 +287,7 @@ fn test_save_rekey_rotates_password_and_preserves_data() {
             password: SecretString::new("ghp_secret_token_123".to_string()),
             notes: Some("SSH key configured".to_string()),
             url: Some("https://github.com".to_string()),
+            account_kind: Some(AccountKind::Login),
         }],
     });
 
@@ -1698,6 +1700,7 @@ fn test_recovery_key_unlock_loads_accounts_allows_edits_and_persists_across_relo
         password: SecretString::new("initial_secret".to_string()),
         notes: Some("test notes".to_string()),
         url: Some("https://github.com".to_string()),
+        account_kind: Some(AccountKind::Login),
     });
     session.data.services.push(service);
     storage.save(&mut session).unwrap();
@@ -1746,6 +1749,7 @@ fn test_recovery_key_unlock_loads_accounts_allows_edits_and_persists_across_relo
         password: SecretString::new("second_secret".to_string()),
         notes: None,
         url: None,
+        account_kind: Some(AccountKind::Login),
     });
 
     // حفظ التغييرات على القرص
@@ -1848,6 +1852,7 @@ fn test_cross_platform_synthetic_vault_compatibility_roundtrip() {
         password: kinana_core::models::SecretString::new("VeryComplexPassword_!@#$_2026".to_string()),
         notes: Some("ملاحظات مشفرة: رمز سري 9876".to_string()),
         url: Some("https://kinana.local".to_string()),
+        account_kind: Some(AccountKind::Login),
     };
 
     let service = kinana_core::models::Service {
@@ -1937,6 +1942,7 @@ fn test_account_clearing_and_generated_password_persistence_roundtrip() {
                 password: SecretString::new(initial_generated_pwd.clone()),
                 notes: packed,
                 url: Some("https://github.com/login".to_string()),
+                account_kind: Some(AccountKind::Login),
             }],
         });
 
@@ -1999,6 +2005,7 @@ fn test_account_clearing_and_generated_password_persistence_roundtrip() {
                 clear_recovery_key: Some(false),
                 clear_pin: Some(false),
                 clear_password: None,
+                account_kind: None,
             },
         );
         storage.save(&mut session).unwrap();
@@ -2076,6 +2083,7 @@ fn test_account_clearing_and_generated_password_persistence_roundtrip() {
                 password: SecretString::new("4111111111111111".to_string()),
                 notes: pack_account_notes("", "999", "[CARD]\nPIN: 4321\nTravel limit 5k"),
                 url: Some("08/29".to_string()),
+                account_kind: Some(AccountKind::Card),
             }],
         });
         storage.save(&mut session).unwrap();
@@ -2095,6 +2103,7 @@ fn test_account_clearing_and_generated_password_persistence_roundtrip() {
                 clear_recovery_key: Some(false),
                 clear_pin: Some(false),
                 clear_password: None,
+                account_kind: None,
             },
         );
         storage.save(&mut session).unwrap();
@@ -2176,6 +2185,7 @@ fn test_master_password_change_preserves_account_updates_and_recovery() {
             password: SecretString::new("temp".to_string()),
             notes: None,
             url: Some("https://mail.example".to_string()),
+            account_kind: Some(AccountKind::Login),
         }],
     });
     apply_account_update(
@@ -2213,4 +2223,173 @@ fn test_master_password_change_preserves_account_updates_and_recovery() {
     assert_eq!(acc.username, "updated_user");
     assert_eq!(acc.password.as_str(), generated_acc_pwd);
     assert_eq!(unlocked.data.recovery_code.as_deref(), Some(recovery_code));
+}
+
+/// 42. اختبار استمرارية نوع الحساب الصريح (تسجيل دخول داخل خدمة بنكية vs بطاقة) والتوافق الرجعي للخزنات القديمة
+#[test]
+fn test_account_kind_persistence_across_unlock_restart_and_legacy_migration() {
+    use kinana_core::account_ops::{
+        apply_account_update, pack_account_notes, unpack_account_notes, AccountUpdateInput,
+    };
+
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("account_kind_vault.dat");
+    let backup_path = dir.path().join("exported_backup.dat");
+    let imported_path = dir.path().join("imported_vault.dat");
+    let master_password = "StrongKindMasterPass#2026";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    // 1. محاكاة خزنة اصطناعية تحوي جميع السيناريوهات المطلوبة
+    {
+        let storage = VaultStorage::new(&vault_path);
+        let mut session = storage
+            .create_new_vault(master_password, Some(fast_params))
+            .unwrap();
+
+        session.data.services.push(Service {
+            id: "svc_rajhi".to_string(),
+            name: "Al Rajhi Bank".to_string(),
+            icon_data: None,
+            accounts: vec![
+                Account {
+                    id: "rajhi_login".to_string(),
+                    label: "حساب مباشر للأفراد".to_string(),
+                    username: "user_almubasher".to_string(),
+                    password: SecretString::new("RajhiLoginPass#2026".to_string()),
+                    notes: pack_account_notes("me@example.com", "REC-BANK-1", "Online banking"),
+                    url: Some("https://almubasher.com.sa".to_string()),
+                    account_kind: Some(AccountKind::Login),
+                },
+                Account {
+                    id: "rajhi_card".to_string(),
+                    label: "بطاقة مدى".to_string(),
+                    username: "AHMED TEST".to_string(),
+                    password: SecretString::new("4111111111111111".to_string()),
+                    notes: pack_account_notes("", "321", "[CARD]\nPIN: 1357\nDaily card"),
+                    url: Some("08/29".to_string()),
+                    account_kind: Some(AccountKind::Card),
+                },
+            ],
+        });
+
+        session.data.services.push(Service {
+            id: "svc_gitlab".to_string(),
+            name: "GitLab".to_string(),
+            icon_data: None,
+            accounts: vec![Account {
+                id: "gitlab_login".to_string(),
+                label: "Work GitLab".to_string(),
+                username: "dev_octo".to_string(),
+                password: SecretString::new("GitLabToken#2026".to_string()),
+                notes: None,
+                url: Some("https://gitlab.com".to_string()),
+                account_kind: Some(AccountKind::Login),
+            }],
+        });
+
+        session.data.services.push(Service {
+            id: "svc_generic".to_string(),
+            name: "Personal Folder".to_string(),
+            icon_data: None,
+            accounts: vec![Account {
+                id: "generic_card".to_string(),
+                label: "Travel Card".to_string(),
+                username: "TRAVEL HOLDER".to_string(),
+                password: SecretString::new("5222222222222222".to_string()),
+                notes: pack_account_notes("", "999", "[CARD]"),
+                url: Some("12/30".to_string()),
+                account_kind: Some(AccountKind::Card),
+            }],
+        });
+
+        storage.save(&mut session).unwrap();
+    }
+
+    // 2. إعادة فتح الخزنة وتصدير واستيراد نسخة احتياطية والتحقق من بقاء النوع الصريح لكل حساب
+    {
+        let storage_reloaded = VaultStorage::new(&vault_path);
+        let unlocked = storage_reloaded.unlock(master_password).unwrap();
+        let summary = unlocked.data.to_summary();
+
+        assert_eq!(summary.services[0].accounts[0].account_kind, AccountKind::Login);
+        assert_eq!(summary.services[0].accounts[1].account_kind, AccountKind::Card);
+        assert_eq!(summary.services[1].accounts[0].account_kind, AccountKind::Login);
+        assert_eq!(summary.services[2].accounts[0].account_kind, AccountKind::Card);
+
+        fs::copy(&vault_path, &backup_path).unwrap();
+        fs::copy(&backup_path, &imported_path).unwrap();
+    }
+
+    // 3. فتح النسخة المستوردة، التعديل، التحقق من بقاء كلمة المرور ونوع الحساب دون تداخل
+    {
+        let imported_storage = VaultStorage::new(&imported_path);
+        let mut imported_session = imported_storage.unlock(master_password).unwrap();
+        let rajhi_login = &mut imported_session.data.services[0].accounts[0];
+        apply_account_update(
+            rajhi_login,
+            AccountUpdateInput {
+                label: Some("حساب مباشر المحدّث".to_string()),
+                username: Some("updated_bank_user".to_string()),
+                password: None,
+                account_kind: Some(AccountKind::Login),
+                ..Default::default()
+            },
+        );
+        imported_storage.save(&mut imported_session).unwrap();
+        drop(imported_session);
+
+        let reopened = imported_storage.unlock(master_password).unwrap();
+        let summary = reopened.data.to_summary();
+        assert_eq!(summary.services[0].accounts[0].account_kind, AccountKind::Login);
+        assert_eq!(
+            reopened.data.services[0].accounts[0].password.as_str(),
+            "RajhiLoginPass#2026"
+        );
+        assert_eq!(summary.services[0].accounts[1].account_kind, AccountKind::Card);
+        let (_, cvv, notes) =
+            unpack_account_notes(reopened.data.services[0].accounts[1].notes.as_deref());
+        assert_eq!(cvv, "321");
+        assert!(notes.contains("[CARD]"));
+    }
+
+    // 4. التوافق الرجعي مع صيغة JSON قديمة لا تحتوي حقل `account_kind` مطلقاً
+    let legacy_json = r#"{
+        "version": 1,
+        "created_at": 1000,
+        "updated_at": 1000,
+        "recovery_code": null,
+        "services": [
+            {
+                "id": "old_bank",
+                "name": "مصرف الراجحي",
+                "icon_data": null,
+                "accounts": [
+                    {
+                        "id": "old_card",
+                        "label": "بطاقة قديمة",
+                        "username": "OLD HOLDER",
+                        "password": "4111111111111111",
+                        "notes": "[CARD]\nPIN: 4444",
+                        "url": "09/28"
+                    },
+                    {
+                        "id": "old_login",
+                        "label": "مباشر قديم",
+                        "username": "legacy_user",
+                        "password": "LegacyBankPassword!1",
+                        "notes": null,
+                        "url": "https://alrajhibank.com.sa"
+                    }
+                ]
+            }
+        ]
+    }"#;
+    let legacy_vault: VaultData = serde_json::from_str(legacy_json).unwrap();
+    let legacy_summary = legacy_vault.to_summary();
+    assert_eq!(legacy_summary.services[0].accounts[0].account_kind, AccountKind::Card);
+    assert_eq!(legacy_summary.services[0].accounts[1].account_kind, AccountKind::Login);
 }

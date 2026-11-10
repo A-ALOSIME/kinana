@@ -45,7 +45,7 @@ On macOS, Gatekeeper checks for Apple Developer notarization tickets. Because Ki
 
 Alternatively, open Terminal and run:
 ```bash
-xattr -cr /Applications/kinana.app
+xattr -cr /Applications/Kinana.app
 ```
 This is only required once on first launch.
 

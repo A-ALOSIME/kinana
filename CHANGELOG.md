@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.8] - 2026-11-10
+
+### Changed
+- Standardized the English application identity to **Kinana** across window titles, macOS bundle name, Linux desktop launcher (`Name=Kinana`), Windows Start Menu/Desktop shortcuts, and tray/installer metadata while strictly preserving `com.kinana.vault`, existing vault files, and native Auto-Unlock credentials, plus NSIS pre/post-install migration hooks to remove legacy Windows installations (`كنانة`) cleanly without data loss.
+- Standardized all destructive confirmation dialogs (single service delete, batch service delete, login account delete, and bank card delete) onto a shared `<DestructiveConfirmDialog />` component using consistent RTL button order (Delete on the right, Cancel immediately to its left with safe initial focus), Escape cancellation, duplicate-submission locks, and narrow-viewport layout discipline.
+- Improved Edit Account secret presentation by rendering safe visual password bullets (`••••••••••••`) inside `<SecretInput />` whenever a password is stored (zero preloaded secrets in React state), distinguishing stored-hidden, missing, and replacement states, preserving stored passwords if left blank, and supporting explicit on-demand guarded reveal that clears upon hide, close, blur, or vault lock.
+- Added keyboard accessibility and scoped desktop shortcuts across the vault: `Ctrl+A`/`Cmd+A` (also layout-safe via `KeyA`), `Delete`, and `Escape` in selection mode strictly scoped away from editable fields and open modals, plus focusable `Enter`/`Space`-activatable service cards across Grid and List views.
+
+### Fixed
+- Fixed critical account-type misclassification where login accounts explicitly created inside banking services (e.g. Al Rajhi Bank) were forced into Bank Card presentation/behavior based on parent service name heuristics; persisted an explicit backward-compatible `account_kind` (`login` | `card`) field across `kinana-core` and the UI while preserving legacy `[CARD]` / `MM/YY` cards and previously misclassified bank logins.
+- Fixed identical rendered card/list sizes across Linux zoom steps (e.g. `140%`-`150%` and `160%`-`200%`) by eliminating flexible `1fr` grid track absorption (`repeat(auto-fill, min(100%, ...))`), removing flat list-view upper clamps and duplicate `cqw` style overrides in `index.css`, and aligning card typography/spacing with `--vault-zoom`.
+- Disabled unwanted Windows WebView2 general autofill and password autosave popups (via `ICoreWebView2Settings4`, `ICoreWebView2Profile6`, `generalAutofillEnabled: false`, and selective `ICoreWebView2Profile2` autofill data clearing that preserves `localStorage`) alongside `autoComplete="off"` / `"new-password"` attributes across forms and inputs.
+- Hardened `release.yml` so duplicate tag-push or already-published immutable release events report a clear non-destructive skip with exit status `0` instead of failing builds or touching existing releases (`v0.1.7` and earlier).
+
+---
+
 ## [0.1.7] - 2026-11-10
 
 ### Changed

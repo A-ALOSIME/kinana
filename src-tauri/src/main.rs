@@ -15,7 +15,7 @@ use kinana_core::{
         strip_pin_lines, unpack_account_notes, AccountUpdateInput,
     },
     journal::{create_pre_import_archive, TransactionJournal},
-    models::{Account, SecretString, Service, VaultSummary},
+    models::{Account, AccountKind, SecretString, Service, VaultSummary},
     storage::{VaultSession, VaultStorage},
 };
 
@@ -502,6 +502,7 @@ async fn duplicate_service(
             password: SecretString::new(acc.password.as_str().to_string()),
             notes: acc.notes.clone(),
             url: acc.url.clone(),
+            account_kind: acc.account_kind,
         })
         .collect();
 
@@ -1012,6 +1013,7 @@ pub struct AccountDetail {
     pub password: Option<String>,
     pub recovery_key: Option<String>,
     pub notes: Option<String>,
+    pub account_kind: AccountKind,
 }
 
 #[tauri::command]
@@ -1061,6 +1063,7 @@ async fn get_service_accounts(
                 password: None,
                 recovery_key: None,
                 notes: safe_notes,
+                account_kind: acc.resolve_kind(&service.name),
             }
         })
         .collect();
@@ -1216,6 +1219,7 @@ async fn add_account(
     recovery_key: Option<String>,
     notes: Option<String>,
     url: Option<String>,
+    account_kind: Option<AccountKind>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultSummary, String> {
@@ -1255,6 +1259,14 @@ async fn add_account(
         .find(|s| s.id == service_id)
         .ok_or_else(|| format!("Service with ID '{}' not found", service_id))?;
 
+    let inferred_kind = account_kind.unwrap_or_else(|| {
+        if notes.as_deref().map_or(false, |n| n.contains("[CARD]")) {
+            AccountKind::Card
+        } else {
+            AccountKind::Login
+        }
+    });
+
     let account_id = uuid::Uuid::new_v4().to_string();
     let new_account = Account {
         id: account_id,
@@ -1263,6 +1275,7 @@ async fn add_account(
         password: secret_password,
         notes: packed_notes,
         url: clean_url,
+        account_kind: Some(inferred_kind),
     };
 
     service.accounts.push(new_account);
@@ -1334,6 +1347,7 @@ async fn update_account(
     clear_recovery_key: Option<bool>,
     clear_pin: Option<bool>,
     clear_password: Option<bool>,
+    account_kind: Option<AccountKind>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultSummary, String> {
@@ -1376,6 +1390,7 @@ async fn update_account(
             clear_recovery_key,
             clear_pin,
             clear_password,
+            account_kind,
         },
     );
 
@@ -2001,11 +2016,14 @@ fn main() {
         let name: Vec<u16> = "Kinana_App_Single_Instance_Mutex\0".encode_utf16().collect();
         let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 1, name.as_ptr()) };
         if handle.is_null() || unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-            let title: Vec<u16> = "كنانة\0".encode_utf16().collect();
-            let mut hwnd = unsafe { FindWindowW(std::ptr::null_mut(), title.as_ptr()) };
-            if hwnd.is_null() {
-                let old_title: Vec<u16> = "كِنانة\0".encode_utf16().collect();
-                hwnd = unsafe { FindWindowW(std::ptr::null_mut(), old_title.as_ptr()) };
+            let candidates = ["Kinana\0", "كنانة\0", "كِنانة\0"];
+            let mut hwnd = std::ptr::null_mut();
+            for candidate in candidates {
+                let title_utf16: Vec<u16> = candidate.encode_utf16().collect();
+                hwnd = unsafe { FindWindowW(std::ptr::null_mut(), title_utf16.as_ptr()) };
+                if !hwnd.is_null() {
+                    break;
+                }
             }
             if !hwnd.is_null() {
                 unsafe {
@@ -2084,16 +2102,57 @@ fn main() {
                         );
                     }
                 }
+
+                // Disable WebView2 general form autofill & password autosave popups while keeping
+                // localStorage / UI preferences intact.
+                let _ = window.with_webview(|webview| unsafe {
+                    use webview2_com::Microsoft::Web::WebView2::Win32::{
+                        ICoreWebView2Profile2, ICoreWebView2Profile6, ICoreWebView2Settings4,
+                        ICoreWebView2_13, COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL,
+                        COREWEBVIEW2_BROWSING_DATA_KINDS_PASSWORD_AUTOSAVE,
+                    };
+                    use webview2_com::ClearBrowsingDataCompletedHandler;
+                    use windows_core::Interface;
+
+                    if let Ok(core) = webview.controller().CoreWebView2() {
+                        if let Ok(settings) = core.Settings() {
+                            if let Ok(settings4) = settings.cast::<ICoreWebView2Settings4>() {
+                                let _ = settings4.SetIsGeneralAutofillEnabled(false);
+                                let _ = settings4.SetIsPasswordAutosaveEnabled(false);
+                            }
+                        }
+
+                        if let Ok(core13) = core.cast::<ICoreWebView2_13>() {
+                            if let Ok(profile) = core13.Profile() {
+                                if let Ok(profile6) = profile.cast::<ICoreWebView2Profile6>() {
+                                    let _ = profile6.SetIsGeneralAutofillEnabled(false);
+                                    let _ = profile6.SetIsPasswordAutosaveEnabled(false);
+                                }
+                                if let Ok(profile2) = profile.cast::<ICoreWebView2Profile2>() {
+                                    let handler = ClearBrowsingDataCompletedHandler::create(
+                                        Box::new(|_| Ok(())),
+                                    );
+                                    let _ = profile2.ClearBrowsingData(
+                                        COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL
+                                            | COREWEBVIEW2_BROWSING_DATA_KINDS_PASSWORD_AUTOSAVE,
+                                        &handler,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
             }
 
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-            let open_item = MenuItem::with_id(app, "open_kinana", "فتح كِنانة", true, None::<&str>)?;
+            let open_item = MenuItem::with_id(app, "open_kinana", "فتح Kinana", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "إغلاق", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&open_item, &quit_item])?;
 
             let mut tray_builder = TrayIconBuilder::new()
+                .tooltip("Kinana")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {

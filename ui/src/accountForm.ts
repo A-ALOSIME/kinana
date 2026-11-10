@@ -25,6 +25,7 @@ export interface CardFormValues {
 
 export interface AddAccountPayload {
   serviceId: string;
+  accountKind: AccountFormMode;
   label: string | null;
   username: string | null;
   password: string | null;
@@ -37,6 +38,7 @@ export interface AddAccountPayload {
 export interface UpdateAccountPayload {
   serviceId: string;
   accountId: string;
+  accountKind: AccountFormMode;
   label: string;
   username: string;
   password: string | null;
@@ -46,6 +48,35 @@ export interface UpdateAccountPayload {
   url: string;
   clearRecoveryKey: boolean;
   clearPin: boolean;
+}
+
+/**
+ * Checks whether a service name typically represents a bank or payment card provider.
+ * Used solely as the default mode when opening Add Account, never to override an account's stored kind.
+ */
+export function isBankOrCardService(serviceName: string = ""): boolean {
+  return Boolean(
+    serviceName.match(
+      /(بطاقة|فيزا|ماستركارد|مدى|Visa|Mastercard|Mada|Al Rajhi|SNB|Alinma|urpay|stc pay|بنك|مصرف|الراجحي|الأهلي|الإنماء)/i
+    )
+  );
+}
+
+/**
+ * Resolves whether an existing account should display/edit as a bank card or login account.
+ * Explicit persisted `account_kind` is strictly authoritative and never overridden by parent service name.
+ */
+export function resolveAccountKind(acc: {
+  account_kind?: AccountFormMode | null;
+  notes?: string | null;
+  url?: string | null;
+}): AccountFormMode {
+  if (acc.account_kind === "card" || acc.account_kind === "login") {
+    return acc.account_kind;
+  }
+  if (acc.notes?.includes("[CARD]")) return "card";
+  if (acc.url && /^\d{2}\/\d{2}$/.test(acc.url.trim())) return "card";
+  return "login";
 }
 
 /**
@@ -104,6 +135,7 @@ export function buildAddAccountPayload(
     const cleanNum = card.number.replace(/\s+/g, "").trim();
     return {
       serviceId,
+      accountKind: "card",
       label: card.label.trim() || "بطاقة بنكية",
       username: card.holder.trim() || null,
       password: cleanNum || null,
@@ -116,6 +148,7 @@ export function buildAddAccountPayload(
 
   return {
     serviceId,
+    accountKind: "login",
     label: login.label.trim() || null,
     username: login.username.trim() || null,
     password: login.password.trim() ? login.password : null,
@@ -146,6 +179,7 @@ export function buildUpdateAccountPayload(
     return {
       serviceId,
       accountId,
+      accountKind: "card",
       label: card.label.trim(),
       username: card.holder.trim(),
       password: cleanNum || null,
@@ -161,6 +195,7 @@ export function buildUpdateAccountPayload(
   return {
     serviceId,
     accountId,
+    accountKind: "login",
     label: login.label.trim(),
     username: login.username.trim(),
     password: login.password.trim() ? login.password : null,

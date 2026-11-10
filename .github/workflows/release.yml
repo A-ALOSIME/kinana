@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event.inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   validate-release-tag:
     name: Validate Release Tag & Safety Guards
@@ -22,6 +26,7 @@ jobs:
     outputs:
       tag: ${{ steps.check.outputs.tag }}
       version: ${{ steps.check.outputs.version }}
+      should_release: ${{ steps.check.outputs.should_release }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,7 +43,7 @@ jobs:
             TAG="${{ github.ref_name }}"
           fi
 
-          echo "Evaluating release tag: $TAG"
+          echo "Evaluating release tag: $TAG (event: ${{ github.event_name }})"
 
           # 1. Strict semantic tag format check (e.g. v0.1.2 or v1.0.0-rc1)
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
@@ -46,33 +51,55 @@ jobs:
             exit 1
           fi
 
-          # 2. Strict Version Consistency Check:
-          # Verify that kinana package version in Cargo.toml matches the tag version
           TAG_VER="${TAG#v}"
-          CARGO_VER=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="kinana") | .version')
-          echo "Target tag version: $TAG_VER, kinana Cargo.toml version: $CARGO_VER"
-          if [ "$TAG_VER" != "$CARGO_VER" ]; then
-            echo "ERROR: Version inconsistency detected!"
-            echo "Tag version ($TAG_VER) does not match kinana Cargo.toml version ($CARGO_VER)."
-            echo "To release version $TAG_VER, you must update the version in Cargo.toml, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, and ui/package.json."
+
+          # 2. Strict immutability guard for already published GitHub releases.
+          # When a draft release is published (or a duplicate request targets an already-published tag),
+          # GitHub emits a tag push event for the published tag. Report a clear non-destructive skip
+          # without triggering redundant platform builds or modifying the published release.
+          if RELEASE_JSON=$(gh release view "$TAG" --json isDraft,url 2>/dev/null); then
+            IS_DRAFT=$(echo "$RELEASE_JSON" | jq -r '.isDraft')
+            RELEASE_URL=$(echo "$RELEASE_JSON" | jq -r '.url')
+            if [ "$IS_DRAFT" = "false" ]; then
+              echo "::notice::Release '$TAG' is already published on GitHub ($RELEASE_URL) and is strictly immutable. Skipping duplicate build and release without modifying existing assets."
+              {
+                echo "### Release Automation Skipped (Immutable Published Release)"
+                echo "- Tag \`$TAG\` is already published at $RELEASE_URL."
+                echo "- Trigger event: \`${{ github.event_name }}\`"
+                echo "- Existing releases are strictly immutable; no builds or asset modifications were executed."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+              echo "version=${TAG_VER}" >> "$GITHUB_OUTPUT"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "ERROR: Draft release '$TAG' already exists on GitHub ($RELEASE_URL)."
+            echo "Resolve or remove the unpublished draft before re-running Release Automation."
             exit 1
           fi
 
-          # 3. Guard against overwriting or modifying any existing release (e.g. v0.1.1)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "ERROR: Release '$TAG' already exists on GitHub!"
-            echo "Existing releases are strictly immutable and cannot be overwritten."
+          # 3. Strict Version Consistency Check across all version-bearing files
+          CARGO_VER=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="kinana") | .version')
+          TAURI_VER=$(jq -r '.version' src-tauri/tauri.conf.json)
+          UI_VER=$(jq -r '.version' ui/package.json)
+          echo "Target tag version: $TAG_VER, Cargo: $CARGO_VER, Tauri: $TAURI_VER, UI: $UI_VER"
+          if [ "$TAG_VER" != "$CARGO_VER" ] || [ "$TAG_VER" != "$TAURI_VER" ] || [ "$TAG_VER" != "$UI_VER" ]; then
+            echo "ERROR: Version inconsistency detected!"
+            echo "Tag version ($TAG_VER) must match Cargo.toml ($CARGO_VER), tauri.conf.json ($TAURI_VER), and ui/package.json ($UI_VER)."
             exit 1
           fi
 
           echo "Tag validation succeeded: $TAG (version: $TAG_VER)"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${TAG_VER}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG_VER}" >> "$GITHUB_OUTPUT"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
 
   build-release-assets:
     name: Build (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.os }}
     needs: validate-release-tag
+    if: needs.validate-release-tag.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -219,6 +246,7 @@ jobs:
     name: Assemble & Publish Draft Release
     runs-on: ubuntu-latest
     needs: [validate-release-tag, build-release-assets]
+    if: needs.validate-release-tag.outputs.should_release == 'true'
     permissions:
       contents: write
     steps:
@@ -256,9 +284,12 @@ jobs:
             Kinana is an offline-first, local desktop password manager built with Rust, Tauri 2, and React. All sensitive data is encrypted locally using AES-256-GCM and Argon2id key derivation, with zero external server telemetry or cloud synchronization.
 
             #### What is New in This Release:
-            - Global Arabic Placeholder Rendering Fix: Extracted a shared accessible `<PlaceholderOverlay />` used across both `<Input />` and `<SecretInput />` to bypass WebKitGTK's tight native single-line shadow placeholder bounds (`hhea` descent `-250` vs `-571`/`-610` actual descenders), removed redundant outer vertical `overflow-hidden` clipping, added `line-height: 2.15` + `pt-0.5 pb-1.5` bottom clearance inside horizontal truncation boundaries, normalized `::placeholder` weight, and converted `recovery-key-input` to `min-h-14`.
-            - Account Password Strength Indicator: Added the shared 4-segment informational `<PasswordStrengthIndicator />` directly under the login account password field in `<AccountFormFields />` for both Add and Edit accounts, displaying and updating live when typing or generating a new password while staying hidden when empty (never evaluating existing stored secrets when opening Edit, never shown for payment card fields, and keeping password inputs masked by default).
-            - Previous v0.1.6 Fixes Included: Explicit three-state account clearing semantics, generated-password save/refresh synchronization, simplified/unified Add & Edit forms, centered card numbers, redesigned Vault Creation screen, and refined Settings password change and Auto-Unlock notices.
+            - Account Classification Integrity: Persists explicit user-selected `account_kind` (`login` vs `card`) end-to-end across creation, editing, duplication, vault lock/unlock, restart, and backup import/export while safely preserving legacy cards (`[CARD]`, `MM/YY`) and legacy banking login accounts.
+            - Standardized English Application Identity (`Kinana`): Uses `Kinana` consistently across window titles, macOS bundle name, Linux launcher metadata, and Windows installer/shortcuts while preserving `com.kinana.vault` vault paths and native credential storage plus clean Windows NSIS upgrade cleanup from prior installs.
+            - Safe Masked Edit Password UX: Displays clear masked dots when an existing password is stored (zero preloaded secrets in frontend state), differentiates stored-hidden / missing / replacement states, preserves stored secrets if unchanged, and retrieves plaintext strictly on explicit reveal with cleanup on hide, close, blur, and lock.
+            - Standardized Destructive Confirmations: Shared RTL-consistent confirmation modal (`Delete` on the right, `Cancel` immediately to its left with safe initial focus, Escape closing, duplicate-click guards, and narrow-window support) across single/bulk service deletion, account deletion, and card deletion.
+            - Linux & Cross-Platform Zoom Scaling: Replaced flexible `1fr` card expansion and flat list clamps with proportional card sizing (`repeat(auto-fill, min(100%, ...))`) and aligned card scaling rules so every 10% zoom step (`70%`-`200%`) changes rendered size smoothly.
+            - Keyboard Workflows & Autofill Hardening: Added selection-mode shortcuts (`Ctrl+A`/`Cmd+A`, `Delete`, `Escape`) safely scoped away from editable inputs/open modals, keyboard-focusable/activatable service cards (`Enter`/`Space`), and disabled Windows WebView2 general autofill + password autosave plus HTML form autocomplete.
 
             #### Download Options:
             - Windows (x64): `kinana-windows-x64-setup.exe` (NSIS Installer)
@@ -270,7 +301,7 @@ jobs:
             #### Important Notes & Platform Status:
             - Windows: Primary verified platform with Windows Credential Manager integration for Auto-Unlock and Win32 clipboard history exclusion.
             - Linux: Desktop integration with Freedesktop Secret Service for optional Auto-Unlock and clean desktop launcher integration. Clipboard clearing releases the X11/Wayland selection after 15 seconds; note that third-party clipboard history daemons (such as CopyQ or GPaste) operate independently and retain historical copies unless configured otherwise.
-            - macOS: Preview builds. Unsigned packages require a right-click -> Open or running `xattr -cr /Applications/kinana.app`.
+            - macOS: Preview builds. Unsigned packages require a right-click -> Open or running `xattr -cr /Applications/Kinana.app`.
             - Backups: Always export and retain an encrypted `.dat` backup and store your offline emergency recovery key safely.
 
             #### Verification (SHA-256):

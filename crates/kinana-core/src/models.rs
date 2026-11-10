@@ -42,6 +42,74 @@ impl<'de> Deserialize<'de> for SecretString {
     }
 }
 
+/// Explicit persisted account type (`login` vs `card`).
+/// Preserving explicit user selection avoids relying on service name heuristics.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountKind {
+    #[default]
+    Login,
+    Card,
+}
+
+/// Checks whether a service name typically represents a bank or payment card service
+/// (used only as an initial creation-form default and cautious legacy fallback).
+pub fn is_bank_or_card_service_name(service_name: &str) -> bool {
+    let lower = service_name.to_lowercase();
+    const ENGLISH_MARKERS: &[&str] = &[
+        "visa",
+        "mastercard",
+        "mada",
+        "al rajhi",
+        "snb",
+        "alinma",
+        "urpay",
+        "stc pay",
+    ];
+    if ENGLISH_MARKERS.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+
+    const ARABIC_MARKERS: &[&str] = &[
+        "بطاقة",
+        "فيزا",
+        "ماستركارد",
+        "مدى",
+        "بنك",
+        "مصرف",
+        "الراجحي",
+        "الأهلي",
+        "الإنماء",
+    ];
+    ARABIC_MARKERS.iter().any(|m| service_name.contains(m))
+}
+
+fn is_legacy_expiry_url(url: &str) -> bool {
+    let b = url.trim().as_bytes();
+    b.len() == 5
+        && b[0].is_ascii_digit()
+        && b[1].is_ascii_digit()
+        && b[2] == b'/'
+        && b[3].is_ascii_digit()
+        && b[4].is_ascii_digit()
+}
+
+fn is_legacy_card_number(secret: &str) -> bool {
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let mut digits = 0usize;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_digit() {
+            digits += 1;
+        } else if ch != ' ' && ch != '-' {
+            return false;
+        }
+    }
+    (13..=19).contains(&digits)
+}
+
 /// An individual account credential.
 /// Does NOT derive Clone to prevent duplicating sensitive data in RAM.
 #[derive(Serialize, Deserialize, Debug)]
@@ -52,6 +120,56 @@ pub struct Account {
     pub password: SecretString,
     pub notes: Option<String>,
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_kind: Option<AccountKind>,
+}
+
+impl Account {
+    /// Resolves the authoritative account type (`login` or `card`).
+    /// When an explicit `account_kind` was persisted, it is ALWAYS honored regardless of parent service name.
+    /// Only legacy pre-`account_kind` records (`account_kind == None`) fall back to card markers.
+    pub fn resolve_kind(&self, service_name: &str) -> AccountKind {
+        if let Some(explicit) = self.account_kind {
+            return explicit;
+        }
+
+        let (email, _rec, unpacked_notes) =
+            crate::account_ops::unpack_account_notes(self.notes.as_deref());
+
+        if self.notes.as_deref().map_or(false, |n| n.contains("[CARD]"))
+            || unpacked_notes.contains("[CARD]")
+            || crate::account_ops::extract_pin_from_notes(&unpacked_notes).is_some()
+        {
+            return AccountKind::Card;
+        }
+
+        if self.url.as_deref().map_or(false, is_legacy_expiry_url) {
+            return AccountKind::Card;
+        }
+
+        // Legacy vaults created before explicit `account_kind` never saved login accounts cleanly
+        // inside banking services, EXCEPT login accounts lack `[CARD]` / `MM/YY` and usually carry
+        // an email, a website URL, or a non-digit password. Preserve obvious legacy bank cards
+        // while allowing legacy non-card bank logins to classify accurately as `Login`.
+        if is_bank_or_card_service_name(service_name) {
+            let has_web_url = self
+                .url
+                .as_deref()
+                .map_or(false, |u| {
+                    let t = u.trim();
+                    !t.is_empty() && (t.contains("://") || t.contains('.'))
+                });
+            if email.trim().is_empty()
+                && !has_web_url
+                && (self.label.trim() == "بطاقة بنكية"
+                    || is_legacy_card_number(self.password.as_str()))
+            {
+                return AccountKind::Card;
+            }
+        }
+
+        AccountKind::Login
+    }
 }
 
 /// A service containing a group of accounts.
@@ -90,6 +208,7 @@ pub struct AccountSummary {
     pub has_password: bool,
     pub has_notes: bool,
     pub url: Option<String>,
+    pub account_kind: AccountKind,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -132,6 +251,7 @@ impl VaultData {
                             has_password: !acc.password.as_str().is_empty(),
                             has_notes: acc.notes.as_ref().map_or(false, |n| !n.is_empty()),
                             url: acc.url.clone(),
+                            account_kind: acc.resolve_kind(&svc.name),
                         })
                         .collect(),
                 }
@@ -187,6 +307,7 @@ mod tests {
                     password: SecretString::new("secret123".to_string()),
                     notes: None,
                     url: None,
+                    account_kind: Some(AccountKind::Login),
                 },
                 Account {
                     id: "acc_without_pwd".to_string(),
@@ -195,6 +316,7 @@ mod tests {
                     password: SecretString::new(String::new()),
                     notes: None,
                     url: None,
+                    account_kind: Some(AccountKind::Login),
                 },
             ],
         });
@@ -222,11 +344,81 @@ mod tests {
                 password: SecretString::new("admin_pwd".to_string()),
                 notes: None,
                 url: None,
+                account_kind: Some(AccountKind::Login),
             }],
         });
 
         assert_eq!(vault.get_account_password("non_existent_service", "real_acc"), None);
         assert_eq!(vault.get_account_password("real_service", "non_existent_acc"), None);
         assert_eq!(vault.get_account_password("real_service", "real_acc"), Some("admin_pwd"));
+    }
+
+    #[test]
+    fn test_explicit_account_kind_overrides_bank_service_name_and_legacy_cards_preserved() {
+        let mut vault = VaultData::default();
+        vault.services.push(Service {
+            id: "bank_1".to_string(),
+            name: "Al Rajhi Bank".to_string(),
+            icon_data: None,
+            accounts: vec![
+                Account {
+                    id: "explicit_login".to_string(),
+                    label: "Al Mubasher".to_string(),
+                    username: "user_bank".to_string(),
+                    password: SecretString::new("StrongBankPass!1".to_string()),
+                    notes: None,
+                    url: Some("https://almubasher.com.sa".to_string()),
+                    account_kind: Some(AccountKind::Login),
+                },
+                Account {
+                    id: "explicit_card".to_string(),
+                    label: "Mada Card".to_string(),
+                    username: "USER NAME".to_string(),
+                    password: SecretString::new("4111111111111111".to_string()),
+                    notes: Some("[CARD]".to_string()),
+                    url: Some("08/29".to_string()),
+                    account_kind: Some(AccountKind::Card),
+                },
+                Account {
+                    id: "legacy_card".to_string(),
+                    label: "Old Salary Card".to_string(),
+                    username: "USER".to_string(),
+                    password: SecretString::new("5222222222222222".to_string()),
+                    notes: Some("[CARD]\nPIN: 1234".to_string()),
+                    url: Some("01/28".to_string()),
+                    account_kind: None,
+                },
+                Account {
+                    id: "legacy_login_in_bank".to_string(),
+                    label: "Old Online Banking".to_string(),
+                    username: "online_user".to_string(),
+                    password: SecretString::new("MyOldBankPass!".to_string()),
+                    notes: None,
+                    url: Some("https://alrajhibank.com.sa".to_string()),
+                    account_kind: None,
+                },
+            ],
+        });
+        vault.services.push(Service {
+            id: "generic_1".to_string(),
+            name: "Personal Misc".to_string(),
+            icon_data: None,
+            accounts: vec![Account {
+                id: "card_in_generic".to_string(),
+                label: "Travel Wallet".to_string(),
+                username: "TRAVELER".to_string(),
+                password: SecretString::new("4000000000000002".to_string()),
+                notes: Some("[CARD]".to_string()),
+                url: Some("11/30".to_string()),
+                account_kind: Some(AccountKind::Card),
+            }],
+        });
+
+        let summary = vault.to_summary();
+        assert_eq!(summary.services[0].accounts[0].account_kind, AccountKind::Login);
+        assert_eq!(summary.services[0].accounts[1].account_kind, AccountKind::Card);
+        assert_eq!(summary.services[0].accounts[2].account_kind, AccountKind::Card);
+        assert_eq!(summary.services[0].accounts[3].account_kind, AccountKind::Login);
+        assert_eq!(summary.services[1].accounts[0].account_kind, AccountKind::Card);
     }
 }

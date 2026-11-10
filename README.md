@@ -67,7 +67,7 @@ To verify the integrity of downloaded files, check them against the official che
 2. Open the disk image and drag **Kinana** into your **Applications** folder.
 3. On first launch, right-click **Kinana** in Finder and choose **Open**, or run:
    ```bash
-   xattr -cr /Applications/kinana.app
+   xattr -cr /Applications/Kinana.app
    ```
 
 ### Linux (Preview)

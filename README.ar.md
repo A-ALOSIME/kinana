@@ -69,7 +69,7 @@
 2. افتح صورة القرص واسحب أيقونة **Kinana** إلى مجلد **Applications**.
 3. عند التشغيل لأول مرة، انقر بزر الفأرة الأيمن على التطبيق في Finder واختر **Open**، أو نفّذ الأمر التالي في Terminal:
    ```bash
-   xattr -cr /Applications/kinana.app
+   xattr -cr /Applications/Kinana.app
    ```
 
 ### لينكس (Linux - تجريبي)

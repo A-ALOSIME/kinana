@@ -63,7 +63,7 @@ To open the application safely:
 
 Alternatively, you can clear the quarantine attribute via Terminal:
 ```bash
-xattr -cr /Applications/kinana.app
+xattr -cr /Applications/Kinana.app
 ```
 *(You only need to perform this step once on first launch.)*
 
@@ -77,7 +77,7 @@ xattr -cr /Applications/kinana.app
 - Ubuntu 20.04 LTS / 22.04 LTS / 24.04 LTS, Debian 11 / 12, Linux Mint, or compatible distribution.
 - Dependencies: `libwebkit2gtk-4.1-0` (or `4.0`), `libayatana-appindicator3-1`.
 
-> Note: Starting with v0.1.3, the Debian package strictly conforms to Debian package naming standards (`Package: kinana`) while preserving Arabic localized desktop application branding (`كنانة`). The `.deb` package contains zero custom maintainer scripts and passes automated `dpkg-deb` metadata inspection and `apt` installation smoke checks.
+> Note: Starting with v0.1.3, the Debian package strictly conforms to Debian package naming standards (`Package: kinana`) while displaying **Kinana** consistently in desktop launchers (`Name=Kinana`). The `.deb` package contains zero custom maintainer scripts and passes automated `dpkg-deb` metadata inspection and `apt` installation smoke checks.
 
 #### Installation via Terminal
 ```bash

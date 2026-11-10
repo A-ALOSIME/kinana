@@ -16,6 +16,10 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
       value,
       defaultValue,
       disabled,
+      autoComplete = "off",
+      autoCorrect = "off",
+      autoCapitalize = "off",
+      spellCheck = false,
       onChange,
       ...props
     },
@@ -47,6 +51,13 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
         value={value}
         defaultValue={defaultValue}
         disabled={disabled}
+        autoComplete={autoComplete}
+        autoCorrect={autoCorrect}
+        autoCapitalize={autoCapitalize}
+        spellCheck={spellCheck}
+        data-lpignore="true"
+        data-1p-ignore="true"
+        data-form-type="other"
         placeholder={useOverlay ? undefined : placeholder}
         aria-placeholder={
           useOverlay ? placeholder : props["aria-placeholder"]

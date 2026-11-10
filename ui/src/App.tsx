@@ -88,7 +88,15 @@ import {
 } from "lucide-react";
 import { PasswordStrengthIndicator } from "@/components/ui/password-strength-indicator";
 import { AccountFormFields } from "@/components/AccountFormFields";
+import { DestructiveConfirmDialog } from "@/components/ui/destructive-confirm-dialog";
 import { validateMasterPasswordForm } from "./passwordValidation";
+import {
+  getZoomActionFromKeyboardEvent,
+  shouldActivateServiceCard,
+  shouldHandleDeleteSelectionShortcut,
+  shouldHandleSelectAllShortcut,
+  shouldHandleSelectionEscape,
+} from "./keyboard";
 import {
   POPULAR_SERVICES,
   generateCinematicCoverSvg,
@@ -96,10 +104,13 @@ import {
   loadServiceCovers,
 } from "@/data/popularServices";
 import {
+  type AccountFormMode,
   buildAddAccountPayload,
   buildUpdateAccountPayload,
   extractCardPin,
   extractCleanCardNotes,
+  isBankOrCardService,
+  resolveAccountKind,
 } from "./accountForm";
 
 interface AccountSummary {
@@ -109,6 +120,7 @@ interface AccountSummary {
   has_password: boolean;
   has_notes: boolean;
   url?: string;
+  account_kind?: AccountFormMode;
 }
 
 interface AccountDetail {
@@ -124,6 +136,7 @@ interface AccountDetail {
   password?: string | null;
   recovery_key?: string | null;
   notes?: string | null;
+  account_kind?: AccountFormMode;
 }
 
 interface ServiceSummary {
@@ -191,19 +204,10 @@ function detectCardBrand(num: string = "", serviceName: string = ""): { name: st
   return { name: "Card", color: "#1E293B", badge: "BANK CARD" };
 }
 
-// Check if a service is inherently a bank or card service
-function isBankOrCardService(serviceName: string = ""): boolean {
-  return Boolean(
-    serviceName.match(/(بطاقة|فيزا|ماستركارد|مدى|Visa|Mastercard|Mada|Al Rajhi|SNB|Alinma|urpay|stc pay|بنك|مصرف|الراجحي|الأهلي|الإنماء)/i)
-  );
-}
-
-// Check if an account is a dedicated bank card account
-function isAccountCard(acc: { notes?: string | null; url?: string | null }, serviceName: string = ""): boolean {
-  if (acc.notes?.includes("[CARD]")) return true;
-  if (acc.url && /^\d{2}\/\d{2}$/.test(acc.url.trim())) return true;
-  if (isBankOrCardService(serviceName)) return true;
-  return false;
+// Resolve authoritative persisted account kind (`login` vs `card`).
+// Service name may guide creation defaults only, never override an existing account's stored kind.
+function isAccountCard(acc: { account_kind?: AccountFormMode | null; notes?: string | null; url?: string | null }): boolean {
+  return resolveAccountKind(acc) === "card";
 }
 
 
@@ -416,6 +420,7 @@ export default function App() {
   }, [selectedServiceIds]);
 
   const [showBatchDeleteModal, setShowBatchDeleteModal] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Windows-style Marquee Box Selection state (Drag in empty space to select cards)
   const [marqueeBox, setMarqueeBox] = useState<{
@@ -501,6 +506,7 @@ export default function App() {
     serviceId: string;
     accountId: string;
     label: string;
+    isCard?: boolean;
   } | null>(null);
 
   // View mode: 'netflix' (widescreen edge-to-edge cover cards) vs 'list' (compact list with small images & count)
@@ -621,6 +627,7 @@ export default function App() {
   const [editUsername, setEditUsername] = useState<string>("");
   const [editEmail, setEditEmail] = useState<string>("");
   const [editPassword, setEditPassword] = useState<string>("");
+  const [editRevealedStoredPassword, setEditRevealedStoredPassword] = useState<string | null>(null);
   const [editRecoveryKey, setEditRecoveryKey] = useState<string>("");
   const [editUrl, setEditUrl] = useState<string>("");
   const [editNotes, setEditNotes] = useState<string>("");
@@ -759,6 +766,34 @@ export default function App() {
     const unpinned = summary.services.filter((s) => !pinnedSet.has(s.id));
     return [...pinned, ...unpinned];
   }, [summary?.services, pinnedServiceIds]);
+
+  const unlockedRef = useRef<boolean>(false);
+  useEffect(() => {
+    unlockedRef.current = unlocked;
+  }, [unlocked]);
+
+  const displayedServicesRef = useRef<ServiceSummary[]>([]);
+  useEffect(() => {
+    displayedServicesRef.current = displayedServices;
+  }, [displayedServices]);
+
+  const hasOpenDialogRef = useRef<boolean>(false);
+  const isAnyDialogOpen =
+    Boolean(selectedServiceId) ||
+    showAddService ||
+    showEditService ||
+    showAddAccount ||
+    Boolean(editingAccount) ||
+    Boolean(serviceToDelete) ||
+    Boolean(accountToDelete) ||
+    showBatchDeleteModal ||
+    showSettings ||
+    showRecoveryModal ||
+    showImportModal ||
+    showAutoUnlockModal;
+  useEffect(() => {
+    hasOpenDialogRef.current = isAnyDialogOpen;
+  }, [isAnyDialogOpen]);
 
   // Zoom management helper with on-screen HUD toast
   const applyZoom = (newLevel: number) => {
@@ -925,6 +960,7 @@ export default function App() {
     setAccEmail("");
     setAccLabel("");
     setEditPassword("");
+    setEditRevealedStoredPassword(null);
     setEditRecoveryKey("");
     setEditNotes("");
     setEditUsername("");
@@ -938,6 +974,8 @@ export default function App() {
     setCardPin("");
     setClearRecoveryKey(false);
     setClearCardPin(false);
+    setIsDeleting(false);
+    setShowBatchDeleteModal(false);
     setRevealedAccountPasswords({});
     setRevealedAccountRecoveryKeys({});
     setRevealedCardNumbers({});
@@ -973,7 +1011,7 @@ export default function App() {
     const unlistenPromise = listen("vault-auto-locked", () => {
       purgeAllSensitiveState();
       invoke("trim_app_memory").catch(() => {});
-      setWarning("تم إقفال كنانة تلقائياً بسبب الخمول لحماية بياناتك.");
+      setWarning("تم إقفال Kinana تلقائياً بسبب الخمول لحماية بياناتك.");
     });
 
     const syncFullscreen = async () => {
@@ -991,11 +1029,41 @@ export default function App() {
       setSavedPasswordHint(null);
       setShowVaultRecoveryKey(false);
       setRecoveryKey(null);
+      setShowEditPassword(false);
+      setEditRevealedStoredPassword(null);
     };
     window.addEventListener("blur", handleBlur);
 
-    // Keyboard shortcuts: F11 fullscreen, Ctrl+= zoom in, Ctrl+- zoom out, Ctrl+0 zoom reset
+    // Keyboard shortcuts: F11 fullscreen, selection mode (Ctrl/Cmd+A, Delete, Esc), Ctrl/Cmd zoom
     const handleKeyDown = async (e: KeyboardEvent) => {
+      const dialogOpenInDom = Boolean(document.querySelector("[role='dialog']"));
+      const shortcutCtx = {
+        unlocked: unlockedRef.current,
+        selectionMode: selectionModeRef.current,
+        selectedCount: selectedServiceIdsRef.current.length,
+        hasOpenDialog: hasOpenDialogRef.current || dialogOpenInDom,
+        target: e.target,
+      };
+
+      if (shouldHandleSelectAllShortcut(e, shortcutCtx)) {
+        e.preventDefault();
+        setSelectedServiceIds(displayedServicesRef.current.map((s) => s.id));
+        return;
+      }
+
+      if (shouldHandleDeleteSelectionShortcut(e, shortcutCtx)) {
+        e.preventDefault();
+        setShowBatchDeleteModal(true);
+        return;
+      }
+
+      if (shouldHandleSelectionEscape(e, shortcutCtx)) {
+        e.preventDefault();
+        setSelectionMode(false);
+        setSelectedServiceIds([]);
+        return;
+      }
+
       if (e.key === "F11") {
         e.preventDefault();
         try {
@@ -1004,13 +1072,11 @@ export default function App() {
         } catch (err) {
           console.warn("Fullscreen toggle failed:", err);
         }
-      } else if (e.key === "Escape") {
-        if (selectionModeRef.current) {
-          e.preventDefault();
-          setSelectionMode(false);
-          setSelectedServiceIds([]);
-          return;
-        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (shortcutCtx.hasOpenDialog) return;
         try {
           const isFull = await invoke<boolean>("is_fullscreen");
           if (isFull) {
@@ -1019,13 +1085,17 @@ export default function App() {
             setIsFullscreen(next);
           }
         } catch {}
-      } else if (e.ctrlKey && (e.key === "=" || e.key === "+")) {
+        return;
+      }
+
+      const zoomAction = getZoomActionFromKeyboardEvent(e);
+      if (zoomAction === "in") {
         e.preventDefault();
         applyZoom(zoomLevelRef.current + 0.1);
-      } else if (e.ctrlKey && e.key === "-") {
+      } else if (zoomAction === "out") {
         e.preventDefault();
         applyZoom(zoomLevelRef.current - 0.1);
-      } else if (e.ctrlKey && e.key === "0") {
+      } else if (zoomAction === "reset") {
         e.preventDefault();
         applyZoom(1.0);
       }
@@ -1486,8 +1556,9 @@ export default function App() {
   };
 
   const handleConfirmBatchDelete = async () => {
-    if (selectedServiceIds.length === 0) return;
+    if (selectedServiceIds.length === 0 || isDeleting) return;
     try {
+      setIsDeleting(true);
       setError(null);
       const updated = await invoke<VaultSummary>("delete_multiple_services", {
         serviceIds: selectedServiceIds,
@@ -1498,6 +1569,8 @@ export default function App() {
       setShowBatchDeleteModal(false);
     } catch (err: any) {
       setError(err?.toString() || "فشل حذف الخدمات المحددة");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1577,7 +1650,7 @@ export default function App() {
         setShowSavedPassword(false);
         setSettingsFeedback({
           type: "success",
-          message: "تم تعطيل الفتح التلقائي: سيُطلب منك رمز الدخول في كل مرة تفتح فيها كنانة.",
+          message: "تم تعطيل الفتح التلقائي: سيُطلب منك رمز الدخول في كل مرة تفتح فيها Kinana.",
         });
       } catch (err: any) {
         setSettingsFeedback({
@@ -1613,7 +1686,7 @@ export default function App() {
       setShowAutoUnlockModal(false);
       setSettingsFeedback({
         type: "success",
-        message: "تم تفعيل الفتح التلقائي بنجاح: سيتم فتح كنانة تلقائياً عند كل تشغيل.",
+        message: "تم تفعيل الفتح التلقائي بنجاح: سيتم فتح Kinana تلقائياً عند كل تشغيل.",
       });
     } catch (err: any) {
       const errStr = err?.toString() || "";
@@ -1822,6 +1895,7 @@ export default function App() {
     setEditUsername("");
     setEditEmail("");
     setEditPassword("");
+    setEditRevealedStoredPassword(null);
     setEditRecoveryKey("");
     setEditUrl("");
     setEditNotes("");
@@ -1868,6 +1942,7 @@ export default function App() {
       if (target === "add") {
         setAccPassword(generated);
       } else {
+        setEditRevealedStoredPassword(null);
         setEditPassword(generated);
       }
     } catch (err: any) {
@@ -1877,6 +1952,34 @@ export default function App() {
       } else {
         setEditAccountError(msg);
       }
+    }
+  };
+
+  // Explicit on-demand guarded reveal/hide for Edit password field
+  const handleToggleEditPasswordReveal = async () => {
+    if (showEditPassword) {
+      setShowEditPassword(false);
+      setEditRevealedStoredPassword(null);
+      return;
+    }
+
+    if (editPassword.length > 0 || !editingAccount?.has_password || !selectedServiceId) {
+      setShowEditPassword(true);
+      return;
+    }
+
+    const epoch = sessionGuardRef.current.epoch;
+    try {
+      const pwd = await invoke<string>("get_account_password", {
+        serviceId: selectedServiceId,
+        accountId: editingAccount.id,
+      });
+      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
+      setEditRevealedStoredPassword(pwd);
+      setShowEditPassword(true);
+    } catch (err: any) {
+      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
+      setEditAccountError(err?.toString() || "فشل استرجاع كلمة المرور المحفوظة");
     }
   };
 
@@ -1934,7 +2037,9 @@ export default function App() {
 
   // Confirm and Execute Service Deletion
   const confirmDeleteService = async (serviceId: string) => {
+    if (isDeleting) return;
     try {
+      setIsDeleting(true);
       setError(null);
       const updated = await invoke<VaultSummary>("delete_service", { serviceId });
       setSummary(updated);
@@ -1942,6 +2047,8 @@ export default function App() {
       setServiceToDelete(null);
     } catch (err: any) {
       setError(err?.toString() || "فشل حذف الخدمة");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1988,7 +2095,7 @@ export default function App() {
 
   // Duplicate / Clone Account Handler (Pre-fills Add modal with cloned values)
   const handleDuplicateAccount = async (acc: AccountDetail) => {
-    const isCard = isAccountCard(acc, selectedService?.name);
+    const isCard = isAccountCard(acc);
     resetAccountFormFields();
     setAccountFormMode(isCard ? "card" : "login");
     setAccLabel(`${acc.label || (isCard ? "بطاقة" : "حساب")} (نسخة)`);
@@ -2012,7 +2119,7 @@ export default function App() {
 
   // Open Edit Account Modal
   const openEditAccountModal = (acc: AccountDetail) => {
-    const isCard = isAccountCard(acc, selectedService?.name);
+    const isCard = isAccountCard(acc);
     resetAccountFormFields();
     setEditingAccount(acc);
     setAccountFormMode(isCard ? "card" : "login");
@@ -2080,7 +2187,9 @@ export default function App() {
 
   // Confirm and Execute Account Deletion
   const confirmDeleteAccount = async (serviceId: string, accountId: string) => {
+    if (isDeleting) return;
     try {
+      setIsDeleting(true);
       setError(null);
       const updated = await invoke<VaultSummary>("delete_account", { serviceId, accountId });
       setSummary(updated);
@@ -2088,6 +2197,8 @@ export default function App() {
       setAccountToDelete(null);
     } catch (err: any) {
       setError(err?.toString() || "فشل حذف الحساب");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -2178,12 +2289,12 @@ export default function App() {
         <div className="text-center space-y-6">
           <img
             src={kinanaLogo}
-            alt="كنانة"
+            alt="Kinana"
             className="h-20 w-auto object-contain mx-auto animate-pulse drop-shadow-lg"
           />
           <div className="flex items-center justify-center gap-3 text-lg font-medium">
             <RefreshCw className="w-5 h-5 animate-spin text-primary" />
-            <span>جاري فتح كنانة والتحقق من الأمان...</span>
+            <span>جاري فتح Kinana والتحقق من الأمان...</span>
           </div>
         </div>
       </div>
@@ -2285,7 +2396,7 @@ export default function App() {
               <div className="flex justify-center mb-5">
                 <img
                   src={kinanaLogo}
-                  alt="كنانة"
+                  alt="Kinana"
                   className="h-28 sm:h-32 w-auto object-contain drop-shadow-xl"
                 />
               </div>
@@ -2303,7 +2414,7 @@ export default function App() {
                   isSubmitting: isCreatingVault,
                 });
                 return (
-                <form onSubmit={handleCreate} className="space-y-4">
+                <form onSubmit={handleCreate} autoComplete="off" className="space-y-4">
                   <div>
                     <FormLabel htmlFor="create-vault-password" required className="mb-2">
                       كلمة المرور الرئيسية
@@ -2387,7 +2498,7 @@ export default function App() {
                 </form>
                 );
               })() : (
-                <form onSubmit={handleUnlock} className="space-y-6">
+                <form onSubmit={handleUnlock} autoComplete="off" className="space-y-6">
                   <div>
                     <FormLabel htmlFor="unlock-vault-password" centered required className="mb-2.5">
                       أدخل رمز الدخول أو كلمة المرور الرئيسية
@@ -2505,9 +2616,9 @@ export default function App() {
               <div className="flex items-center space-x-4 space-x-reverse shrink-0">
                 <img
                   src={kinanaLogo}
-                  alt="كنانة"
+                  alt="Kinana"
                   className="h-10 w-auto object-contain cursor-pointer drop-shadow-sm"
-                  title="كنانة"
+                  title="Kinana"
                 />
                 <Badge
                   variant="secondary"
@@ -2762,9 +2873,22 @@ export default function App() {
                     <ContextMenuTrigger asChild>
                       <Card
                         data-service-id={service.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={
+                          selectionMode
+                            ? `${service.name} (${selectedServiceIds.includes(service.id) ? "محددة" : "غير محددة"})`
+                            : service.name
+                        }
                         onPointerDown={(e) => handlePointerDown(e, service.id)}
                         onClick={() => handleCardClick(service.id)}
-                        className={`kinana-service-card group cursor-grab active:cursor-grabbing border-2 transition-all duration-200 bg-card rounded-2xl overflow-hidden relative aspect-video flex flex-col justify-end shadow-md ${
+                        onKeyDown={(e) => {
+                          if (shouldActivateServiceCard(e)) {
+                            if (e.key === " ") e.preventDefault();
+                            handleCardClick(service.id);
+                          }
+                        }}
+                        className={`kinana-service-card group cursor-grab active:cursor-grabbing border-2 transition-all duration-200 bg-card rounded-2xl overflow-hidden relative aspect-video flex flex-col justify-end shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                           draggedServiceId === service.id
                             ? "opacity-30 scale-95 border-dashed border-primary ring-4 ring-primary/40 shadow-2xl"
                             : selectionMode && selectedServiceIds.includes(service.id)
@@ -2920,20 +3044,39 @@ export default function App() {
             ) : (
               /* Option 2: Compact List View with Scaled Icons, Labels & Action Buttons */
               <div
-                style={{ gap: `${zoomMetrics.listRowGapPx}px` }}
-                className="flex flex-col max-w-5xl mx-auto w-full"
+                style={{
+                  gap: `${zoomMetrics.listRowGapPx}px`,
+                  maxWidth:
+                    zoomLevel > 1
+                      ? `min(100%, ${(64 * zoomLevel).toFixed(2)}rem)`
+                      : "64rem",
+                }}
+                className="flex flex-col mx-auto w-full"
               >
                 {displayedServices.map((service) => (
                   <ContextMenu key={service.id}>
                     <ContextMenuTrigger asChild>
                       <div
                         data-service-id={service.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={
+                          selectionMode
+                            ? `${service.name} (${selectedServiceIds.includes(service.id) ? "محددة" : "غير محددة"})`
+                            : service.name
+                        }
                         onPointerDown={(e) => handlePointerDown(e, service.id)}
                         onClick={() => handleCardClick(service.id)}
+                        onKeyDown={(e) => {
+                          if (shouldActivateServiceCard(e)) {
+                            if (e.key === " ") e.preventDefault();
+                            handleCardClick(service.id);
+                          }
+                        }}
                         style={{
                           padding: `${zoomMetrics.listRowPaddingY}px ${zoomMetrics.listRowPaddingX}px`,
                         }}
-                        className={`group cursor-grab active:cursor-grabbing rounded-2xl border-2 bg-card hover:bg-muted/20 transition-all duration-200 hover:shadow-lg flex items-center justify-between gap-4 sm:gap-6 ${
+                        className={`group cursor-grab active:cursor-grabbing rounded-2xl border-2 bg-card hover:bg-muted/20 transition-all duration-200 hover:shadow-lg flex items-center justify-between gap-4 sm:gap-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                           draggedServiceId === service.id
                             ? "opacity-30 scale-[0.98] border-dashed border-primary ring-4 ring-primary/40 shadow-2xl"
                             : selectionMode && selectedServiceIds.includes(service.id)
@@ -3235,49 +3378,30 @@ export default function App() {
           )}
 
           {/* Batch Delete Confirmation Dialog */}
-          <Dialog open={showBatchDeleteModal} onOpenChange={setShowBatchDeleteModal}>
-            <DialogContent className="max-w-md p-6 rounded-3xl bg-card border-2 border-destructive/50 shadow-2xl text-right">
-              <DialogHeader className="space-y-3 text-right">
-                <DialogTitle className="text-xl font-bold font-thamaniah text-destructive flex items-center gap-2.5 leading-normal">
-                  <div className="flex items-center justify-center shrink-0">
-                    <Trash2 className="w-5 h-5 text-destructive" />
-                  </div>
-                  <span className="leading-normal">
-                    {selectedServiceIds.length === 1
-                      ? "تأكيد حذف الخدمة المحددة"
-                      : "تأكيد حذف الخدمات المحددة"}
-                  </span>
-                </DialogTitle>
-                <DialogDescription className="text-sm font-semibold text-muted-foreground leading-relaxed">
-                  أنت على وشك حذف{" "}
-                  <strong className="text-foreground">{selectedServiceIds.length}</strong>{" "}
-                  {selectedServiceIds.length === 1 ? "خدمة" : "خدمات"} مع كافة الحسابات وكلمات المرور والبيانات المحفوظة داخلها نهائياً. لا يمكن التراجع عن هذا الإجراء.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-border/60">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowBatchDeleteModal(false)}
-                  className="h-10 px-4 rounded-xl font-bold"
-                >
-                  إلغاء
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleConfirmBatchDelete}
-                  className="h-10 px-5 rounded-xl font-bold gap-2"
-                >
-                  <Trash2 className="w-4 h-4 shrink-0" />
-                  <span>
-                    {selectedServiceIds.length === 1
-                      ? "حذف الخدمة المحددة نهائياً"
-                      : `حذف الخدمات المحددة (${selectedServiceIds.length}) نهائياً`}
-                  </span>
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <DestructiveConfirmDialog
+            open={showBatchDeleteModal}
+            onOpenChange={setShowBatchDeleteModal}
+            title={
+              selectedServiceIds.length === 1
+                ? "تأكيد حذف الخدمة المحددة"
+                : "تأكيد حذف الخدمات المحددة"
+            }
+            description={
+              <>
+                أنت على وشك حذف{" "}
+                <strong className="text-foreground">{selectedServiceIds.length}</strong>{" "}
+                {selectedServiceIds.length === 1 ? "خدمة" : "خدمات"} مع كافة الحسابات وكلمات المرور والبيانات المحفوظة داخلها نهائياً. لا يمكن التراجع عن هذا الإجراء.
+              </>
+            }
+            confirmLabel={
+              selectedServiceIds.length === 1
+                ? "حذف الخدمة"
+                : `حذف المحدد (${selectedServiceIds.length})`
+            }
+            isSubmitting={isDeleting}
+            onCancel={() => setShowBatchDeleteModal(false)}
+            onConfirm={handleConfirmBatchDelete}
+          />
         </div>
       </ContextMenuTrigger>
 
@@ -3432,7 +3556,7 @@ export default function App() {
                   </div>
                 ) : (
                   serviceAccounts.map((acc) => {
-                    const isCard = isAccountCard(acc, selectedService?.name);
+                    const isCard = isAccountCard(acc);
 
                     if (isCard) {
                       const brand = detectCardBrand(acc.username, selectedService?.name);
@@ -3514,6 +3638,7 @@ export default function App() {
                                     serviceId: selectedService.id,
                                     accountId: acc.id,
                                     label: acc.label || acc.username || "هذه البطاقة",
+                                    isCard: true,
                                   })
                                 }
                                 className="h-9 w-9 rounded-xl text-rose-400 hover:bg-rose-500/20"
@@ -3765,6 +3890,7 @@ export default function App() {
                                 serviceId: selectedService.id,
                                 accountId: acc.id,
                                 label: acc.label || acc.username || "هذا الحساب",
+                                isCard: false,
                               })
                             }
                             className="h-9 w-9 rounded-xl text-destructive hover:bg-destructive/15"
@@ -4087,7 +4213,7 @@ export default function App() {
             </div>
           )}
 
-          <form onSubmit={handleAddService} className="space-y-6 pt-2">
+          <form onSubmit={handleAddService} autoComplete="off" className="space-y-6 pt-2">
             {/* Quick Presets Section */}
             <div className="space-y-3 p-4 rounded-2xl bg-muted/30 border border-border/60">
               <div className="flex items-center justify-between">
@@ -4378,7 +4504,7 @@ export default function App() {
             </div>
           )}
 
-          <form onSubmit={handleUpdateService} className="space-y-6 pt-2">
+          <form onSubmit={handleUpdateService} autoComplete="off" className="space-y-6 pt-2">
             {/* Quick Presets Section */}
             <div className="space-y-3 p-4 rounded-2xl bg-muted/30 border border-border/60">
               <div className="flex items-center justify-between">
@@ -4708,7 +4834,7 @@ export default function App() {
             </div>
           )}
 
-          <form onSubmit={handleAddAccount} className="space-y-4 pt-2">
+          <form onSubmit={handleAddAccount} autoComplete="off" className="space-y-4 pt-2">
             <AccountFormFields
               mode={accountFormMode}
               isEdit={false}
@@ -4839,7 +4965,7 @@ export default function App() {
             </div>
           )}
 
-          <form onSubmit={handleUpdateAccount} className="space-y-4 pt-2">
+          <form onSubmit={handleUpdateAccount} autoComplete="off" className="space-y-4 pt-2">
             <AccountFormFields
               mode={accountFormMode}
               isEdit
@@ -4854,9 +4980,14 @@ export default function App() {
               email={editEmail}
               onEmailChange={setEditEmail}
               password={editPassword}
-              onPasswordChange={setEditPassword}
+              onPasswordChange={(val) => {
+                if (editRevealedStoredPassword !== null) {
+                  setEditRevealedStoredPassword(null);
+                }
+                setEditPassword(val);
+              }}
               showPassword={showEditPassword}
-              onToggleShowPassword={() => setShowEditPassword((prev) => !prev)}
+              onToggleShowPassword={handleToggleEditPasswordReveal}
               onGeneratePassword={() => handleGeneratePassword("edit")}
               recoveryKey={editRecoveryKey}
               onRecoveryKeyChange={setEditRecoveryKey}
@@ -4880,6 +5011,8 @@ export default function App() {
               onCardPinChange={setCardPin}
               showCardPin={showCardPin}
               onToggleShowCardPin={() => setShowCardPin((prev) => !prev)}
+              hasExistingPassword={Boolean(editingAccount?.has_password)}
+              revealedStoredPassword={editRevealedStoredPassword}
               hasExistingRecoveryKey={Boolean(editingAccount?.has_recovery_key)}
               clearRecoveryKey={clearRecoveryKey}
               onSetClearRecoveryKey={setClearRecoveryKey}
@@ -4910,8 +5043,8 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
-      {/* ================= MODAL: DELETE CONFIRMATION (SHADCN STYLED, REPLACES NATIVE BROWSER POPUP) ================= */}
-      <Dialog
+      {/* ================= MODAL: DELETE CONFIRMATION (STANDARDIZED RTL DESTRUCTIVE DIALOG) ================= */}
+      <DestructiveConfirmDialog
         open={Boolean(serviceToDelete || accountToDelete)}
         onOpenChange={(open) => {
           if (!open) {
@@ -4919,66 +5052,57 @@ export default function App() {
             setAccountToDelete(null);
           }
         }}
-      >
-        <DialogContent className="max-w-md p-7 rounded-3xl bg-card border-2 border-border/80 shadow-2xl text-center">
-          <div className="w-16 h-16 rounded-2xl bg-destructive/15 border border-destructive/30 flex items-center justify-center mx-auto text-destructive mb-3">
-            <Trash2 className="w-8 h-8" />
-          </div>
-
-          <DialogHeader className="text-center pe-0 space-y-2">
-            <DialogTitle className="text-2xl font-black font-thamaniah text-foreground text-center">
-              {serviceToDelete ? "تأكيد حذف الخدمة" : "تأكيد حذف الحساب"}
-            </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground text-center leading-relaxed">
-              {serviceToDelete ? (
-                <>
-                  هل أنت متأكد من حذف خدمة{" "}
-                  <span className="font-bold text-foreground">«{serviceToDelete.name}»</span>؟
-                  <br />
-                  سيتم حذف هذه الخدمة نهائياً مع كافة الحسابات وكلمات المرور التابعة لها، ولا يمكن
-                  التراجع عن هذا الإجراء.
-                </>
-              ) : (
-                <>
-                  هل أنت متأكد من حذف حساب{" "}
-                  <span className="font-bold text-foreground">«{accountToDelete?.label}»</span>؟
-                  <br />
-                  سيتم مسح بيانات الحساب وكلمة المرور الخاصة به نهائياً من الخزنة.
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex items-center justify-center gap-3 pt-5 border-t border-border/40 mt-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setServiceToDelete(null);
-                setAccountToDelete(null);
-              }}
-              className="h-12 px-6 rounded-xl text-base font-bold flex-1"
-            >
-              إلغاء
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={async () => {
-                if (serviceToDelete) {
-                  await confirmDeleteService(serviceToDelete.id);
-                } else if (accountToDelete) {
-                  await confirmDeleteAccount(accountToDelete.serviceId, accountToDelete.accountId);
-                }
-              }}
-              className="h-12 px-6 rounded-xl text-base font-bold shadow-lg gap-2 flex-1"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>حذف نهائي</span>
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        title={
+          serviceToDelete
+            ? "تأكيد حذف الخدمة"
+            : accountToDelete?.isCard
+            ? "تأكيد حذف البطاقة"
+            : "تأكيد حذف الحساب"
+        }
+        description={
+          serviceToDelete ? (
+            <>
+              هل أنت متأكد من حذف خدمة{" "}
+              <span className="font-bold text-foreground">«{serviceToDelete.name}»</span>؟
+              <br />
+              سيتم حذف هذه الخدمة نهائياً مع كافة الحسابات وكلمات المرور التابعة لها، ولا يمكن التراجع عن هذا الإجراء.
+            </>
+          ) : accountToDelete?.isCard ? (
+            <>
+              هل أنت متأكد من حذف بطاقة{" "}
+              <span className="font-bold text-foreground">«{accountToDelete.label}»</span>؟
+              <br />
+              سيتم مسح بيانات البطاقة وأرقامها السرية نهائياً من الخزنة.
+            </>
+          ) : (
+            <>
+              هل أنت متأكد من حذف حساب{" "}
+              <span className="font-bold text-foreground">«{accountToDelete?.label}»</span>؟
+              <br />
+              سيتم مسح بيانات الحساب وكلمة المرور الخاصة به نهائياً من الخزنة.
+            </>
+          )
+        }
+        confirmLabel={
+          serviceToDelete
+            ? "حذف الخدمة"
+            : accountToDelete?.isCard
+            ? "حذف البطاقة"
+            : "حذف الحساب"
+        }
+        isSubmitting={isDeleting}
+        onCancel={() => {
+          setServiceToDelete(null);
+          setAccountToDelete(null);
+        }}
+        onConfirm={async () => {
+          if (serviceToDelete) {
+            await confirmDeleteService(serviceToDelete.id);
+          } else if (accountToDelete) {
+            await confirmDeleteAccount(accountToDelete.serviceId, accountToDelete.accountId);
+          }
+        }}
+      />
 
       {/* ================= MODAL: SETTINGS & SECURITY ================= */}
       <Dialog
@@ -5059,7 +5183,7 @@ export default function App() {
                       </h4>
                       <p className="text-sm text-muted-foreground mt-0.5">
                         {autoUnlockActive
-                          ? `مفعّل: يتم فتح كنانة تلقائياً عبر مخزن الاعتمادات الآمن (${autoUnlockStatus.platform_name}).`
+                          ? `مفعّل: يتم فتح Kinana تلقائياً عبر مخزن الاعتمادات الآمن (${autoUnlockStatus.platform_name}).`
                           : "معطّل: سيُطلب منك إدخال كلمة المرور الرئيسية في كل مرة تشغّل فيها التطبيق."}
                       </p>
                     </div>
@@ -5270,7 +5394,7 @@ export default function App() {
                   isSubmitting: isChangingMasterPassword,
                 });
                 return (
-              <form onSubmit={handleChangeMasterPassword} className="space-y-4">
+              <form onSubmit={handleChangeMasterPassword} autoComplete="off" className="space-y-4">
                 <div>
                   <FormLabel htmlFor="settings-new-password" required className="text-sm">
                     كلمة المرور الرئيسية الجديدة
@@ -5508,7 +5632,7 @@ export default function App() {
             </div>
           )}
 
-          <form onSubmit={handleConfirmEnableAutoUnlock} className="space-y-4 pt-2">
+          <form onSubmit={handleConfirmEnableAutoUnlock} autoComplete="off" className="space-y-4 pt-2">
             <div>
               <FormLabel htmlFor="auto-unlock-password" required className="text-xs">
                 أدخل رمز الدخول أو كلمة المرور الحالية
@@ -5593,7 +5717,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleRecoverVault} className="space-y-6 pt-4">
+          <form onSubmit={handleRecoverVault} autoComplete="off" className="space-y-6 pt-4">
             <div>
               <FormLabel htmlFor="recovery-key-input" required className="mb-2">
                 مفتاح الاسترداد (<bdi dir="ltr">Recovery Key</bdi>)
@@ -5660,7 +5784,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handlePerformImport} className="space-y-6 pt-4">
+          <form onSubmit={handlePerformImport} autoComplete="off" className="space-y-6 pt-4">
             {importModalError && (
               <div className="p-4 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive text-sm font-bold flex items-center gap-2 text-start">
                 <ShieldAlert className="w-5 h-5 flex-shrink-0" />

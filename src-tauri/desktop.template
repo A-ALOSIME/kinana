@@ -6,6 +6,5 @@ Comment={{comment}}
 Exec={{exec}} %U
 Icon={{icon}}
 Name=Kinana
-Name[ar]=كنانة
 Terminal=false
 Type=Application

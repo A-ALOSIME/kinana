@@ -41,14 +41,14 @@ test("clampZoomLevel clamps and sanitizes zoom inputs", () => {
   assert.equal(clampZoomLevel(1.256), 1.26);
 });
 
-test("computeZoomMetrics scales container, grid tracks, and list metrics proportionally without overflow", () => {
+test("computeZoomMetrics scales container, grid tracks, and list metrics strictly monotonically without stalling", () => {
   const baseline = computeZoomMetrics(1.0);
   assert.equal(baseline.percentageLabel, "100%");
   assert.equal(baseline.containerMaxWidthCss, "80rem");
   assert.equal(baseline.gridMinColumnPx, 256);
   assert.equal(
     baseline.gridTemplateColumnsCss,
-    "repeat(auto-fill, minmax(min(100%, 256px), 1fr))"
+    "repeat(auto-fill, min(100%, 256px))"
   );
 
   const zoomedIn = computeZoomMetrics(2.0);
@@ -57,7 +57,7 @@ test("computeZoomMetrics scales container, grid tracks, and list metrics proport
   assert.equal(zoomedIn.gridMinColumnPx, 512);
   assert.equal(
     zoomedIn.gridTemplateColumnsCss,
-    "repeat(auto-fill, minmax(min(100%, 512px), 1fr))"
+    "repeat(auto-fill, min(100%, 512px))"
   );
   assert.ok(zoomedIn.listTitleFontRem > baseline.listTitleFontRem);
   assert.ok(zoomedIn.listIconSizePx > baseline.listIconSizePx);
@@ -66,6 +66,29 @@ test("computeZoomMetrics scales container, grid tracks, and list metrics proport
   assert.equal(zoomedOut.percentageLabel, "70%");
   assert.ok(zoomedOut.gridMinColumnPx < baseline.gridMinColumnPx);
   assert.ok(zoomedOut.listTitleFontRem < baseline.listTitleFontRem);
+
+  // Every 10% step from 70% through 200% must produce strictly increasing dimensions (fixes Linux 140->150 & 160->200 stalls)
+  let prev = computeZoomMetrics(0.7);
+  for (let pct = 80; pct <= 200; pct += 10) {
+    const cur = computeZoomMetrics(pct / 100);
+    assert.ok(
+      cur.gridMinColumnPx > prev.gridMinColumnPx,
+      `gridMinColumnPx must strictly increase between ${pct - 10}% and ${pct}%`
+    );
+    assert.ok(
+      cur.listIconSizePx > prev.listIconSizePx,
+      `listIconSizePx must strictly increase between ${pct - 10}% and ${pct}%`
+    );
+    assert.ok(
+      cur.listTitleFontRem > prev.listTitleFontRem,
+      `listTitleFontRem must strictly increase between ${pct - 10}% and ${pct}%`
+    );
+    assert.ok(
+      !cur.gridTemplateColumnsCss.includes("1fr"),
+      "Grid track sizing must not use 1fr expansion that freezes 2-card row sizes across zoom levels"
+    );
+    prev = cur;
+  }
 });
 
 test("Vault recovery key defaults to masked placeholder until explicitly revealed and clears when stale", async () => {
@@ -239,9 +262,13 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
       accountFormFieldsSrc.indexOf("mode === \"card\"") < accountFormFieldsSrc.indexOf("<PasswordStrengthIndicator"),
     "Account password strength indicator must only show when a new/replacement login password is entered or generated (never for card fields or blank edit password)"
   );
+  const generateStart = appSrcNoComments.indexOf("const handleGeneratePassword");
+  const generateEnd = appSrcNoComments.indexOf("const handleToggleEditPasswordReveal");
+  assert.ok(generateStart !== -1 && generateEnd > generateStart);
+  const generateSection = appSrcNoComments.slice(generateStart, generateEnd);
   assert.ok(
-    !appSrcNoComments.includes("setShowAccPassword(true)") &&
-      !appSrcNoComments.includes("setShowEditPassword(true)"),
+    !generateSection.includes("setShowAccPassword(true)") &&
+      !generateSection.includes("setShowEditPassword(true)"),
     "Account password fields must remain masked by default even after generating a password"
   );
   const accountPlaceholders = [...accountFormFieldsSrc.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);

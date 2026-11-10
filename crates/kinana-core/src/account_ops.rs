@@ -1,7 +1,7 @@
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
-use crate::models::{Account, SecretString};
+use crate::models::{Account, AccountKind, SecretString};
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 pub struct AccountMetaPayload {
@@ -99,6 +99,7 @@ pub struct AccountUpdateInput {
     pub clear_recovery_key: Option<bool>,
     pub clear_pin: Option<bool>,
     pub clear_password: Option<bool>,
+    pub account_kind: Option<AccountKind>,
 }
 
 /// Applies validated three-state update semantics to an `Account` record in memory.
@@ -198,6 +199,9 @@ pub fn apply_account_update(account: &mut Account, input: AccountUpdateInput) {
     }
 
     account.notes = packed_notes;
+    if let Some(kind) = input.account_kind {
+        account.account_kind = Some(kind);
+    }
 }
 
 /// Generates a uniform random password from CSPRNG (`OsRng`) without modulo bias.
