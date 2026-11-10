@@ -80,7 +80,32 @@ To prevent vault file corruption during sudden system crashes, power outages, or
 
 ---
 
-## 6. Threat Model
+## 6. Platform Credential Storage and Auto-Unlock
+
+Kinana provides an optional, opt-in Auto-Unlock convenience feature that stores the master password within native platform credential stores:
+
+- **Windows**: Integrated with Windows Credential Manager (`wincred` API via Generic Credentials target `kinana:master_password`). The credential is encrypted at rest by the Windows Data Protection API (DPAPI) and tied to the user's login session.
+- **Linux**: Integrated with the Freedesktop Secret Service standard over D-Bus (`org.freedesktop.secrets` using GNOME Keyring, KWallet, or KeePassXC).
+  - Disabled by default (opt-in).
+  - Requires an active, unlocked Secret Service daemon. If unavailable or locked, the UI gracefully informs the user and keeps auto-unlock disabled.
+  - Stored credentials are explicitly wiped when auto-unlock is toggled off or when the master password is changed.
+  - Same-user access trade-off: Any process running under the same user UID that has access to the user D-Bus session bus can query the Secret Service. Users running shared accounts or untrusted local processes should keep Auto-Unlock disabled.
+- **macOS**: Auto-Unlock remains in preview and is disabled until macOS Keychain services integration is fully verified.
+
+---
+
+## 7. Clipboard Security and Platform Nuances
+
+Kinana automatically clears copied credentials after 15 seconds:
+
+- **Windows**: Copies use native Win32 clipboard APIs and register clipboard exclusion formats (`ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`). This instructs the Windows clipboard history buffer (Win+V) and cloud clipboard synchronization not to record copied secrets.
+- **Linux (X11 & Wayland)**: Kinana releases its clipboard selection ownership and overwrites the primary system clipboard after 15 seconds.
+  - Third-party clipboard history daemons: Modern desktop environments often feature third-party clipboard history managers (e.g., CopyQ, GPaste, Diodon, Klipper) that listen to clipboard change events and record copied text into their own independent database. Standard X11/Wayland clipboard clearing cannot modify or delete entries already captured by these independent third-party background daemons.
+  - Recommendation: If you utilize a persistent clipboard manager on Linux, configure it to exclude sensitive applications or disable history tracking while managing passwords.
+
+---
+
+## 8. Threat Model
 
 ### In Scope (What Kinana Protects Against)
 - **Stolen Devices and Physical Drive Inspection**: If an attacker obtains an encrypted Kinana vault file (`.dat`) or steals your laptop's storage drive, they cannot read the contents without knowledge of your master password or recovery key.

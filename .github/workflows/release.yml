@@ -183,6 +183,24 @@ jobs:
             echo "ERROR: AppImage not found in target" && exit 1
           fi
 
+          echo "Inspecting Debian package metadata..."
+          dpkg-deb --info "release-assets/kinana-linux-x64.deb"
+          PKG_NAME=$(dpkg-deb -f "release-assets/kinana-linux-x64.deb" Package)
+          echo "Detected Package field: '$PKG_NAME'"
+          if [[ ! "$PKG_NAME" =~ ^[a-z0-9][a-z0-9+.-]+$ ]]; then
+            echo "ERROR: Invalid Debian package name: '$PKG_NAME'"
+            exit 1
+          fi
+
+          echo "Running installation smoke test via apt..."
+          sudo apt-get update && sudo apt-get install -y "./release-assets/kinana-linux-x64.deb"
+          echo "Verifying installed binary..."
+          which kinana
+          ls -la /usr/bin/kinana
+          dpkg -l kinana | grep -E "^ii\s+kinana"
+          echo "Testing clean package removal..."
+          sudo apt-get remove -y kinana
+
       - name: Upload Platform Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -232,11 +250,13 @@ jobs:
             Kinana is an offline-first, local desktop password manager built with Rust, Tauri 2, and React. All sensitive data is encrypted locally using AES-256-GCM and Argon2id key derivation, with zero external server telemetry or cloud synchronization.
 
             #### What is New in This Release:
-            - Cross-platform preview support for macOS (Apple Silicon & Intel) and Linux (DEB & AppImage).
-            - Standardized stable installer naming for reliable automated downloading.
-            - Unified secure clipboard abstraction with automatic 15-second clearing and transient buffer zeroization.
-            - Hardened release automation with cryptographic checksum verification.
-            - Complete backward compatibility with existing vaults created on Windows.
+            - Debian Package Standardization: Fixed Linux .deb package name metadata to compliant ASCII format (Package: kinana), resolving installation errors on Linux Mint, Ubuntu, and Debian.
+            - Linux AppImage File Manager Isolation: Sanitized host process spawning from AppImage runtime to prevent library conflicts (resolving Nemo file manager symbol crashes and browser directory listings).
+            - Native Linux Auto-Unlock: Integrated Freedesktop Secret Service (GNOME Keyring / KWallet) support for optional hardware/session-backed Auto-Unlock on Linux desktops.
+            - RTL Dialog & Layout Enhancements: Centered dialog header title with icon and positioned close button on the opposite side to eliminate header collisions in RTL layouts.
+            - Clear Bulk Delete Feedback: Updated confirmation dialog wording to indicate the exact number of selected services instead of generic delete-all text.
+            - Improved Vault Import Notifications: Added distinct success, warning, and error banners with responsive word wrapping, preventing visual overflow on small window sizes.
+            - Automated Debian Smoke Testing: Added package metadata inspection and apt installation smoke testing in CI/CD release automation.
 
             #### Download Options:
             - Windows (x64): `kinana-windows-x64-setup.exe` (NSIS Installer)
@@ -247,8 +267,8 @@ jobs:
 
             #### Important Notes & Platform Status:
             - Windows: Primary verified platform with Windows Credential Manager integration for Auto-Unlock and Win32 clipboard history exclusion.
-            - macOS & Linux: Experimental / preview builds. Auto-Unlock is disabled on these platforms to prevent unencrypted credential storage.
-            - Unsigned software notes: Unsigned macOS packages require a right-click -> Open or running `xattr -cr /Applications/kinana.app`. Windows installers may show a SmartScreen warning on first launch.
+            - Linux: Desktop integration with Freedesktop Secret Service for optional Auto-Unlock and clean desktop launcher integration. Clipboard clearing releases the X11/Wayland selection after 15 seconds; note that third-party clipboard history daemons (such as CopyQ or GPaste) operate independently and retain historical copies unless configured otherwise.
+            - macOS: Preview builds. Unsigned packages require a right-click -> Open or running `xattr -cr /Applications/kinana.app`.
             - Backups: Always export and retain an encrypted `.dat` backup and store your offline emergency recovery key safely.
 
             #### Verification (SHA-256):

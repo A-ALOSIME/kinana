@@ -1,6 +1,6 @@
 [package]
 name = "kinana"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]
@@ -30,6 +30,9 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 arboard = "3.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["sync-secret-service"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

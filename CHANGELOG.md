@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.3] - 2026-11-10
+
+### Added
+- Optional Linux Auto-Unlock integration backed by Freedesktop Secret Service (GNOME Keyring / KWallet via D-Bus).
+- Linux-specific desktop launcher template (`desktop.template`) supporting localized Arabic application title (`Name[ar]=كنانة`).
+- Automated Debian package metadata inspection and apt installation smoke testing in CI and release workflows.
+
+### Fixed
+- Fixed Debian package metadata on Linux: decoupled Debian control package name (`kinana`) from Arabic application branding (`كنانة`), eliminating package manager rejection (`invalid package name in 'Package' field`).
+- Fixed file manager launching from AppImage environments: sanitized host environment variables (`LD_LIBRARY_PATH`, `LD_PRELOAD`, GTK/GIO module paths) before spawning host tools, eliminating Nemo/GLib symbol crashes and preventing directory listings in browsers.
+- Fixed bulk delete dialog title and trash icon alignment in RTL layouts, and repositioned the dialog close button to prevent header collision.
+- Updated bulk delete confirmation button text to accurately reflect the selected item count rather than generic delete-all wording.
+- Fixed vault import success notification styling, replacing incorrect error styling with distinct success/warning banners and adding overflow wrapping to prevent horizontal layout overflow.
+
+---
+
 ## [0.1.2] - 2026-11-10
 
 ### Added

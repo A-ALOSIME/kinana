@@ -101,6 +101,31 @@ jobs:
         run: |
           npx --prefix ui tauri build
 
+      - name: Validate Linux DEB Metadata & Test Installation Smoke
+        if: runner.os == 'Linux'
+        run: |
+          DEB_FILE=$(find target -name "*.deb" | head -n 1)
+          if [ -z "$DEB_FILE" ] || [ ! -f "$DEB_FILE" ]; then
+            echo "ERROR: No .deb file found in target directory"
+            exit 1
+          fi
+          echo "Inspecting Debian package metadata: $DEB_FILE"
+          dpkg-deb --info "$DEB_FILE"
+          PKG_NAME=$(dpkg-deb -f "$DEB_FILE" Package)
+          echo "Detected Package field: '$PKG_NAME'"
+          if [[ ! "$PKG_NAME" =~ ^[a-z0-9][a-z0-9+.-]+$ ]]; then
+            echo "ERROR: Invalid Debian package name: '$PKG_NAME'"
+            exit 1
+          fi
+          echo "Running installation smoke test via apt..."
+          sudo apt-get update && sudo apt-get install -y "$DEB_FILE"
+          echo "Verifying installed binary..."
+          which kinana
+          ls -la /usr/bin/kinana
+          dpkg -l kinana | grep -E "^ii\s+kinana"
+          echo "Testing clean package removal..."
+          sudo apt-get remove -y kinana
+
       - name: Upload CI Build Artifacts
         uses: actions/upload-artifact@v4
         with:

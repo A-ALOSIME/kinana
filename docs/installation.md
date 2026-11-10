@@ -77,6 +77,8 @@ xattr -cr /Applications/kinana.app
 - Ubuntu 20.04 LTS / 22.04 LTS / 24.04 LTS, Debian 11 / 12, Linux Mint, or compatible distribution.
 - Dependencies: `libwebkit2gtk-4.1-0` (or `4.0`), `libayatana-appindicator3-1`.
 
+> Note: Starting with v0.1.3, the Debian package strictly conforms to Debian package naming standards (`Package: kinana`) while preserving Arabic localized desktop application branding (`كنانة`).
+
 #### Installation via Terminal
 ```bash
 # Download the package
@@ -94,6 +96,8 @@ kinana
 ### Universal Standalone Executable (.AppImage)
 
 The AppImage package runs on almost all modern 64-bit Linux distributions without requiring installation.
+
+> Note: Starting with v0.1.3, host process spawning (such as opening the vault directory in Nemo, Nautilus, Dolphin, or Thunar) is isolated from AppImage runtime environment variables to ensure compatibility with host libraries.
 
 #### Requirements
 - FUSE (Filesystem in Userspace) support. On Ubuntu 22.04+, install FUSE 2 if needed:

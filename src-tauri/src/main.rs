@@ -3,6 +3,7 @@
 
 mod clipboard;
 mod wincred;
+mod credential_store;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -154,7 +155,7 @@ async fn auto_unlock_vault(
     recover_interrupted_transactions_if_any(&app)
         .map_err(|e| format!("خطأ أمني حرج: توجد معاملة سابقة غير مكتملة وفشلت استعادتها تلقائياً ({})", e))?;
 
-    let saved_key = match unsafe { wincred::read_vault_key_wincred() } {
+    let saved_key = match credential_store::read_credential() {
         Ok(k) => k,
         Err(_) => return Ok(false),
     };
@@ -183,17 +184,22 @@ async fn auto_unlock_vault(
 
 #[tauri::command]
 fn is_auto_unlock_supported() -> bool {
-    cfg!(target_os = "windows")
+    credential_store::is_supported()
+}
+
+#[tauri::command]
+fn get_auto_unlock_status() -> credential_store::KeyringSupportStatus {
+    credential_store::check_support_status()
 }
 
 #[tauri::command]
 async fn is_auto_unlock_enabled() -> bool {
-    unsafe { wincred::has_vault_key_wincred() }
+    credential_store::has_stored_credential()
 }
 
 #[tauri::command]
 async fn disable_auto_unlock() -> Result<(), String> {
-    unsafe { wincred::delete_vault_key_wincred() }
+    credential_store::delete_credential()
 }
 
 #[tauri::command]
@@ -205,7 +211,7 @@ async fn enable_auto_unlock(
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
     let _ = storage.unlock(&password).map_err(|e| e.to_string())?;
-    unsafe { wincred::store_vault_key_wincred(&password)? };
+    credential_store::store_credential(&password)?;
     Ok(())
 }
 
@@ -619,8 +625,8 @@ fn write_recovery_file(app: &AppHandle, master_password: &str, recovery_code: &s
     std::fs::write(&tmp_path, &encrypted_payload).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp_path, &recovery_path).map_err(|e| e.to_string())?;
 
-    // Ensure NO recovery code is stored in Windows Credential Store (strictly offline user recovery key)
-    unsafe { wincred::delete_recovery_code_wincred(); }
+    // Ensure NO recovery code is stored in credential store (strictly offline user recovery key)
+    credential_store::delete_recovery_credential();
 
     Ok(())
 }
@@ -841,9 +847,9 @@ async fn change_master_password(
         *rec_lock = Some(SecretString::new(recovery_code));
     }
 
-    // 3. إذا كان الفتح التلقائي مفعلاً مسبقاً، حدّث المفتاح في WinCred مع فحص الخطأ
-    if unsafe { wincred::has_vault_key_wincred() } {
-        if let Err(e) = unsafe { wincred::store_vault_key_wincred(&new_password) } {
+    // 3. إذا كان الفتح التلقائي مفعلاً مسبقاً، حدّث المفتاح في مخزن الاعتمادات مع فحص الخطأ
+    if credential_store::has_stored_credential() {
+        if let Err(e) = credential_store::store_credential(&new_password) {
             return Err(format!("تم حفظ الخزنة بالمفتاح الجديد ولكن تعذر تحديث الفتح التلقائي: {}", e));
         }
     }
@@ -889,7 +895,7 @@ async fn get_current_saved_password(state: State<'_, AppState>) -> Result<String
     if lock.is_none() {
         return Err("الخزنة مقفلة".to_string());
     }
-    unsafe { wincred::read_vault_key_wincred().map(|k| k.to_string()) }
+    credential_store::read_credential().map(|k| k.to_string())
 }
 
 #[tauri::command]
@@ -974,8 +980,8 @@ async fn recover_vault_with_key(
         }
     }
 
-    // Keep recovery key in memory for this session and delete any old unencrypted WinCred entry
-    unsafe { wincred::delete_recovery_code_wincred(); }
+    // Keep recovery key in memory for this session and delete any old unencrypted credential entry
+    credential_store::delete_recovery_credential();
 
     if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
         *rec_lock = Some(SecretString::new(clean_code.to_string()));
@@ -1902,13 +1908,100 @@ fn reveal_path_in_file_manager(vault_path: &Path, app: &AppHandle) -> Result<(),
             let _ = std::fs::create_dir_all(&app_dir);
             app_dir
         };
-        std::process::Command::new("xdg-open")
-            .arg(&target_dir)
-            .spawn()
-            .map_err(|e| format!("فشل فتح متصفح الملفات: {}", e))?;
+
+        // 1. Try gio open (standard GLib/GIO desktop opener)
+        let mut gio_cmd = std::process::Command::new("gio");
+        gio_cmd.args(["open", &target_dir.to_string_lossy()]);
+        sanitize_linux_host_command(&mut gio_cmd);
+        if let Ok(mut child) = gio_cmd.spawn() {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(None) => return Ok(()),
+                _ => {}
+            }
+        }
+
+        // 2. Try xdg-open with sanitized environment
+        let mut xdg_cmd = std::process::Command::new("xdg-open");
+        xdg_cmd.arg(&target_dir);
+        sanitize_linux_host_command(&mut xdg_cmd);
+        if let Ok(mut child) = xdg_cmd.spawn() {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(None) => return Ok(()),
+                _ => {}
+            }
+        }
+
+        // 3. Fallback directly to native desktop file managers (Nemo for Linux Mint, Nautilus, Dolphin, Thunar, PCManFM)
+        for fm in &["nemo", "nautilus", "dolphin", "thunar", "pcmanfm"] {
+            let mut fm_cmd = std::process::Command::new(fm);
+            fm_cmd.arg(&target_dir);
+            sanitize_linux_host_command(&mut fm_cmd);
+            if let Ok(mut child) = fm_cmd.spawn() {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                match child.try_wait() {
+                    Ok(Some(status)) if status.success() => return Ok(()),
+                    Ok(None) => return Ok(()),
+                    _ => {}
+                }
+            }
+        }
+
+        return Err("تعذر فتح مدير الملفات على النظام. يرجى فتح المجلد يدوياً.".to_string());
     }
 
     Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn sanitize_linux_host_command(cmd: &mut std::process::Command) {
+    if let Ok(ld_path) = std::env::var("LD_LIBRARY_PATH") {
+        let appdir = std::env::var("APPDIR").unwrap_or_default();
+        let cleaned: Vec<&str> = ld_path
+            .split(':')
+            .filter(|p| {
+                let p_str = *p;
+                if p_str.is_empty() {
+                    return false;
+                }
+                if p_str.contains("/.mount_") || p_str.contains("/tmp/.mount") {
+                    return false;
+                }
+                if !appdir.is_empty() && p_str.starts_with(&appdir) {
+                    return false;
+                }
+                true
+            })
+            .collect();
+
+        if cleaned.is_empty() {
+            cmd.env_remove("LD_LIBRARY_PATH");
+        } else {
+            cmd.env("LD_LIBRARY_PATH", cleaned.join(":"));
+        }
+    } else {
+        cmd.env_remove("LD_LIBRARY_PATH");
+    }
+
+    for var in &[
+        "LD_PRELOAD",
+        "GIO_MODULE_DIR",
+        "GTK_PATH",
+        "GTK_DATA_PREFIX",
+        "GTK_EXE_PREFIX",
+        "QT_PLUGIN_PATH",
+        "PYTHONHOME",
+        "PYTHONPATH",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            if val.contains("/.mount_") || val.contains("/tmp/.mount") {
+                cmd.env_remove(var);
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -1933,9 +2026,10 @@ async fn open_url(url: String) -> Result<(), String> {
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        std::process::Command::new("xdg-open")
-            .arg(&target)
-            .spawn()
+        let mut cmd = std::process::Command::new("xdg-open");
+        cmd.arg(&target);
+        sanitize_linux_host_command(&mut cmd);
+        cmd.spawn()
             .map_err(|e| format!("فشل فتح الرابط في المتصفح: {}", e))?;
     }
     Ok(())
@@ -2016,7 +2110,7 @@ fn main() {
     {
         let flags = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeSharedStorage --disable-background-networking --disable-component-update --disable-breakpad --renderer-process-limit=1";
         std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
-        unsafe { wincred::delete_recovery_code_wincred(); }
+        credential_store::delete_recovery_credential();
     }
 
     #[cfg(windows)]
@@ -2220,6 +2314,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             vault_exists,
             is_auto_unlock_supported,
+            get_auto_unlock_status,
             auto_unlock_vault,
             is_auto_unlock_enabled,
             disable_auto_unlock,

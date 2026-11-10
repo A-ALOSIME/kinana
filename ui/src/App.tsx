@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +37,8 @@ import {
   Shield,
   ShieldCheck,
   ShieldAlert,
+  AlertTriangle,
+  CheckCircle2,
   Settings,
   Plus,
   Trash2,
@@ -282,7 +285,28 @@ export default function App() {
   useEffect(() => {
     summaryRef.current = summary;
   }, [summary]);
-  const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    type: "error" | "warning" | "success";
+    message: string;
+    detail?: string;
+  } | null>(null);
+
+  const setError = (msg: string | null, detail?: string) => {
+    if (!msg) {
+      setNotification(null);
+    } else {
+      setNotification({ type: "error", message: msg, detail });
+    }
+  };
+
+  const setSuccess = (msg: string, detail?: string) => {
+    setNotification({ type: "success", message: msg, detail });
+  };
+
+  const setWarning = (msg: string, detail?: string) => {
+    setNotification({ type: "warning", message: msg, detail });
+  };
+
   const [loading, setLoading] = useState<boolean>(true);
 
   // Fullscreen state (immersive gaming/media mode)
@@ -293,6 +317,17 @@ export default function App() {
   // Auto-unlock status & Settings (Disabled by default: requires user to opt-in)
   const [autoUnlockActive, setAutoUnlockActive] = useState<boolean>(false);
   const [isAutoUnlockSupported, setIsAutoUnlockSupported] = useState<boolean>(true);
+  const [autoUnlockStatus, setAutoUnlockStatus] = useState<{
+    supported: boolean;
+    platform_name: string;
+    available: boolean;
+    unavailable_reason?: string | null;
+  }>({
+    supported: true,
+    platform_name: "Windows Credential Manager",
+    available: true,
+    unavailable_reason: null,
+  });
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [importPassword, setImportPassword] = useState<string>("");
@@ -756,11 +791,22 @@ export default function App() {
       const isExist = await invoke<boolean>("vault_exists");
       setExists(isExist);
 
-      const isSupported = await invoke<boolean>("is_auto_unlock_supported").catch(() => false);
-      setIsAutoUnlockSupported(isSupported);
+      const status = await invoke<{
+        supported: boolean;
+        platform_name: string;
+        available: boolean;
+        unavailable_reason?: string | null;
+      }>("get_auto_unlock_status").catch(() => ({
+        supported: false,
+        platform_name: "Unknown",
+        available: false,
+        unavailable_reason: null,
+      }));
+      setAutoUnlockStatus(status);
+      setIsAutoUnlockSupported(status.supported);
 
       let isAutoEnabled = false;
-      if (isSupported) {
+      if (status.supported && status.available) {
         isAutoEnabled = await invoke<boolean>("is_auto_unlock_enabled").catch(() => false);
       }
       setAutoUnlockActive(isAutoEnabled);
@@ -1610,9 +1656,14 @@ export default function App() {
         purgeAllSensitiveState();
         setExists(true);
         if (res.warning) {
-          setError(`تم استيراد الخزنة بنجاح من: ${res.source_path}. تنبيه: ${res.warning}. أدخل كلمة المرور الخاصة بها لفتحها.`);
+          setWarning(
+            "تم استيراد الخزنة بنجاح مع تنبيه، يرجى إدخال كلمة المرور الخاصة بها لفتحها.",
+            res.warning
+          );
         } else {
-          setError(`تم استيراد الخزنة بنجاح وفحص تشفيرها ومطابقة ترويستها بنجاح من: ${res.source_path}. أدخل كلمة المرور الخاصة بها لفتحها.`);
+          setSuccess(
+            "تم استيراد الخزنة بنجاح، يرجى إدخال كلمة المرور الخاصة بها لفتحها."
+          );
         }
       }
     } catch (err: any) {
@@ -2047,19 +2098,42 @@ export default function App() {
         </div>
       )}
 
-      {/* Floating Centered Shadcn Alert / Toast Notification */}
-      {error && (
+      {/* Floating Centered Toast Notification (Success, Warning, Error) */}
+      {notification && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg px-4 pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300">
-          <div className="bg-destructive/15 backdrop-blur-xl border-2 border-destructive/40 text-destructive-foreground rounded-2xl shadow-2xl p-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <ShieldAlert className="w-5 h-5 text-destructive shrink-0" />
-              <span className="text-sm font-bold leading-normal">{error}</span>
+          <div
+            className={cn(
+              "backdrop-blur-xl border-2 rounded-2xl shadow-2xl p-4 flex items-start justify-between gap-3 text-right",
+              notification.type === "success" && "bg-emerald-500/15 border-emerald-500/40 text-emerald-100",
+              notification.type === "warning" && "bg-amber-500/15 border-amber-500/40 text-amber-100",
+              notification.type === "error" && "bg-destructive/15 border-destructive/40 text-destructive-foreground"
+            )}
+          >
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+              <div className="shrink-0 mt-0.5">
+                {notification.type === "success" && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+                {notification.type === "warning" && <AlertTriangle className="w-5 h-5 text-amber-400" />}
+                {notification.type === "error" && <ShieldAlert className="w-5 h-5 text-destructive" />}
+              </div>
+              <div className="flex-1 min-w-0 space-y-1">
+                <p className="text-sm font-bold leading-normal [overflow-wrap:anywhere] break-words">
+                  {notification.message}
+                </p>
+                {notification.detail && (
+                  <p
+                    className="text-xs font-mono opacity-85 mt-1 [overflow-wrap:anywhere] break-all max-h-24 overflow-y-auto bg-black/20 p-2 rounded-lg border border-white/10 text-left ltr"
+                    dir="ltr"
+                  >
+                    {notification.detail}
+                  </p>
+                )}
+              </div>
             </div>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setError(null)}
-              className="text-destructive-foreground hover:bg-destructive/20 rounded-xl h-8 w-8 p-0 shrink-0 ml-2"
+              onClick={() => setNotification(null)}
+              className="hover:bg-white/10 rounded-xl h-8 w-8 p-0 shrink-0 rtl:mr-2 ltr:ml-2"
             >
               <X className="w-4 h-4" />
             </Button>
@@ -2956,15 +3030,21 @@ export default function App() {
           {/* Batch Delete Confirmation Dialog */}
           <Dialog open={showBatchDeleteModal} onOpenChange={setShowBatchDeleteModal}>
             <DialogContent className="max-w-md p-6 rounded-3xl bg-card border-2 border-destructive/50 shadow-2xl text-right">
-              <DialogHeader className="space-y-3">
-                <DialogTitle className="text-xl font-black font-thamaniah text-destructive flex items-center gap-2">
-                  <Trash2 className="w-5 h-5" />
-                  <span>تأكيد حذف الخدمات المحددة</span>
+              <DialogHeader className="space-y-3 text-right">
+                <DialogTitle className="text-xl font-bold font-thamaniah text-destructive flex items-center gap-2.5 leading-normal">
+                  <div className="flex items-center justify-center shrink-0">
+                    <Trash2 className="w-5 h-5 text-destructive" />
+                  </div>
+                  <span className="leading-normal">
+                    {selectedServiceIds.length === 1
+                      ? "تأكيد حذف الخدمة المحددة"
+                      : "تأكيد حذف الخدمات المحددة"}
+                  </span>
                 </DialogTitle>
-                <DialogDescription className="text-sm font-semibold text-muted-foreground">
+                <DialogDescription className="text-sm font-semibold text-muted-foreground leading-relaxed">
                   أنت على وشك حذف{" "}
-                  <strong className="text-foreground">{selectedServiceIds.length}</strong> خدمة مع
-                  كافة الحسابات وكلمات المرور والبيانات المحفوظة داخلها نهائياً. لا يمكن التراجع عن هذا الإجراء.
+                  <strong className="text-foreground">{selectedServiceIds.length}</strong>{" "}
+                  {selectedServiceIds.length === 1 ? "خدمة" : "خدمات"} مع كافة الحسابات وكلمات المرور والبيانات المحفوظة داخلها نهائياً. لا يمكن التراجع عن هذا الإجراء.
                 </DialogDescription>
               </DialogHeader>
 
@@ -2981,8 +3061,12 @@ export default function App() {
                   onClick={handleConfirmBatchDelete}
                   className="h-10 px-5 rounded-xl font-bold gap-2"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>نعم، احذف الكل نهائياً</span>
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  <span>
+                    {selectedServiceIds.length === 1
+                      ? "حذف الخدمة المحددة نهائياً"
+                      : `حذف الخدمات المحددة (${selectedServiceIds.length}) نهائياً`}
+                  </span>
                 </Button>
               </div>
             </DialogContent>
@@ -5301,19 +5385,19 @@ export default function App() {
               </div>
             )}
 
-            {/* Section 1: Auto-Unlock Toggle (Supported on Windows) */}
+            {/* Section 1: Auto-Unlock Toggle (Supported on Windows and Linux) */}
             {isAutoUnlockSupported && (
               <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <Shield className="w-6 h-6 text-white" />
+                    <Shield className="w-6 h-6 text-white shrink-0" />
                     <div>
                       <h4 className="text-lg font-bold text-foreground">
                         الفتح التلقائي (Passwordless by default)
                       </h4>
                       <p className="text-sm text-muted-foreground mt-0.5">
                         {autoUnlockActive
-                          ? "مفعّل: يتم فتح كنانة تلقائياً عبر مخزن ويندوز الآمن."
+                          ? `مفعّل: يتم فتح كنانة تلقائياً عبر مخزن الاعتمادات الآمن (${autoUnlockStatus.platform_name}).`
                           : "معطّل: سيُطلب منك رمز الدخول في كل مرة تشغّل فيها التطبيق."}
                       </p>
                     </div>
@@ -5322,30 +5406,49 @@ export default function App() {
                     type="button"
                     variant={autoUnlockActive ? "destructive" : "default"}
                     onClick={handleToggleAutoUnlock}
-                    className="rounded-xl font-bold h-11 px-5 shadow-sm"
+                    disabled={!autoUnlockStatus.available && !autoUnlockActive}
+                    className="rounded-xl font-bold h-11 px-5 shadow-sm shrink-0"
                   >
                     {autoUnlockActive ? "تعطيل الفتح التلقائي" : "تفعيل الفتح التلقائي"}
                   </Button>
                 </div>
 
-                {/* Security Warning: Windows Credential Manager */}
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
-                  <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-bold text-amber-300">
-                      تنبيه: يتم حفظ رمز الدخول محلياً في Windows Credential Manager.
-                    </p>
-                    <p className="text-xs text-amber-200/90 leading-relaxed">
-                      هذا يعني إمكانية الوصول إليه من أي برنامج يعمل بنفس صلاحياتك.
-                      إذا كنت تفضل الأمان الأعلى، قم بتعطيل الفتح التلقائي.
-                    </p>
+                {/* Keyring Availability Notice if unavailable on Linux */}
+                {!autoUnlockStatus.available && (
+                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-bold text-amber-300">
+                        مخزن المفاتيح الآمن ({autoUnlockStatus.platform_name}) غير متاح حالياً.
+                      </p>
+                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                        {autoUnlockStatus.unavailable_reason ||
+                          "يرجى التحقق من تشغيل خدمة إدارة المفاتيح (gnome-keyring أو kwallet) في بيئة سطح المكتب الحالية."}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Security Warning: Same-user access trade-off */}
+                {autoUnlockStatus.available && (
+                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
+                    <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-bold text-amber-300">
+                        تنبيه: يتم حفظ رمز الدخول محلياً في {autoUnlockStatus.platform_name}.
+                      </p>
+                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                        هذا يعني إمكانية قراءة الرمز من أي تطبيق آخر يعمل بنفس حساب المستخدم الحالي على هذا الجهاز.
+                        إذا كنت تفضل أعلى درجات الحماية والعزل، اترك الفتح التلقائي معطلاً.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Reveal current password if available */}
                 {autoUnlockActive && (
                   <div className="pt-3 border-t border-border/40 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">الرمز المحفوظ حالياً في ويندوز:</span>
+                    <span className="text-muted-foreground">الرمز المحفوظ حالياً في مخزن النظام:</span>
                     <div className="flex items-center gap-2">
                       <span className="font-sans font-bold bg-background px-3 py-1 rounded-lg border border-border">
                         {showSavedPassword && savedPasswordHint ? savedPasswordHint : "••••••••••••"}
@@ -5665,7 +5768,7 @@ export default function App() {
               <span>تفعيل الفتح التلقائي</span>
             </DialogTitle>
             <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed text-right">
-              أدخل رمز الدخول (PIN) أو كلمة المرور الرئيسية ليتم حفظها وتشفيرها في مخزن ويندوز الآمن (Windows Credential Manager).
+              أدخل رمز الدخول (PIN) أو كلمة المرور الرئيسية ليتم حفظها وتشفيرها في مخزن الاعتمادات الآمن بالنظام ({autoUnlockStatus.platform_name}).
             </DialogDescription>
           </DialogHeader>
 
