@@ -17,6 +17,7 @@ import {
   copyVaultRecoveryKeySecurely,
 } from "./recoveryKeyState";
 import { Button } from "@/components/ui/button";
+import { FormLabel } from "@/components/ui/form-label";
 import { Input } from "@/components/ui/input";
 import { SecretInput } from "@/components/ui/secret-input";
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
@@ -2243,10 +2244,11 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-2.5 text-start">
-                      كلمة المرور الرئيسية أو رمز <bdi dir="ltr">PIN</bdi>:
-                    </label>
+                    <FormLabel htmlFor="create-vault-password" required className="mb-2.5">
+                      كلمة المرور الرئيسية أو رمز <bdi dir="ltr">PIN</bdi>
+                    </FormLabel>
                     <SecretInput
+                      id="create-vault-password"
                       buttonSize="lg"
                       centered
                       revealed={showCreatePassword}
@@ -2259,6 +2261,7 @@ export default function App() {
                       onChange={(e) => setPassword(e.target.value)}
                       className="text-xl rounded-2xl border-2"
                       autoFocus
+                      required
                     />
                   </div>
 
@@ -2286,10 +2289,11 @@ export default function App() {
               ) : (
                 <form onSubmit={handleUnlock} className="space-y-6">
                   <div>
-                    <label className="block text-base font-bold text-foreground text-center mb-2.5">
-                      أدخل رمز الدخول أو كلمة المرور الرئيسية:
-                    </label>
+                    <FormLabel htmlFor="unlock-vault-password" centered required className="mb-2.5">
+                      أدخل رمز الدخول أو كلمة المرور الرئيسية
+                    </FormLabel>
                     <SecretInput
+                      id="unlock-vault-password"
                       buttonSize="lg"
                       centered
                       revealed={showUnlockPassword}
@@ -2302,6 +2306,7 @@ export default function App() {
                       onChange={(e) => setPassword(e.target.value)}
                       className="text-2xl rounded-2xl border-2"
                       autoFocus
+                      required
                     />
                   </div>
 
@@ -4052,7 +4057,7 @@ export default function App() {
                     placeholder="ابحث بالاسم العربي أو الإنجليزي (مثل: Steam, Disney, Claude...)"
                     value={presetSearch}
                     onChange={(e) => setPresetSearch(e.target.value)}
-                    className="h-9 text-xs pr-8 pl-3 rounded-xl bg-card/80 border-border/70"
+                    className="h-9 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
                   />
                   {presetSearch && (
                     <button
@@ -4179,14 +4184,18 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-base font-bold text-foreground mb-2">اسم الخدمة *</label>
+              <FormLabel htmlFor="add-service-name" required className="mb-2">
+                اسم الخدمة
+              </FormLabel>
               <Input
+                id="add-service-name"
                 placeholder="مثال: Google, Netflix, Steam, منصة أبشر..."
                 value={newServiceName}
                 onChange={(e) => setNewServiceName(e.target.value)}
                 className="h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
                 autoFocus
                 required
+                aria-required="true"
               />
             </div>
 
@@ -4339,7 +4348,7 @@ export default function App() {
                     placeholder="ابحث بالاسم العربي أو الإنجليزي (مثل: Steam, Disney, Claude...)"
                     value={presetSearch}
                     onChange={(e) => setPresetSearch(e.target.value)}
-                    className="h-9 text-xs pr-8 pl-3 rounded-xl bg-card/80 border-border/70"
+                    className="h-9 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
                   />
                   {presetSearch && (
                     <button
@@ -4466,12 +4475,16 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-base font-bold text-foreground mb-2">اسم الخدمة *</label>
+              <FormLabel htmlFor="edit-service-name" required className="mb-2">
+                اسم الخدمة
+              </FormLabel>
               <Input
+                id="edit-service-name"
                 value={editServiceName}
                 onChange={(e) => setEditServiceName(e.target.value)}
                 className="h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
                 required
+                aria-required="true"
               />
             </div>
 
@@ -4665,10 +4678,11 @@ export default function App() {
 
                 {/* Dedicated Bank Card Form Fields */}
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    تسمية البطاقة (اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-card-label">
+                    تسمية البطاقة
+                  </FormLabel>
                   <Input
+                    id="add-card-label"
                     placeholder="مثال: بطاقة الراتب، فيزا المشتريات، بطاقة السفر..."
                     value={accLabel}
                     onChange={(e) => setAccLabel(e.target.value)}
@@ -4677,10 +4691,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                  <FormLabel htmlFor="add-card-holder">
                     اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
-                  </label>
+                  </FormLabel>
                   <Input
+                    id="add-card-holder"
                     placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية (e.g. MOHAMMED AL-OTAIBI)"
                     value={cardHolder}
                     onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
@@ -4690,14 +4705,15 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-base font-bold text-foreground">
-                      رقم البطاقة (16 رقماً) *
-                    </label>
+                    <FormLabel htmlFor="add-card-number" inline required>
+                      رقم البطاقة (16 رقماً)
+                    </FormLabel>
                     <span className="text-xs font-bold text-primary" dir="ltr">
                       {detectCardBrand(cardNumber, selectedService?.name).badge}
                     </span>
                   </div>
                   <SecretInput
+                    id="add-card-number"
                     revealed={showCardNumber}
                     onToggleReveal={() => setShowCardNumber(!showCardNumber)}
                     revealLabel="إظهار رقم البطاقة"
@@ -4718,10 +4734,11 @@ export default function App() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    <FormLabel htmlFor="add-card-expiry">
                       تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
-                    </label>
+                    </FormLabel>
                     <Input
+                      id="add-card-expiry"
                       placeholder="08/29"
                       value={cardExpiry}
                       onChange={(e) => {
@@ -4729,18 +4746,20 @@ export default function App() {
                         const formatted = raw.length >= 3 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
                         setCardExpiry(formatted);
                       }}
+                      style={{ direction: "ltr", textAlign: "center" }}
                       className="h-12 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
                     />
                   </div>
 
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
-                      <label className="text-base font-bold text-foreground">
+                      <FormLabel htmlFor="add-card-cvv" inline>
                         رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
-                      </label>
+                      </FormLabel>
                       <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
                     </div>
                     <SecretInput
+                      id="add-card-cvv"
                       revealed={showCardCvv}
                       onToggleReveal={() => setShowCardCvv(!showCardCvv)}
                       revealLabel="إظهار رمز الأمان"
@@ -4757,10 +4776,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi> - اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-card-pin">
+                    الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi>)
+                  </FormLabel>
                   <SecretInput
+                    id="add-card-pin"
                     revealed={showCardPin}
                     onToggleReveal={() => setShowCardPin(!showCardPin)}
                     revealLabel="إظهار الرمز السري"
@@ -4776,10 +4796,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    ملاحظات إضافية (اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-card-notes">
+                    ملاحظات إضافية
+                  </FormLabel>
                   <Input
+                    id="add-card-notes"
                     placeholder="ملاحظات أو تعليمات خاصة بالبطاقة..."
                     value={accNotes}
                     onChange={(e) => setAccNotes(e.target.value)}
@@ -4790,10 +4811,11 @@ export default function App() {
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    تسمية الحساب (اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-acc-label">
+                    تسمية الحساب
+                  </FormLabel>
                   <Input
+                    id="add-acc-label"
                     placeholder="مثال: الحساب الشخصي، العمل، حساب الألعاب..."
                     value={accLabel}
                     onChange={(e) => setAccLabel(e.target.value)}
@@ -4803,10 +4825,11 @@ export default function App() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                      اسم المستخدم (<bdi dir="ltr">Username</bdi> اختياري)
-                    </label>
+                    <FormLabel htmlFor="add-acc-username">
+                      اسم المستخدم (<bdi dir="ltr">Username</bdi>)
+                    </FormLabel>
                     <Input
+                      id="add-acc-username"
                       placeholder="اسم المستخدم في الخدمة"
                       value={accUsername}
                       onChange={(e) => setAccUsername(e.target.value)}
@@ -4815,14 +4838,16 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                      البريد الإلكتروني (<bdi dir="ltr">Email</bdi> اختياري)
-                    </label>
+                    <FormLabel htmlFor="add-acc-email">
+                      البريد الإلكتروني (<bdi dir="ltr">Email</bdi>)
+                    </FormLabel>
                     <Input
+                      id="add-acc-email"
                       type="email"
                       placeholder="user@example.com"
                       value={accEmail}
                       onChange={(e) => setAccEmail(e.target.value)}
+                      style={{ direction: "ltr", textAlign: "right" }}
                       className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                     />
                   </div>
@@ -4830,7 +4855,9 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-base font-bold text-foreground">كلمة المرور (اختياري)</label>
+                    <FormLabel htmlFor="add-acc-password" inline>
+                      كلمة المرور
+                    </FormLabel>
                     <Button
                       type="button"
                       variant="outline"
@@ -4843,6 +4870,7 @@ export default function App() {
                     </Button>
                   </div>
                   <SecretInput
+                    id="add-acc-password"
                     revealed={showAccPassword}
                     onToggleReveal={() => setShowAccPassword(!showAccPassword)}
                     revealLabel="إظهار كلمة المرور"
@@ -4855,10 +4883,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi> اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-acc-recovery">
+                    مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi>)
+                  </FormLabel>
                   <SecretInput
+                    id="add-acc-recovery"
                     revealed={showAccRecoveryKey}
                     onToggleReveal={() => setShowAccRecoveryKey(!showAccRecoveryKey)}
                     revealLabel="إظهار مفتاح الاسترداد"
@@ -4871,22 +4900,25 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi> اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-acc-url">
+                    رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi>)
+                  </FormLabel>
                   <Input
+                    id="add-acc-url"
                     placeholder="https://example.com/login"
                     value={accUrl}
                     onChange={(e) => setAccUrl(e.target.value)}
+                    style={{ direction: "ltr", textAlign: "right" }}
                     className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    ملاحظات إضافية (اختياري)
-                  </label>
+                  <FormLabel htmlFor="add-acc-notes">
+                    ملاحظات إضافية
+                  </FormLabel>
                   <Input
+                    id="add-acc-notes"
                     placeholder="ملاحظات سرية إضافية..."
                     value={accNotes}
                     onChange={(e) => setAccNotes(e.target.value)}
@@ -5028,10 +5060,11 @@ export default function App() {
 
                 {/* Dedicated Bank Card Form Fields */}
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    تسمية البطاقة (اختياري)
-                  </label>
+                  <FormLabel htmlFor="edit-card-label">
+                    تسمية البطاقة
+                  </FormLabel>
                   <Input
+                    id="edit-card-label"
                     placeholder="مثال: بطاقة الراتب، فيزا المشتريات، بطاقة السفر..."
                     value={editLabel}
                     onChange={(e) => setEditLabel(e.target.value)}
@@ -5040,10 +5073,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                  <FormLabel htmlFor="edit-card-holder">
                     اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
-                  </label>
+                  </FormLabel>
                   <Input
+                    id="edit-card-holder"
                     placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية"
                     value={cardHolder}
                     onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
@@ -5053,14 +5087,15 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-base font-bold text-foreground">
-                      رقم البطاقة الجديد (16 رقماً - اختياري)
-                    </label>
+                    <FormLabel htmlFor="edit-card-number" inline>
+                      رقم البطاقة الجديد (16 رقماً)
+                    </FormLabel>
                     <span className="text-xs font-bold text-primary" dir="ltr">
                       {detectCardBrand(cardNumber, selectedService?.name).badge}
                     </span>
                   </div>
                   <SecretInput
+                    id="edit-card-number"
                     revealed={showCardNumber}
                     onToggleReveal={() => setShowCardNumber(!showCardNumber)}
                     revealLabel="إظهار رقم البطاقة"
@@ -5080,10 +5115,11 @@ export default function App() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    <FormLabel htmlFor="edit-card-expiry">
                       تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
-                    </label>
+                    </FormLabel>
                     <Input
+                      id="edit-card-expiry"
                       placeholder="08/29"
                       value={cardExpiry}
                       onChange={(e) => {
@@ -5091,15 +5127,16 @@ export default function App() {
                         const formatted = raw.length >= 3 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
                         setCardExpiry(formatted);
                       }}
+                      style={{ direction: "ltr", textAlign: "center" }}
                       className="h-12 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
                     />
                   </div>
 
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
-                      <label className="text-base font-bold text-foreground">
+                      <FormLabel htmlFor="edit-card-cvv" inline>
                         رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
-                      </label>
+                      </FormLabel>
                       <div className="flex items-center gap-2">
                         {editingAccount?.has_recovery_key && (
                           clearRecoveryKey ? (
@@ -5127,11 +5164,13 @@ export default function App() {
                       </div>
                     </div>
                     <SecretInput
+                      id="edit-card-cvv"
                       revealed={showCardCvv}
                       onToggleReveal={() => setShowCardCvv(!showCardCvv)}
                       revealLabel="إظهار رمز الأمان"
                       hideLabel="إخفاء رمز الأمان"
                       centered
+                      centeredPlaceholder={false}
                       codeStyleWhenFilled
                       filledTrackingClass="tracking-widest"
                       placeholder={clearRecoveryKey ? "سيتم حذف رمز CVV عند الحفظ" : "اتركه فارغاً للإبقاء على رمز الأمان الحالي"}
@@ -5145,9 +5184,9 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-base font-bold text-foreground">
-                      الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi> - اختياري)
-                    </label>
+                    <FormLabel htmlFor="edit-card-pin" inline>
+                      الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi>)
+                    </FormLabel>
                     {editingAccount?.has_pin && (
                       clearCardPin ? (
                         <button
@@ -5172,11 +5211,13 @@ export default function App() {
                     )}
                   </div>
                   <SecretInput
+                    id="edit-card-pin"
                     revealed={showCardPin}
                     onToggleReveal={() => setShowCardPin(!showCardPin)}
                     revealLabel="إظهار الرمز السري"
                     hideLabel="إخفاء الرمز السري"
                     centered
+                    centeredPlaceholder={false}
                     codeStyleWhenFilled
                     filledTrackingClass="tracking-widest"
                     placeholder={clearCardPin ? "سيتم حذف الرمز السري عند الحفظ" : "اتركه فارغاً للإبقاء على الرمز السري الحالي"}
@@ -5188,10 +5229,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
-                    ملاحظات إضافية (اختياري)
-                  </label>
+                  <FormLabel htmlFor="edit-card-notes">
+                    ملاحظات إضافية
+                  </FormLabel>
                   <Input
+                    id="edit-card-notes"
                     placeholder="ملاحظات أو تعليمات خاصة بالبطاقة..."
                     value={editNotes}
                     onChange={(e) => setEditNotes(e.target.value)}
@@ -5202,10 +5244,11 @@ export default function App() {
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                  <FormLabel htmlFor="edit-acc-label">
                     تسمية الحساب
-                  </label>
+                  </FormLabel>
                   <Input
+                    id="edit-acc-label"
                     value={editLabel}
                     onChange={(e) => setEditLabel(e.target.value)}
                     className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
@@ -5214,10 +5257,11 @@ export default function App() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    <FormLabel htmlFor="edit-acc-username">
                       اسم المستخدم
-                    </label>
+                    </FormLabel>
                     <Input
+                      id="edit-acc-username"
                       value={editUsername}
                       onChange={(e) => setEditUsername(e.target.value)}
                       className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
@@ -5225,13 +5269,15 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-base font-bold text-foreground mb-1.5 text-start">
+                    <FormLabel htmlFor="edit-acc-email">
                       البريد الإلكتروني
-                    </label>
+                    </FormLabel>
                     <Input
+                      id="edit-acc-email"
                       type="email"
                       value={editEmail}
                       onChange={(e) => setEditEmail(e.target.value)}
+                      style={{ direction: "ltr", textAlign: "right" }}
                       className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                     />
                   </div>
@@ -5239,9 +5285,9 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-base font-bold text-foreground">
-                      كلمة المرور الجديدة (اختياري)
-                    </label>
+                    <FormLabel htmlFor="edit-acc-password" inline>
+                      كلمة المرور الجديدة
+                    </FormLabel>
                     <Button
                       type="button"
                       variant="outline"
@@ -5254,6 +5300,7 @@ export default function App() {
                     </Button>
                   </div>
                   <SecretInput
+                    id="edit-acc-password"
                     revealed={showEditPassword}
                     onToggleReveal={() => setShowEditPassword(!showEditPassword)}
                     revealLabel="إظهار كلمة المرور"
@@ -5267,9 +5314,9 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-base font-bold text-foreground">
+                    <FormLabel htmlFor="edit-acc-recovery" inline>
                       مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi>)
-                    </label>
+                    </FormLabel>
                     {editingAccount?.has_recovery_key && (
                       clearRecoveryKey ? (
                         <button
@@ -5294,6 +5341,7 @@ export default function App() {
                     )}
                   </div>
                   <SecretInput
+                    id="edit-acc-recovery"
                     revealed={showEditRecoveryKey}
                     onToggleReveal={() => setShowEditRecoveryKey(!showEditRecoveryKey)}
                     revealLabel="إظهار مفتاح الاسترداد"
@@ -5307,18 +5355,25 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">الرابط</label>
+                  <FormLabel htmlFor="edit-acc-url">
+                    الرابط
+                  </FormLabel>
                   <Input
+                    id="edit-acc-url"
                     placeholder="https://..."
                     value={editUrl}
                     onChange={(e) => setEditUrl(e.target.value)}
+                    style={{ direction: "ltr", textAlign: "right" }}
                     className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-base font-bold text-foreground mb-1.5 text-start">الملاحظات</label>
+                  <FormLabel htmlFor="edit-acc-notes">
+                    الملاحظات
+                  </FormLabel>
                   <Input
+                    id="edit-acc-notes"
                     value={editNotes}
                     onChange={(e) => setEditNotes(e.target.value)}
                     className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
@@ -5685,10 +5740,11 @@ export default function App() {
               <form onSubmit={handleChangeMasterPassword} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-bold text-foreground mb-1.5 text-start">
-                      الرمز أو كلمة المرور الجديدة:
-                    </label>
+                    <FormLabel htmlFor="settings-new-password" required className="text-sm">
+                      الرمز أو كلمة المرور الجديدة
+                    </FormLabel>
                     <SecretInput
+                      id="settings-new-password"
                       revealed={showNewMasterPassword}
                       onToggleReveal={() => setShowNewMasterPassword((prev) => !prev)}
                       revealLabel="إظهار الرمز الجديد"
@@ -5701,10 +5757,11 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-foreground mb-1.5 text-start">
-                      تأكيد الرمز الجديد:
-                    </label>
+                    <FormLabel htmlFor="settings-confirm-password" required className="text-sm">
+                      تأكيد الرمز الجديد
+                    </FormLabel>
                     <SecretInput
+                      id="settings-confirm-password"
                       revealed={showConfirmMasterPassword}
                       onToggleReveal={() => setShowConfirmMasterPassword((prev) => !prev)}
                       revealLabel="إظهار تأكيد الرمز"
@@ -5910,10 +5967,11 @@ export default function App() {
 
           <form onSubmit={handleConfirmEnableAutoUnlock} className="space-y-4 pt-2">
             <div>
-              <label className="block text-xs font-bold text-foreground mb-1.5 text-start">
-                أدخل رمز الدخول أو كلمة المرور الحالية:
-              </label>
+              <FormLabel htmlFor="auto-unlock-password" required className="text-xs">
+                أدخل رمز الدخول أو كلمة المرور الحالية
+              </FormLabel>
               <SecretInput
+                id="auto-unlock-password"
                 revealed={showAutoUnlockPassword}
                 onToggleReveal={() => setShowAutoUnlockPassword((prev) => !prev)}
                 revealLabel="إظهار الرمز"
@@ -5930,6 +5988,7 @@ export default function App() {
                 autoFocus
                 className="text-base font-bold rounded-xl border-2"
                 disabled={autoUnlockModalLoading}
+                required
               />
             </div>
 
@@ -5993,10 +6052,11 @@ export default function App() {
 
           <form onSubmit={handleRecoverVault} className="space-y-6 pt-4">
             <div>
-              <label className="block text-base font-bold text-foreground mb-2 text-start">
-                مفتاح الاسترداد (<bdi dir="ltr">Recovery Key</bdi>):
-              </label>
+              <FormLabel htmlFor="recovery-key-input" required className="mb-2">
+                مفتاح الاسترداد (<bdi dir="ltr">Recovery Key</bdi>)
+              </FormLabel>
               <SecretInput
+                id="recovery-key-input"
                 revealed={showInputRecoveryKey}
                 onToggleReveal={() => setShowInputRecoveryKey((prev) => !prev)}
                 revealLabel="إظهار مفتاح الاسترداد"
@@ -6066,10 +6126,11 @@ export default function App() {
             )}
 
             <div>
-              <label className="block text-sm font-bold text-foreground mb-2 text-start">
-                كلمة مرور الخزنة المستوردة:
-              </label>
+              <FormLabel htmlFor="import-vault-password" required className="text-sm mb-2">
+                كلمة مرور الخزنة المستوردة
+              </FormLabel>
               <SecretInput
+                id="import-vault-password"
                 revealed={showImportPassword}
                 onToggleReveal={() => setShowImportPassword((prev) => !prev)}
                 revealLabel="إظهار كلمة مرور الخزنة المستوردة"

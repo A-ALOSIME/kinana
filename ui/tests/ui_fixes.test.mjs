@@ -123,18 +123,82 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.ok(secretInputSrc.includes("top-1/2 -translate-y-1/2"), "Toggle button must stay vertically centered");
   assert.ok(secretInputSrc.includes("codeStyleWhenFilled && hasValue"), "Code font/tracking must apply only when non-empty");
   assert.ok(!secretInputSrc.includes('dir="ltr"'), "Input must not set HTML dir=ltr attribute over Tailwind rtl: selectors");
+  assert.ok(secretInputSrc.includes("aria-placeholder={placeholder}"), "SecretInput must expose accessible placeholder semantics while avoiding native WebKit password shadow placeholder glyph corruption");
+  assert.ok(secretInputSrc.includes('dir="auto"'), "SecretInput placeholder overlay must auto-detect RTL/LTR direction cleanly");
+  assert.ok(secretInputSrc.includes("rtl:pl-14"), "SecretInput must reserve clearance for eye toggle icon");
+
+  const inputSrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/ui/input.tsx"),
+    "utf8"
+  );
+  assert.ok(!inputSrc.includes("md:text-sm"), "Input base style must not override desktop form text sizes with md:text-sm");
+  assert.ok(inputSrc.includes("leading-[1.65]"), "Input base style must enforce sufficient vertical line height for Arabic descenders and diacritics");
+  assert.ok(inputSrc.includes("px-4"), "Input base style must provide comfortable horizontal padding");
+
+  const formLabelSrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/ui/form-label.tsx"),
+    "utf8"
+  );
+  assert.ok(formLabelSrc.includes("text-red-400"), "Required fields must display a visible red asterisk");
+  assert.ok(formLabelSrc.includes("sr-only"), "Required fields must provide accessible screen-reader semantics");
 
   const cssSrc = fs.readFileSync(path.join(uiRoot, "src/index.css"), "utf8");
   assert.ok(cssSrc.includes("input::placeholder"), "Placeholder font/tracking reset must exist");
+  assert.ok(cssSrc.includes("unicode-bidi: plaintext"), "Placeholders must use plaintext bidi direction");
   assert.ok(cssSrc.includes("letter-spacing: normal"), "Default form letter-spacing must be normalized");
   assert.ok(cssSrc.includes("container-type: inline-size"), "Service cards must establish container-query sizing");
 
   const rawAppSrc = fs.readFileSync(path.join(uiRoot, "src/App.tsx"), "utf8");
-  const appSrcNoComments = rawAppSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  const appSrcNoComments = rawAppSrc.replace(/\/\*[\s\S]*?\*\/|^[ \t]*\/\/.*$/gm, "");
   assert.ok(!appSrcNoComments.includes("style={{ zoom:"), "Non-standard CSS zoom must not be applied to main container");
   assert.ok(!appSrcNoComments.includes("h-13"), "Invalid Tailwind h-13 class must not remain in App.tsx");
   assert.ok(!appSrcNoComments.includes("فتح مسار ملف الخزنة في ويندوز"), "Cross-platform vault folder label must not say Windows");
   assert.ok(!appSrcNoComments.includes("blur-3xl"), "Service detail modal must avoid expensive blur-3xl FBO effects");
+
+  // Validate form label cleanup, required asterisks, and Arabic placeholders beginning with اتركه فارغاً
+  assert.ok(!appSrcNoComments.includes("(اختياري)"), "Redundant optional suffixes must be removed from field labels");
+  assert.ok(!appSrcNoComments.includes("- اختياري"), "Redundant optional suffixes must be removed from field labels");
+  const formLabelBlocks =
+    appSrcNoComments.match(/<FormLabel\b[^>]*>[\s\S]*?<\/FormLabel>/g) || [];
+  assert.ok(formLabelBlocks.length >= 25, "FormLabel blocks must cover all form fields");
+  for (const labelBlock of formLabelBlocks) {
+    assert.ok(
+      !labelBlock.includes("اختياري"),
+      `Field label must not contain اختياري: ${labelBlock}`
+    );
+  }
+
+  const requiredLabelMatches = appSrcNoComments.match(/<FormLabel\b[^>]*\brequired\b/g) || [];
+  assert.equal(requiredLabelMatches.length, 10, "Exactly the 10 genuinely required form fields must carry red asterisks");
+
+  const requiredFieldIds = [
+    "create-vault-password",
+    "unlock-vault-password",
+    "add-service-name",
+    "edit-service-name",
+    "add-card-number",
+    "settings-new-password",
+    "settings-confirm-password",
+    "auto-unlock-password",
+    "recovery-key-input",
+    "import-vault-password",
+  ];
+  for (const fieldId of requiredFieldIds) {
+    assert.ok(
+      appSrcNoComments.includes(`htmlFor="${fieldId}"`) && appSrcNoComments.includes(`id="${fieldId}"`),
+      `Required field ${fieldId} must link FormLabel htmlFor to input id`
+    );
+  }
+
+  const leaveEmptyMatches = appSrcNoComments.match(/اتركه فارغاً للإبقاء/g) || [];
+  assert.equal(leaveEmptyMatches.length, 5, "All 5 edit secret fields must retain contextual اتركه فارغاً placeholders intact");
+  assert.ok(!/اتركه فارغاً[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/.test(appSrcNoComments), "Arabic placeholder strings must not contain hidden Unicode control characters");
+  assert.ok(
+    appSrcNoComments.includes('id="edit-acc-url"') &&
+      appSrcNoComments.includes('placeholder="https://..."') &&
+      appSrcNoComments.includes('direction: "ltr"'),
+    "URL inputs must enforce LTR direction flow so https://... is not visually reversed"
+  );
 
   const detailStartIdx = rawAppSrc.indexOf("MODAL: SERVICE DETAIL & ACCOUNTS");
   const detailEndIdx = rawAppSrc.indexOf("MODAL: ADD SERVICE");

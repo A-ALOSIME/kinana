@@ -69,10 +69,17 @@
     font-family: 'Thamaniah', 'thmanyah sans', 'Noto Sans Arabic', 'Segoe UI', 'SF Arabic', 'Tahoma', sans-serif;
     letter-spacing: normal;
   }
+  input,
+  textarea {
+    line-height: 1.65;
+  }
   input::placeholder,
   textarea::placeholder {
     font-family: 'Thamaniah', 'thmanyah sans', 'Noto Sans Arabic', 'Segoe UI', 'SF Arabic', 'Tahoma', sans-serif;
     letter-spacing: normal;
+    line-height: 1.65;
+    unicode-bidi: plaintext;
+    -webkit-text-security: none;
   }
   body {
     @apply bg-background text-foreground;

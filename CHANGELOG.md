@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.5] - 2026-11-10
+
+### Changed
+- Removed redundant optional labels (`(اختياري)`, `- اختياري`, `اختياري`) across account, payment card, and service forms while retaining contextual guidance hints (`اتركه فارغاً للإبقاء...`).
+- Added consistent, accessible red required asterisks (`*` with screen-reader `(مطلوب)` semantics and `aria-required` bindings via shared `<FormLabel />`) exclusively on genuinely required form fields across vault creation, unlock, service management, new card number, password change, auto-unlock, emergency recovery, and import dialogs.
+
+### Fixed
+- Fixed Linux Mint WebKitGTK Arabic placeholder glyph corruption inside password-masked fields (where `"اتركه فارغاً..."` combining marks could trigger shadow-placeholder vertical offset clipping) by rendering an accessible HTML placeholder layer in `<SecretInput />` with normal RTL line layout and explicit `unicode-bidi: plaintext` / `-webkit-text-security: none` rules in `index.css`.
+- Fixed Arabic descender/glyph clipping and tight padding across `<Input />` and `<SecretInput />` by removing desktop `md:text-sm` overrides, increasing default line height (`leading-[1.65]` / `1.7`) and horizontal clearance (`px-4`, `rtl:pl-14`/`rtl:pl-16` around toggle icons, `pr-9 pl-8` on search inputs), and fixing LTR text flow for Email, URL (`https://...`), and Card Expiry inputs.
+
+---
+
 ## [0.1.4] - 2026-11-10
 
 ### Changed
