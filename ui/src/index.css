@@ -71,13 +71,13 @@
   }
   input,
   textarea {
-    line-height: 1.65;
+    line-height: 2;
   }
   input::placeholder,
   textarea::placeholder {
     font-family: 'Thamaniah', 'thmanyah sans', 'Noto Sans Arabic', 'Segoe UI', 'SF Arabic', 'Tahoma', sans-serif;
     letter-spacing: normal;
-    line-height: 1.65;
+    line-height: 2;
     unicode-bidi: plaintext;
     -webkit-text-security: none;
   }
@@ -133,7 +133,8 @@
   .kinana-card-title {
     font-size: clamp(1rem, calc(1.35rem * var(--vault-zoom, 1)), 2.75rem);
     font-size: clamp(1rem, 7.6cqw, 2.75rem);
-    line-height: 1.25;
+    line-height: 1.65;
+    padding-block: 0.15em;
   }
 
   .kinana-card-badge-pos {

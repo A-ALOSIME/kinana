@@ -19,6 +19,11 @@ import {
   getVisibleRecoveryKeyText,
   revealVaultRecoveryKey,
 } from "../src/recoveryKeyState.ts";
+import {
+  MIN_MASTER_PASSWORD_LENGTH,
+  evaluatePasswordStrength,
+  validateMasterPasswordForm,
+} from "../src/passwordValidation.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(__dirname, "..");
@@ -126,13 +131,16 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.ok(secretInputSrc.includes("aria-placeholder={placeholder}"), "SecretInput must expose accessible placeholder semantics while avoiding native WebKit password shadow placeholder glyph corruption");
   assert.ok(secretInputSrc.includes('dir="auto"'), "SecretInput placeholder overlay must auto-detect RTL/LTR direction cleanly");
   assert.ok(secretInputSrc.includes("rtl:pl-14"), "SecretInput must reserve clearance for eye toggle icon");
+  assert.ok(secretInputSrc.includes("min-h-12") && secretInputSrc.includes("min-h-16"), "SecretInput must use min-h controls rather than clipping tall Arabic glyphs");
+  assert.ok(secretInputSrc.includes("leading-[2]") && secretInputSrc.includes("lineHeight: 2"), "SecretInput placeholder overlay must reserve vertical clearance for Arabic descenders and bold glyphs");
 
   const inputSrc = fs.readFileSync(
     path.join(uiRoot, "src/components/ui/input.tsx"),
     "utf8"
   );
   assert.ok(!inputSrc.includes("md:text-sm"), "Input base style must not override desktop form text sizes with md:text-sm");
-  assert.ok(inputSrc.includes("leading-[1.65]"), "Input base style must enforce sufficient vertical line height for Arabic descenders and diacritics");
+  assert.ok(inputSrc.includes("leading-[2]"), "Input base style must enforce sufficient vertical line height for Arabic descenders and diacritics");
+  assert.ok(inputSrc.includes("min-h-10"), "Input base style must avoid rigid clipping height constraints");
   assert.ok(inputSrc.includes("px-4"), "Input base style must provide comfortable horizontal padding");
 
   const formLabelSrc = fs.readFileSync(
@@ -145,22 +153,39 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   const cssSrc = fs.readFileSync(path.join(uiRoot, "src/index.css"), "utf8");
   assert.ok(cssSrc.includes("input::placeholder"), "Placeholder font/tracking reset must exist");
   assert.ok(cssSrc.includes("unicode-bidi: plaintext"), "Placeholders must use plaintext bidi direction");
+  assert.ok(cssSrc.includes("line-height: 2;"), "Global input/placeholder CSS must enforce 2.0 line height to prevent descender clipping");
+  assert.ok(!cssSrc.includes("overflow: visible !important"), "Must not use blanket overflow: visible hacks");
   assert.ok(cssSrc.includes("letter-spacing: normal"), "Default form letter-spacing must be normalized");
   assert.ok(cssSrc.includes("container-type: inline-size"), "Service cards must establish container-query sizing");
 
   const rawAppSrc = fs.readFileSync(path.join(uiRoot, "src/App.tsx"), "utf8");
   const appSrcNoComments = rawAppSrc.replace(/\/\*[\s\S]*?\*\/|^[ \t]*\/\/.*$/gm, "");
+  const accountFormFieldsSrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/AccountFormFields.tsx"),
+    "utf8"
+  );
+  const strengthIndicatorSrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/ui/password-strength-indicator.tsx"),
+    "utf8"
+  );
+
   assert.ok(!appSrcNoComments.includes("style={{ zoom:"), "Non-standard CSS zoom must not be applied to main container");
   assert.ok(!appSrcNoComments.includes("h-13"), "Invalid Tailwind h-13 class must not remain in App.tsx");
   assert.ok(!appSrcNoComments.includes("فتح مسار ملف الخزنة في ويندوز"), "Cross-platform vault folder label must not say Windows");
   assert.ok(!appSrcNoComments.includes("blur-3xl"), "Service detail modal must avoid expensive blur-3xl FBO effects");
 
-  // Validate form label cleanup, required asterisks, and Arabic placeholders beginning with اتركه فارغاً
+  // Validate simplified forms, placeholder reduction, unified AccountFormFields, and card centering
   assert.ok(!appSrcNoComments.includes("(اختياري)"), "Redundant optional suffixes must be removed from field labels");
   assert.ok(!appSrcNoComments.includes("- اختياري"), "Redundant optional suffixes must be removed from field labels");
+  assert.ok(!appSrcNoComments.includes("جميع الخانات اختيارية ويمكنك ملء البيانات"), "Verbose Add Account description must be removed");
+  assert.ok(!appSrcNoComments.includes("قالب بطاقات بنكية مخصص"), "Verbose Bank Card description must be removed");
+  assert.ok(!appSrcNoComments.includes("لا توجد حسابات مسجلة تحت هذه الخدمة حتى الآن."), "Verbose empty-state wording must be removed");
+  assert.ok(!accountFormFieldsSrc.includes("BANK CARD"), "Redundant BANK CARD badge beside card number label must be removed");
+
+  const combinedFormSrc = appSrcNoComments + "\n" + accountFormFieldsSrc;
   const formLabelBlocks =
-    appSrcNoComments.match(/<FormLabel\b[^>]*>[\s\S]*?<\/FormLabel>/g) || [];
-  assert.ok(formLabelBlocks.length >= 25, "FormLabel blocks must cover all form fields");
+    combinedFormSrc.match(/<FormLabel\b[^>]*>[\s\S]*?<\/FormLabel>/g) || [];
+  assert.ok(formLabelBlocks.length >= 20, "FormLabel blocks must cover all form fields");
   for (const labelBlock of formLabelBlocks) {
     assert.ok(
       !labelBlock.includes("اختياري"),
@@ -168,15 +193,17 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
     );
   }
 
+  // Required fields in App.tsx (10 static required fields including Create Vault confirmation) + Add Card Number dynamic required in AccountFormFields
   const requiredLabelMatches = appSrcNoComments.match(/<FormLabel\b[^>]*\brequired\b/g) || [];
-  assert.equal(requiredLabelMatches.length, 10, "Exactly the 10 genuinely required form fields must carry red asterisks");
+  assert.equal(requiredLabelMatches.length, 10, "All 10 static required form fields in App.tsx must carry red asterisks");
+  assert.ok(accountFormFieldsSrc.includes("required={!isEdit}"), "Add Card Number must require input on creation while allowing empty retain on edit");
 
   const requiredFieldIds = [
     "create-vault-password",
+    "create-vault-confirm-password",
     "unlock-vault-password",
     "add-service-name",
     "edit-service-name",
-    "add-card-number",
     "settings-new-password",
     "settings-confirm-password",
     "auto-unlock-password",
@@ -190,15 +217,63 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
     );
   }
 
-  const leaveEmptyMatches = appSrcNoComments.match(/اتركه فارغاً للإبقاء/g) || [];
-  assert.equal(leaveEmptyMatches.length, 5, "All 5 edit secret fields must retain contextual اتركه فارغاً placeholders intact");
-  assert.ok(!/اتركه فارغاً[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/.test(appSrcNoComments), "Arabic placeholder strings must not contain hidden Unicode control characters");
-  assert.ok(
-    appSrcNoComments.includes('id="edit-acc-url"') &&
-      appSrcNoComments.includes('placeholder="https://..."') &&
-      appSrcNoComments.includes('direction: "ltr"'),
-    "URL inputs must enforce LTR direction flow so https://... is not visually reversed"
+  // AccountFormFields must unify Add & Edit layouts and restrict placeholders to account label, card label, and cardholder name
+  assert.ok(appSrcNoComments.includes('<AccountFormFields') && appSrcNoComments.includes('idPrefix="add"') && appSrcNoComments.includes('idPrefix="edit"'), "Both Add and Edit modals must reuse unified AccountFormFields component");
+  const accountPlaceholders = [...accountFormFieldsSrc.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    accountPlaceholders,
+    [
+      "بطاقة الراتب، بطاقة السفر...",
+      "الاسم كما هو مطبوع على البطاقة بالإنجليزية",
+      "حساب شخصي، حساب العمل...",
+    ],
+    "Account/Card forms must retain placeholders solely for card label, cardholder name, and account label"
   );
+  assert.ok(
+    accountFormFieldsSrc.includes('id={`${idPrefix}-card-number`}') &&
+      accountFormFieldsSrc.includes("centered") &&
+      accountFormFieldsSrc.includes('direction: "ltr"') &&
+      accountFormFieldsSrc.includes('textAlign: "center"'),
+    "Both Add and Edit Card Number inputs must use centered LTR block formatting"
+  );
+  assert.ok(!/اتركه فارغاً[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/.test(accountFormFieldsSrc), "Edit retention hints must not contain hidden Unicode control characters");
+
+  // Vault Creation Screen & Settings Change Master Password invariants
+  const createSectionStart = appSrcNoComments.indexOf("create-vault-password");
+  const unlockSectionStart = appSrcNoComments.indexOf("unlock-vault-password");
+  assert.ok(createSectionStart !== -1 && unlockSectionStart > createSectionStart);
+  const createSection = appSrcNoComments.slice(createSectionStart - 300, unlockSectionStart);
+  assert.ok(!createSection.includes("PIN"), "Initial Vault Creation screen must not contain PIN terminology");
+  assert.ok(!createSection.includes("ShieldCheck"), "Initial Vault Creation screen must replace shield icons with neutral Info icon");
+  assert.ok(createSection.includes("<Info"), "Initial Vault Creation recovery notice must use circle-i Info icon");
+  assert.ok(createSection.includes("احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد في مكان آمن"), "Initial Vault Creation must accurately state recovery key + master password behavior");
+  assert.ok(createSection.includes("كلمتا المرور غير متطابقتين"), "Initial Vault Creation must show deferred mismatch feedback");
+  assert.ok(createSection.includes("disabled={!createValidation.canSubmit}"), "Create Vault button must remain disabled until valid and matching");
+  assert.ok(createSection.includes("لم يتم العثور على خزنة سابقة على هذا الجهاز"), "Initial Vault Creation must display missing-vault note below Create button");
+
+  // Verify exact Create Vault order
+  const orderMarkers = [
+    'id="create-vault-password"',
+    "<PasswordStrengthIndicator",
+    'id="create-vault-confirm-password"',
+    "كلمتا المرور غير متطابقتين",
+    "احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد",
+    "إنشاء الخزنة",
+    "لم يتم العثور على خزنة سابقة على هذا الجهاز",
+    "هل لديك نسخة سابقة؟ استيراد الخزنة",
+  ];
+  let lastOrderPos = -1;
+  for (const marker of orderMarkers) {
+    const pos = createSection.indexOf(marker);
+    assert.ok(pos > lastOrderPos, `Create Vault element out of expected order: ${marker}`);
+    lastOrderPos = pos;
+  }
+
+  // Settings Password Change & Auto-Unlock notice
+  assert.ok(!appSrcNoComments.includes("تغيير رمز الدخول (PIN)"), "Settings title must remove PIN reference");
+  assert.ok(appSrcNoComments.includes("تغيير كلمة المرور الرئيسية"), "Settings title must use تغيير كلمة المرور الرئيسية");
+  assert.ok((appSrcNoComments.match(/<PasswordStrengthIndicator/g) || []).length === 2, "Settings and Vault Creation must share the exact same PasswordStrengthIndicator component");
+  assert.ok(!strengthIndicatorSrc.includes("red") && !strengthIndicatorSrc.includes("rose") && !strengthIndicatorSrc.includes("destructive"), "PasswordStrengthIndicator must not use red styling for weakest level");
 
   const detailStartIdx = rawAppSrc.indexOf("MODAL: SERVICE DETAIL & ACCOUNTS");
   const detailEndIdx = rawAppSrc.indexOf("MODAL: ADD SERVICE");
@@ -214,4 +289,77 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.equal(linuxConf?.productName, "kinana");
   assert.equal(linuxConf?.bundle?.linux?.deb?.desktopTemplate, "desktop.template");
   assert.equal(linuxConf?.bundle?.linux?.deb?.depends, undefined);
+});
+
+test("evaluatePasswordStrength returns 4 restrained Arabic strength levels locally and independently of minimum length", () => {
+  assert.deepEqual(evaluatePasswordStrength(""), { level: 0, label: "" });
+  assert.deepEqual(evaluatePasswordStrength("abc"), { level: 1, label: "ضعيفة" });
+  assert.deepEqual(evaluatePasswordStrength("aaaaaaaaaaaa"), { level: 1, label: "ضعيفة" });
+  assert.deepEqual(evaluatePasswordStrength("Password1"), { level: 2, label: "متوسطة" });
+  assert.deepEqual(evaluatePasswordStrength("MyPass123!"), { level: 3, label: "قوية" });
+  assert.deepEqual(evaluatePasswordStrength("Strong#Master2026Vault!"), { level: 4, label: "قوية جداً" });
+});
+
+test("validateMasterPasswordForm enforces minimum length, deferred mismatch display, and submit state", () => {
+  // Initial empty state: disabled, no mismatch shown
+  const initial = validateMasterPasswordForm({
+    password: "",
+    confirmPassword: "",
+    confirmTouched: false,
+    isSubmitting: false,
+  });
+  assert.equal(initial.canSubmit, false);
+  assert.equal(initial.showMismatchError, false);
+
+  // Typing primary password before confirmation is touched: still no mismatch shown
+  const beforeConfirm = validateMasterPasswordForm({
+    password: "ValidMaster#Password1",
+    confirmPassword: "",
+    confirmTouched: false,
+    isSubmitting: false,
+  });
+  assert.equal(beforeConfirm.minLengthMet, true);
+  assert.equal(beforeConfirm.showMismatchError, false);
+  assert.equal(beforeConfirm.canSubmit, false);
+
+  // Confirmation edited with mismatch: shows mismatch & disables submit
+  const mismatched = validateMasterPasswordForm({
+    password: "ValidMaster#Password1",
+    confirmPassword: "ValidMaster#Password2",
+    confirmTouched: true,
+    isSubmitting: false,
+  });
+  assert.equal(mismatched.showMismatchError, true);
+  assert.equal(mismatched.canSubmit, false);
+
+  // Matching short password (< 8): no mismatch, still disabled until min length reached
+  assert.equal(MIN_MASTER_PASSWORD_LENGTH, 8);
+  const tooShort = validateMasterPasswordForm({
+    password: "Ab1!xyz",
+    confirmPassword: "Ab1!xyz",
+    confirmTouched: true,
+    isSubmitting: false,
+  });
+  assert.equal(tooShort.passwordsMatch, true);
+  assert.equal(tooShort.minLengthMet, false);
+  assert.equal(tooShort.showMismatchError, false);
+  assert.equal(tooShort.canSubmit, false);
+
+  // Valid, matching, and idle: enabled; disabled again while submitting to block double submit
+  const validIdle = validateMasterPasswordForm({
+    password: "ValidMaster#Password1",
+    confirmPassword: "ValidMaster#Password1",
+    confirmTouched: true,
+    isSubmitting: false,
+  });
+  assert.equal(validIdle.showMismatchError, false);
+  assert.equal(validIdle.canSubmit, true);
+
+  const validBusy = validateMasterPasswordForm({
+    password: "ValidMaster#Password1",
+    confirmPassword: "ValidMaster#Password1",
+    confirmTouched: true,
+    isSubmitting: true,
+  });
+  assert.equal(validBusy.canSubmit, false);
 });

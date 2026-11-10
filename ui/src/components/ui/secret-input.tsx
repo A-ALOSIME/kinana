@@ -109,7 +109,7 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
             ...style,
           }}
           className={cn(
-            isLarge ? "h-16" : "h-12",
+            isLarge ? "min-h-16" : "min-h-12",
             centered
               ? isLarge
                 ? "px-16 text-center"
@@ -132,7 +132,7 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
             className={cn(
               "pointer-events-none select-none absolute inset-y-0 flex items-center text-muted-foreground font-sans font-normal tracking-normal overflow-hidden",
               sizeClasses,
-              "leading-[1.7]",
+              "leading-[2]",
               disabled && "opacity-50",
               hasStrikeThrough && "line-through",
               alignCenteredPlaceholder
@@ -146,7 +146,7 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
           >
             <span
               dir="auto"
-              style={{ lineHeight: 1.7 }}
+              style={{ lineHeight: 2 }}
               className="block max-w-full truncate py-1"
             >
               {placeholder}

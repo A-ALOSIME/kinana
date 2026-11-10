@@ -92,7 +92,12 @@ kinana
 ```
 
 #### Note on Linux Mint Graphical Package Installer (`gdebi-gtk`)
-On some Linux Mint systems, installing `.deb` files via the graphical Package Installer (`gdebi-gtk`) may leave the installer window open with an unresponsive close button after `Installation finished`, even though Kinana installed cleanly and contains no maintainer scripts or background installer hooks. Installing from the terminal (`sudo apt install ./kinana-linux-x64.deb`) avoids this issue completely; if a graphical `gdebi-gtk` window remains stuck open after completion, you can safely terminate the installer window with `killall gdebi-gtk`.
+On Linux Mint systems, installing `.deb` packages via the graphical Package Installer (`gdebi-gtk`) can leave the `gdebi-gtk` window open with an unresponsive close button after completion or failure. Verification of Kinana's `kinana-linux-x64.deb` archive confirms the package contains only static binary/icon/desktop files, zero Debian maintainer scripts (`preinst`, `postinst`, `prerm`, `postrm`), and zero installer background processes; the hang belongs to upstream `gdebi-gtk` / PolicyKit (`pkexec`) / `aptdaemon` window sensitivity handling and can occur with other `.deb` packages as well.
+
+Installing via terminal (`sudo apt install ./kinana-linux-x64.deb`) or Mint's native Software Installer avoids this issue completely. If a graphical `gdebi-gtk` window stays stuck after installation finishes, you can safely close only that installer window via terminal:
+```bash
+pkill gdebi-gtk
+```
 
 ---
 

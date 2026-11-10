@@ -1,9 +1,15 @@
+pub mod account_ops;
 pub mod benchmark;
 pub mod crypto;
 pub mod error;
 pub mod journal;
 pub mod models;
 pub mod storage;
+
+pub use account_ops::{
+    apply_account_update, extract_pin_from_notes, generate_password_string, pack_account_notes,
+    strip_pin_lines, unpack_account_notes, AccountMetaPayload, AccountUpdateInput,
+};
 
 pub use benchmark::{benchmark_system_argon2, BenchmarkReport};
 pub use crypto::{

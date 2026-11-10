@@ -84,13 +84,23 @@ import {
   CheckCheck,
   Pin,
   PinOff,
+  Info,
 } from "lucide-react";
+import { PasswordStrengthIndicator } from "@/components/ui/password-strength-indicator";
+import { AccountFormFields } from "@/components/AccountFormFields";
+import { validateMasterPasswordForm } from "./passwordValidation";
 import {
   POPULAR_SERVICES,
   generateCinematicCoverSvg,
   getServiceCoverAsync,
   loadServiceCovers,
 } from "@/data/popularServices";
+import {
+  buildAddAccountPayload,
+  buildUpdateAccountPayload,
+  extractCardPin,
+  extractCleanCardNotes,
+} from "./accountForm";
 
 interface AccountSummary {
   id: string;
@@ -434,6 +444,10 @@ export default function App() {
   // Field Reveal / Mask Toggles for Forms
   const [showUnlockPassword, setShowUnlockPassword] = useState<boolean>(false);
   const [showCreatePassword, setShowCreatePassword] = useState<boolean>(false);
+  const [confirmCreatePassword, setConfirmCreatePassword] = useState<string>("");
+  const [showConfirmCreatePassword, setShowConfirmCreatePassword] = useState<boolean>(false);
+  const [createConfirmTouched, setCreateConfirmTouched] = useState<boolean>(false);
+  const [isCreatingVault, setIsCreatingVault] = useState<boolean>(false);
   const [showAccPassword, setShowAccPassword] = useState<boolean>(false);
   const [showAccRecoveryKey, setShowAccRecoveryKey] = useState<boolean>(false);
   const [showEditPassword, setShowEditPassword] = useState<boolean>(false);
@@ -444,6 +458,8 @@ export default function App() {
   // Change Password state
   const [newMasterPassword, setNewMasterPassword] = useState<string>("");
   const [confirmMasterPassword, setConfirmMasterPassword] = useState<string>("");
+  const [settingsConfirmTouched, setSettingsConfirmTouched] = useState<boolean>(false);
+  const [isChangingMasterPassword, setIsChangingMasterPassword] = useState<boolean>(false);
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
 
   // Emergency Recovery Key state
@@ -533,6 +549,8 @@ export default function App() {
   const [editServiceError, setEditServiceError] = useState<string | null>(null);
   const [addAccountError, setAddAccountError] = useState<string | null>(null);
   const [editAccountError, setEditAccountError] = useState<string | null>(null);
+  const [isSavingAccount, setIsSavingAccount] = useState<boolean>(false);
+  const generateReqIdRef = useRef<number>(0);
 
   // New Service Form State
   const [newServiceName, setNewServiceName] = useState<string>("");
@@ -776,6 +794,12 @@ export default function App() {
       setLoadingAccounts(true);
       const accs = await invoke<AccountDetail[]>("get_service_accounts", { serviceId });
       processAccountResponse(sessionGuardRef.current, epoch, accs, (validAccs) => {
+        setRevealedAccountPasswords({});
+        setRevealedAccountRecoveryKeys({});
+        setRevealedCardNumbers({});
+        setRevealedCardCvvs({});
+        setRevealedCardPins({});
+        setRevealedCardPinValues({});
         setServiceAccounts(validAccs);
       });
     } catch (err: any) {
@@ -874,6 +898,10 @@ export default function App() {
     setSelectedServiceId(null);
     setServiceAccounts([]);
     setPassword("");
+    setConfirmCreatePassword("");
+    setCreateConfirmTouched(false);
+    setShowConfirmCreatePassword(false);
+    setIsCreatingVault(false);
     setSavedPasswordHint(null);
     setShowSavedPassword(false);
     setAutoUnlockPassword("");
@@ -885,6 +913,9 @@ export default function App() {
     setShowInputRecoveryKey(false);
     setNewMasterPassword("");
     setConfirmMasterPassword("");
+    setSettingsConfirmTouched(false);
+    setIsChangingMasterPassword(false);
+    setIsSavingAccount(false);
     setShowNewMasterPassword(false);
     setShowConfirmMasterPassword(false);
     setAccPassword("");
@@ -1472,21 +1503,39 @@ export default function App() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password) return;
-    if (password.trim().length < 8) {
-      setError("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول من 8 خانات على الأقل لحماية الخزنة.");
+    if (isCreatingVault) return;
+    const validation = validateMasterPasswordForm({
+      password,
+      confirmPassword: confirmCreatePassword,
+      confirmTouched: createConfirmTouched,
+      isSubmitting: isCreatingVault,
+    });
+    if (!validation.minLengthMet) {
+      setError("يجب أن تتكون كلمة المرور الرئيسية من 8 خانات على الأقل لحماية الخزنة.");
+      return;
+    }
+    if (!validation.passwordsMatch) {
+      setCreateConfirmTouched(true);
+      setError("كلمتا المرور غير متطابقتين");
       return;
     }
     try {
+      setIsCreatingVault(true);
       setError(null);
       await invoke("create_vault", { password });
       setPassword("");
+      setConfirmCreatePassword("");
+      setCreateConfirmTouched(false);
+      setShowCreatePassword(false);
+      setShowConfirmCreatePassword(false);
       sessionGuardRef.current.unlock();
       await fetchSummary();
       setExists(true);
       setAutoUnlockActive(false);
     } catch (err: any) {
       setError(err?.toString() || "فشل إنشاء الخزنة");
+    } finally {
+      setIsCreatingVault(false);
     }
   };
 
@@ -1583,36 +1632,50 @@ export default function App() {
     }
   };
 
-  // Change Master Password / PIN
+  // Change Master Password
   const handleChangeMasterPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isChangingMasterPassword) return;
+    const validation = validateMasterPasswordForm({
+      password: newMasterPassword,
+      confirmPassword: confirmMasterPassword,
+      confirmTouched: settingsConfirmTouched,
+      isSubmitting: isChangingMasterPassword,
+    });
     if (!newMasterPassword) {
-      setError("يرجى إدخال الرمز الجديد");
+      setError("يرجى إدخال كلمة المرور الرئيسية الجديدة");
       return;
     }
-    if (newMasterPassword.trim().length < 8) {
-      setError("يجب أن تتكون كلمة المرور الرئيسية أو رمز الدخول الجديد من 8 خانات على الأقل لضمان الحماية ضد التخمين.");
+    if (!validation.minLengthMet) {
+      setError("يجب أن تتكون كلمة المرور الرئيسية الجديدة من 8 خانات على الأقل لضمان الحماية ضد التخمين.");
       return;
     }
-    if (newMasterPassword !== confirmMasterPassword) {
-      setError("الرمز وتأكيد الرمز غير متطابقين!");
+    if (!validation.passwordsMatch) {
+      setSettingsConfirmTouched(true);
+      setError("كلمتا المرور غير متطابقتين");
       return;
     }
     try {
+      setIsChangingMasterPassword(true);
       setError(null);
       const res = await invoke<VaultOperationResult>("change_master_password", { newPassword: newMasterPassword });
       setSavedPasswordHint(null);
       setShowSavedPassword(false);
       setNewMasterPassword("");
       setConfirmMasterPassword("");
+      setSettingsConfirmTouched(false);
+      setShowNewMasterPassword(false);
+      setShowConfirmMasterPassword(false);
       if (res?.warning) {
-        setPasswordChangeSuccess(`تم تغيير رمز الدخول بنجاح مع تنبيه: ${res.warning}`);
+        setPasswordChangeSuccess(`تم تغيير كلمة المرور الرئيسية بنجاح مع تنبيه: ${res.warning}`);
       } else {
-        setPasswordChangeSuccess("تم تغيير رمز الدخول بنجاح وتحديث بيانات الحماية!");
+        setPasswordChangeSuccess("تم تغيير كلمة المرور الرئيسية بنجاح وتحديث بيانات الحماية!");
       }
       setTimeout(() => setPasswordChangeSuccess(null), 5000);
     } catch (err: any) {
-      setError(err?.toString() || "فشل تغيير رمز الدخول");
+      setError(err?.toString() || "فشل تغيير كلمة المرور الرئيسية");
+    } finally {
+      setIsChangingMasterPassword(false);
     }
   };
 
@@ -1746,20 +1809,76 @@ export default function App() {
     }
   };
 
+  const resetAccountFormFields = () => {
+    generateReqIdRef.current += 1;
+    setAccLabel("");
+    setAccUsername("");
+    setAccEmail("");
+    setAccPassword("");
+    setAccRecoveryKey("");
+    setAccUrl("");
+    setAccNotes("");
+    setEditLabel("");
+    setEditUsername("");
+    setEditEmail("");
+    setEditPassword("");
+    setEditRecoveryKey("");
+    setEditUrl("");
+    setEditNotes("");
+    setCardHolder("");
+    setCardNumber("");
+    setCardExpiry("");
+    setCardCvv("");
+    setCardPin("");
+    setShowCardNumber(false);
+    setShowCardCvv(false);
+    setShowCardPin(false);
+    setShowAccPassword(false);
+    setShowAccRecoveryKey(false);
+    setShowEditPassword(false);
+    setShowEditRecoveryKey(false);
+    setClearRecoveryKey(false);
+    setClearCardPin(false);
+  };
+
+  const closeAddAccountModal = () => {
+    resetAccountFormFields();
+    setAddAccountError(null);
+    setShowAddAccount(false);
+  };
+
+  const closeEditAccountModal = () => {
+    resetAccountFormFields();
+    setEditAccountError(null);
+    setEditingAccount(null);
+  };
+
   // Generate Password Helper
   const handleGeneratePassword = async (target: "add" | "edit") => {
+    const reqId = ++generateReqIdRef.current;
+    const epoch = sessionGuardRef.current.epoch;
     try {
       const generated = await invoke<string>("generate_password", {
         length: 20,
         useSymbols: true,
       });
+      if (!sessionGuardRef.current.isResponseValid(epoch) || generateReqIdRef.current !== reqId) {
+        return;
+      }
       if (target === "add") {
         setAccPassword(generated);
+        setShowAccPassword(true);
       } else {
         setEditPassword(generated);
+        setShowEditPassword(true);
       }
     } catch (err: any) {
-      setError(err?.toString() || "فشل توليد كلمة المرور");
+      const msg = err?.toString() || "فشل توليد كلمة المرور";
+      if (target === "add") {
+        setAddAccountError(msg);
+      } else {
+        setEditAccountError(msg);
+      }
     }
   };
 
@@ -1831,188 +1950,133 @@ export default function App() {
   // Add Account Handler (Supports both standard login accounts and dedicated bank cards)
   const handleAddAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedServiceId) return;
+    if (!selectedServiceId || isSavingAccount) return;
     try {
+      setIsSavingAccount(true);
       setAddAccountError(null);
-      let payloadLabel: string | null = null;
-      let payloadUsername: string | null = null;
-      let payloadPassword: string | null = null;
-      let payloadEmail: string | null = null;
-      let payloadRecoveryKey: string | null = null;
-      let payloadUrl: string | null = null;
-      let payloadNotes: string | null = null;
+      const payload = buildAddAccountPayload(
+        selectedServiceId,
+        accountFormMode,
+        {
+          label: accLabel,
+          username: accUsername,
+          email: accEmail,
+          password: accPassword,
+          recoveryKey: accRecoveryKey,
+          url: accUrl,
+          notes: accNotes,
+        },
+        {
+          label: accLabel,
+          holder: cardHolder,
+          number: cardNumber,
+          expiry: cardExpiry,
+          cvv: cardCvv,
+          pin: cardPin,
+          notes: accNotes,
+        }
+      );
 
-      if (accountFormMode === "card") {
-        payloadLabel = accLabel.trim() || "بطاقة بنكية";
-        payloadUsername = cardHolder.trim() || null;
-        payloadPassword = cardNumber.replace(/\s+/g, "").trim() || null;
-        payloadUrl = cardExpiry.trim() || null;
-        payloadRecoveryKey = cardCvv.trim() || null;
-        const extraNotes = accNotes.trim();
-        const pinPart = cardPin.trim() ? `PIN: ${cardPin.trim()}` : "";
-        const parts = ["[CARD]"];
-        if (pinPart) parts.push(pinPart);
-        if (extraNotes) parts.push(extraNotes);
-        payloadNotes = parts.join("\n");
-      } else {
-        payloadLabel = accLabel.trim() || null;
-        payloadUsername = accUsername.trim() || null;
-        payloadPassword = accPassword.trim() || null;
-        payloadEmail = accEmail.trim() || null;
-        payloadRecoveryKey = accRecoveryKey.trim() || null;
-        payloadNotes = accNotes.trim() || null;
-        payloadUrl = accUrl.trim() || null;
-      }
-
-      const updated = await invoke<VaultSummary>("add_account", {
-        serviceId: selectedServiceId,
-        label: payloadLabel,
-        username: payloadUsername,
-        password: payloadPassword,
-        email: payloadEmail,
-        recoveryKey: payloadRecoveryKey,
-        notes: payloadNotes,
-        url: payloadUrl,
-      });
+      const updated = await invoke<VaultSummary>("add_account", { ...payload });
       setSummary(updated);
       await fetchServiceAccounts(selectedServiceId);
-      setAccLabel("");
-      setAccUsername("");
-      setAccEmail("");
-      setAccPassword("");
-      setAccRecoveryKey("");
-      setAccUrl("");
-      setAccNotes("");
-      setCardHolder("");
-      setCardNumber("");
-      setCardExpiry("");
-      setCardCvv("");
-      setCardPin("");
-      setShowAddAccount(false);
+      closeAddAccountModal();
     } catch (err: any) {
       setAddAccountError(err?.toString() || "فشل إضافة الحساب");
+    } finally {
+      setIsSavingAccount(false);
     }
   };
 
   // Duplicate / Clone Account Handler (Pre-fills Add modal with cloned values)
   const handleDuplicateAccount = async (acc: AccountDetail) => {
     const isCard = isAccountCard(acc, selectedService?.name);
+    resetAccountFormFields();
     setAccountFormMode(isCard ? "card" : "login");
     setAccLabel(`${acc.label || (isCard ? "بطاقة" : "حساب")} (نسخة)`);
     if (isCard) {
       setCardHolder(acc.username || "");
-      setCardNumber("");
       setCardExpiry(acc.url || "");
       setCardCvv(acc.recovery_key || "");
-      const pinM = acc.notes?.match(/PIN:\s*(\d{4,6})/i);
-      setCardPin(pinM ? pinM[1] : "");
-      const cleanNotes = acc.notes?.replace(/\[CARD\]/g, "").replace(/PIN:\s*\d{4,6}/gi, "").trim();
-      setAccNotes(cleanNotes || "");
+      setCardPin(extractCardPin(acc.notes));
+      setAccNotes(extractCleanCardNotes(acc.notes));
     } else {
       setAccUsername(acc.username || "");
       setAccEmail(acc.email || "");
       setAccRecoveryKey(acc.recovery_key || "");
       setAccUrl(acc.url || "");
       setAccNotes(acc.notes || "");
-      setAccPassword("");
     }
 
-    setShowCardNumber(false);
-    setShowCardCvv(false);
-    setShowCardPin(false);
-    setShowAccPassword(false);
-    setShowAccRecoveryKey(false);
     setAddAccountError(null);
     setShowAddAccount(true);
   };
 
   // Open Edit Account Modal
   const openEditAccountModal = (acc: AccountDetail) => {
-    setEditingAccount(acc);
     const isCard = isAccountCard(acc, selectedService?.name);
+    resetAccountFormFields();
+    setEditingAccount(acc);
     setAccountFormMode(isCard ? "card" : "login");
     setEditLabel(acc.label || "");
     if (isCard) {
       setCardHolder(acc.username || "");
-      setCardNumber("");
       setCardExpiry(acc.url || "");
       setCardCvv(acc.recovery_key || "");
-      const pinM = acc.notes?.match(/PIN:\s*(\d{4,6})/i);
-      setCardPin(pinM ? pinM[1] : "");
-      const cleanNotes = acc.notes?.replace(/\[CARD\]/g, "").replace(/PIN:\s*\d{4,6}/gi, "").trim();
-      setEditNotes(cleanNotes || "");
+      setCardPin(extractCardPin(acc.notes));
+      setEditNotes(extractCleanCardNotes(acc.notes));
     } else {
       setEditUsername(acc.username || "");
       setEditEmail(acc.email || "");
-      setEditPassword("");
       setEditRecoveryKey(acc.recovery_key || "");
       setEditUrl(acc.url || "");
       setEditNotes(acc.notes || "");
     }
-    setShowCardNumber(false);
-    setShowCardCvv(false);
-    setShowCardPin(false);
-    setShowEditPassword(false);
-    setShowEditRecoveryKey(false);
-    setClearRecoveryKey(false);
-    setClearCardPin(false);
     setEditAccountError(null);
   };
 
   // Update Account Handler
   const handleUpdateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedServiceId || !editingAccount) return;
+    if (!selectedServiceId || !editingAccount || isSavingAccount) return;
     try {
+      setIsSavingAccount(true);
       setEditAccountError(null);
-      let payloadLabel: string | null = null;
-      let payloadUsername: string | null = null;
-      let payloadPassword: string | null = null;
-      let payloadEmail: string | null = null;
-      let payloadRecoveryKey: string | null = null;
-      let payloadUrl: string | null = null;
-      let payloadNotes: string | null = null;
+      const payload = buildUpdateAccountPayload(
+        selectedServiceId,
+        editingAccount.id,
+        accountFormMode,
+        {
+          label: editLabel,
+          username: editUsername,
+          email: editEmail,
+          password: editPassword,
+          recoveryKey: editRecoveryKey,
+          url: editUrl,
+          notes: editNotes,
+          clearRecoveryKey,
+        },
+        {
+          label: editLabel,
+          holder: cardHolder,
+          number: cardNumber,
+          expiry: cardExpiry,
+          cvv: cardCvv,
+          pin: cardPin,
+          notes: editNotes,
+          clearRecoveryKey,
+          clearPin: clearCardPin,
+        }
+      );
 
-      if (accountFormMode === "card") {
-        payloadLabel = editLabel.trim() || "بطاقة بنكية";
-        payloadUsername = cardHolder.trim() || null;
-        payloadPassword = cardNumber.replace(/\s+/g, "").trim() ? cardNumber.replace(/\s+/g, "").trim() : null;
-        payloadUrl = cardExpiry.trim() || null;
-        payloadRecoveryKey = clearRecoveryKey ? "" : (cardCvv.trim() ? cardCvv.trim() : null);
-        const extraNotes = editNotes.trim();
-        const pinPart = clearCardPin ? "" : (cardPin.trim() ? `PIN: ${cardPin.trim()}` : "");
-        const parts = ["[CARD]"];
-        if (pinPart) parts.push(pinPart);
-        if (extraNotes) parts.push(extraNotes);
-        payloadNotes = parts.join("\n");
-      } else {
-        payloadLabel = editLabel.trim() || null;
-        payloadUsername = editUsername.trim() || null;
-        payloadPassword = editPassword.trim() ? editPassword : null;
-        payloadEmail = editEmail.trim() || null;
-        payloadRecoveryKey = clearRecoveryKey ? "" : (editRecoveryKey.trim() ? editRecoveryKey.trim() : null);
-        payloadNotes = editNotes.trim() || null;
-        payloadUrl = editUrl.trim() || null;
-      }
-
-      const updated = await invoke<VaultSummary>("update_account", {
-        serviceId: selectedServiceId,
-        accountId: editingAccount.id,
-        label: payloadLabel,
-        username: payloadUsername,
-        password: payloadPassword,
-        email: payloadEmail,
-        recoveryKey: payloadRecoveryKey,
-        notes: payloadNotes,
-        url: payloadUrl,
-        clearRecoveryKey: clearRecoveryKey,
-        clearPin: clearCardPin,
-      });
+      const updated = await invoke<VaultSummary>("update_account", { ...payload });
       setSummary(updated);
       await fetchServiceAccounts(selectedServiceId);
-      setEditingAccount(null);
+      closeEditAccountModal();
     } catch (err: any) {
       setEditAccountError(err?.toString() || "فشل تحديث بيانات الحساب");
+    } finally {
+      setIsSavingAccount(false);
     }
   };
 
@@ -2220,73 +2284,111 @@ export default function App() {
         <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-background via-card/30 to-background">
           <Card className="w-full max-w-2xl border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 p-6 sm:p-8 rounded-3xl">
             <CardHeader className="text-center pb-6 pt-6">
-              <div className="flex justify-center mb-4">
+              <div className="flex justify-center mb-5">
                 <img
                   src={kinanaLogo}
                   alt="كنانة"
                   className="h-28 sm:h-32 w-auto object-contain drop-shadow-xl"
                 />
               </div>
-              <CardDescription className="text-lg text-muted-foreground font-medium pt-1 font-sans">
+              <CardDescription className="text-lg text-muted-foreground font-medium pt-3 font-sans leading-relaxed">
                 خزنة كلمات المرور الآمنة والمشفرة محلياً بالكامل
               </CardDescription>
             </CardHeader>
 
             <CardContent className="px-6 sm:px-10 pb-8 pt-2">
-              {!exists ? (
-                <form onSubmit={handleCreate} className="space-y-6">
-                  <div className="p-5 rounded-2xl bg-muted/40 border border-border/50 text-base text-muted-foreground leading-relaxed flex items-start gap-3 text-start">
-                    <ShieldCheck className="w-6 h-6 text-primary shrink-0 mt-0.5" />
-                    <span>
-                      لم يتم العثور على خزنة سابقة. قم بإنشاء خزنتك الآن بتعيين كلمة مرور رئيسية أو رمز{" "}
-                      <bdi dir="ltr">PIN</bdi> قوي:
-                    </span>
-                  </div>
-
+              {!exists ? (() => {
+                const createValidation = validateMasterPasswordForm({
+                  password,
+                  confirmPassword: confirmCreatePassword,
+                  confirmTouched: createConfirmTouched,
+                  isSubmitting: isCreatingVault,
+                });
+                return (
+                <form onSubmit={handleCreate} className="space-y-4">
                   <div>
-                    <FormLabel htmlFor="create-vault-password" required className="mb-2.5">
-                      كلمة المرور الرئيسية أو رمز <bdi dir="ltr">PIN</bdi>
+                    <FormLabel htmlFor="create-vault-password" required className="mb-2">
+                      كلمة المرور الرئيسية
                     </FormLabel>
                     <SecretInput
                       id="create-vault-password"
                       buttonSize="lg"
-                      centered
                       revealed={showCreatePassword}
-                      onToggleReveal={() => setShowCreatePassword(!showCreatePassword)}
-                      revealLabel="إظهار كلمة المرور"
-                      hideLabel="إخفاء كلمة المرور"
-                      filledTrackingClass="tracking-wider"
-                      placeholder="أدخل كلمة مرور قوية أو رمز PIN"
+                      onToggleReveal={() => setShowCreatePassword((prev) => !prev)}
+                      revealLabel="إظهار كلمة المرور الرئيسية"
+                      hideLabel="إخفاء كلمة المرور الرئيسية"
+                      placeholder=""
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="text-xl rounded-2xl border-2"
+                      className="text-lg rounded-2xl border-2"
                       autoFocus
                       required
                     />
+                    <PasswordStrengthIndicator password={password} className="mt-2" />
+                  </div>
+
+                  <div>
+                    <FormLabel htmlFor="create-vault-confirm-password" required className="mb-2">
+                      تأكيد كلمة المرور الرئيسية
+                    </FormLabel>
+                    <SecretInput
+                      id="create-vault-confirm-password"
+                      buttonSize="lg"
+                      revealed={showConfirmCreatePassword}
+                      onToggleReveal={() => setShowConfirmCreatePassword((prev) => !prev)}
+                      revealLabel="إظهار تأكيد كلمة المرور الرئيسية"
+                      hideLabel="إخفاء تأكيد كلمة المرور الرئيسية"
+                      placeholder=""
+                      value={confirmCreatePassword}
+                      onChange={(e) => {
+                        if (!createConfirmTouched) setCreateConfirmTouched(true);
+                        setConfirmCreatePassword(e.target.value);
+                      }}
+                      className="text-lg rounded-2xl border-2"
+                      required
+                    />
+                    {createValidation.showMismatchError && (
+                      <p role="alert" className="text-sm font-bold text-rose-400 pt-1.5 text-start">
+                        كلمتا المرور غير متطابقتين
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-muted/40 border border-border/50 text-sm text-muted-foreground leading-relaxed flex items-start gap-3 text-start">
+                    <Info className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
+                    <span>
+                      احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد في مكان آمن. إذا فقدتهما معاً، فلن تتمكن من استعادة الوصول إلى خزنتك.
+                    </span>
                   </div>
 
                   <Button
                     type="submit"
-                    className="w-full h-16 text-xl font-bold shadow-xl rounded-2xl gap-2"
+                    disabled={!createValidation.canSubmit}
+                    className="w-full min-h-14 text-lg font-bold shadow-xl rounded-2xl"
                   >
-                    <ShieldCheck className="w-6 h-6" />
-                    <span>إنشاء الخزنة وبدء الاستخدام</span>
+                    <span>إنشاء الخزنة</span>
                   </Button>
 
-                  <div className="pt-4 text-center border-t border-border/40">
-                    <button
+                  <p className="text-xs text-muted-foreground text-center pt-0.5 leading-relaxed">
+                    لم يتم العثور على خزنة سابقة على هذا الجهاز
+                  </p>
+
+                  <div className="pt-4 border-t border-border/40">
+                    <Button
                       type="button"
+                      variant="outline"
                       onClick={handleOpenImportModal}
-                      className="text-sm font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="w-full min-h-12 text-sm font-semibold rounded-2xl gap-2 border-border/70"
                     >
-                      <Upload className="w-4 h-4 text-primary" />
+                      <Upload className="w-4 h-4 shrink-0" />
                       <span>
-                        هل لديك نسخة سابقة من جهاز آخر؟ استيراد الخزنة (<bdi dir="ltr">.dat</bdi>)
+                        هل لديك نسخة سابقة؟ استيراد الخزنة (<bdi dir="ltr">.dat</bdi>)
                       </span>
-                    </button>
+                    </Button>
                   </div>
                 </form>
-              ) : (
+                );
+              })() : (
                 <form onSubmit={handleUnlock} className="space-y-6">
                   <div>
                     <FormLabel htmlFor="unlock-vault-password" centered required className="mb-2.5">
@@ -2903,7 +3005,7 @@ export default function App() {
                               <h4
                                 dir="auto"
                                 style={{ fontSize: `${zoomMetrics.listTitleFontRem}rem` }}
-                                className="font-bold font-thamaniah text-foreground group-hover:text-primary transition-colors truncate min-w-0 text-start pointer-events-none leading-snug"
+                                className="font-bold font-thamaniah text-foreground group-hover:text-primary transition-colors truncate min-w-0 text-start pointer-events-none leading-relaxed py-0.5"
                               >
                                 {service.name}
                               </h4>
@@ -3260,7 +3362,7 @@ export default function App() {
                   <div className="min-w-0 text-start">
                     <DialogTitle
                       dir="auto"
-                      className="text-3xl font-black font-thamaniah text-foreground truncate text-start"
+                      className="text-3xl font-black font-thamaniah text-foreground truncate text-start leading-relaxed py-0.5"
                     >
                       {selectedService.name}
                     </DialogTitle>
@@ -3283,21 +3385,10 @@ export default function App() {
                   </Button>
                   <Button
                     onClick={() => {
+                      resetAccountFormFields();
                       setAddAccountError(null);
                       const isCard = isBankOrCardService(selectedService?.name);
                       setAccountFormMode(isCard ? "card" : "login");
-                      setAccLabel("");
-                      setAccUsername("");
-                      setAccEmail("");
-                      setAccPassword("");
-                      setAccRecoveryKey("");
-                      setAccUrl("");
-                      setAccNotes("");
-                      setCardHolder("");
-                      setCardNumber("");
-                      setCardExpiry("");
-                      setCardCvv("");
-                      setCardPin("");
                       setShowAddAccount(true);
                     }}
                     className="h-11 px-5 rounded-xl gap-2 font-bold shadow-md"
@@ -3325,27 +3416,13 @@ export default function App() {
                     <span>جاري تحميل بيانات الحسابات...</span>
                   </div>
                 ) : serviceAccounts.length === 0 ? (
-                  <div className="text-center py-14 space-y-4 bg-muted/20 rounded-2xl border-2 border-dashed border-border/60">
-                    <p className="text-base font-semibold text-muted-foreground">
-                      لا توجد حسابات مسجلة تحت هذه الخدمة حتى الآن.
-                    </p>
+                  <div className="text-center py-14 bg-muted/20 rounded-2xl border-2 border-dashed border-border/60">
                     <Button
                       onClick={() => {
+                        resetAccountFormFields();
                         setAddAccountError(null);
                         const isCard = isBankOrCardService(selectedService?.name);
                         setAccountFormMode(isCard ? "card" : "login");
-                        setAccLabel("");
-                        setAccUsername("");
-                        setAccEmail("");
-                        setAccPassword("");
-                        setAccRecoveryKey("");
-                        setAccUrl("");
-                        setAccNotes("");
-                        setCardHolder("");
-                        setCardNumber("");
-                        setCardExpiry("");
-                        setCardCvv("");
-                        setCardPin("");
                         setShowAddAccount(true);
                       }}
                       size="default"
@@ -3361,9 +3438,7 @@ export default function App() {
 
                     if (isCard) {
                       const brand = detectCardBrand(acc.username, selectedService?.name);
-                      const pinMatch = acc.notes?.match(/PIN:\s*(\d{4,6})/i);
-                      const cardPin = pinMatch ? pinMatch[1] : null;
-                      const cleanNotes = acc.notes?.replace(/\[CARD\]/g, "").replace(/PIN:\s*\d{4,6}/gi, "").trim();
+                      const cleanNotes = extractCleanCardNotes(acc.notes);
                       const isCvvRevealed = revealedCardCvvs[acc.id] || false;
                       const isPinRevealed = revealedCardPins[acc.id] || false;
 
@@ -3404,7 +3479,7 @@ export default function App() {
                                 <path d="M12 19a8.5 8.5 0 0 1 0-12" />
                                 <path d="M15.5 21.5a12 12 0 0 1 0-17" />
                               </svg>
-                              <span className="text-xl font-bold font-thamaniah text-white pr-1 truncate">
+                              <span className="text-xl font-bold font-thamaniah text-white pr-1 truncate leading-relaxed py-0.5">
                                 {acc.label || "بطاقة دفع"}
                               </span>
                             </div>
@@ -3507,7 +3582,7 @@ export default function App() {
                                 <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
                                   حامل البطاقة
                                 </span>
-                                <span dir="auto" className="font-sans font-bold text-white tracking-normal block truncate uppercase">
+                                <span dir="auto" className="font-sans font-bold text-white tracking-normal block truncate uppercase leading-relaxed py-0.5">
                                   {acc.username || "—"}
                                 </span>
                               </div>
@@ -3632,7 +3707,7 @@ export default function App() {
                           {/* Extra Notes */}
                           {cleanNotes && (
                             <div className="relative z-10 pt-3 border-t border-white/10 text-xs text-slate-300 flex items-center justify-between">
-                              <span dir="auto" className="truncate pe-2 text-start"><strong className="text-slate-400">ملاحظات:</strong> {cleanNotes}</span>
+                              <span dir="auto" className="truncate pe-2 text-start leading-relaxed py-0.5"><strong className="text-slate-400">ملاحظات:</strong> {cleanNotes}</span>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -3711,7 +3786,7 @@ export default function App() {
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
                                 اسم المستخدم
                               </span>
-                              <span className="font-sans font-bold text-base text-foreground truncate block select-all">
+                              <span className="font-sans font-bold text-base text-foreground truncate block select-all leading-relaxed py-0.5">
                                 {acc.username}
                               </span>
                             </div>
@@ -3743,7 +3818,7 @@ export default function App() {
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
                                 البريد الإلكتروني
                               </span>
-                              <span className="font-sans font-bold text-base text-foreground truncate block select-all">
+                              <span className="font-sans font-bold text-base text-foreground truncate block select-all leading-relaxed py-0.5">
                                 {acc.email}
                               </span>
                             </div>
@@ -4057,7 +4132,7 @@ export default function App() {
                     placeholder="ابحث بالاسم العربي أو الإنجليزي (مثل: Steam, Disney, Claude...)"
                     value={presetSearch}
                     onChange={(e) => setPresetSearch(e.target.value)}
-                    className="h-9 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
+                    className="min-h-10 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
                   />
                   {presetSearch && (
                     <button
@@ -4192,7 +4267,7 @@ export default function App() {
                 placeholder="مثال: Google, Netflix, Steam, منصة أبشر..."
                 value={newServiceName}
                 onChange={(e) => setNewServiceName(e.target.value)}
-                className="h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
+                className="min-h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
                 autoFocus
                 required
                 aria-required="true"
@@ -4348,7 +4423,7 @@ export default function App() {
                     placeholder="ابحث بالاسم العربي أو الإنجليزي (مثل: Steam, Disney, Claude...)"
                     value={presetSearch}
                     onChange={(e) => setPresetSearch(e.target.value)}
-                    className="h-9 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
+                    className="min-h-10 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
                   />
                   {presetSearch && (
                     <button
@@ -4482,7 +4557,7 @@ export default function App() {
                 id="edit-service-name"
                 value={editServiceName}
                 onChange={(e) => setEditServiceName(e.target.value)}
-                className="h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
+                className="min-h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
                 required
                 aria-required="true"
               />
@@ -4567,13 +4642,10 @@ export default function App() {
       <Dialog
         open={showAddAccount}
         onOpenChange={(open) => {
-          setShowAddAccount(open);
-          if (!open) {
-            setShowCardNumber(false);
-            setShowCardCvv(false);
-            setShowCardPin(false);
-            setShowAccPassword(false);
-            setShowAccRecoveryKey(false);
+          if (open) {
+            setShowAddAccount(true);
+          } else {
+            closeAddAccountModal();
           }
         }}
       >
@@ -4581,12 +4653,14 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
               <Plus className="w-7 h-7 text-primary shrink-0" />
-              <span>{accountFormMode === "card" ? `إضافة بطاقة جديدة إلى ${selectedService?.name}` : `إضافة حساب جديد إلى ${selectedService?.name}`}</span>
+              <span>
+                {accountFormMode === "card"
+                  ? `إضافة بطاقة جديدة إلى ${selectedService?.name}`
+                  : `إضافة حساب جديد إلى ${selectedService?.name}`}
+              </span>
             </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
-              {accountFormMode === "card"
-                ? "قالب بطاقات بنكية مخصص: املأ بيانات البطاقة لتشفيرها وحفظها بأمان فائق."
-                : "جميع الخانات اختيارية ويمكنك ملء البيانات التي ترغب بحفظها."}
+            <DialogDescription className="sr-only">
+              نموذج إضافة حساب أو بطاقة جديدة
             </DialogDescription>
           </DialogHeader>
 
@@ -4637,307 +4711,63 @@ export default function App() {
           )}
 
           <form onSubmit={handleAddAccount} className="space-y-4 pt-2">
-            {accountFormMode === "card" ? (
-              <div className="space-y-4">
-                {/* Live Realistic Card Preview */}
-                <div className="relative rounded-2xl p-5 sm:p-6 shadow-xl border border-white/10 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white max-w-md mx-auto">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-7 rounded bg-gradient-to-br from-amber-300 to-yellow-600 p-0.5 border border-yellow-200/50 shadow-inner flex flex-col justify-between">
-                        <div className="h-1.5 border-b border-amber-600/40"></div>
-                        <div className="h-1.5 border-b border-amber-600/40"></div>
-                      </div>
-                      <span className="text-xs font-bold text-slate-300">
-                        {accLabel || "بطاقة دفع"}
-                      </span>
-                    </div>
-                    <Badge className="px-2.5 py-0.5 text-[10px] font-black tracking-wider bg-white/10 text-white border border-white/20">
-                      {detectCardBrand(cardNumber, selectedService?.name).badge}
-                    </Badge>
-                  </div>
-
-                  <div className="my-4 font-mono text-lg sm:text-xl font-bold tracking-[0.2em] text-center text-white/90 select-none" dir="ltr">
-                    {cardNumber ? cardNumber : "•••• •••• •••• ••••"}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-slate-300 pt-2 border-t border-white/10">
-                    <div className="text-start">
-                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">حامل البطاقة</span>
-                      <span dir="auto" className="font-bold tracking-normal uppercase text-white truncate max-w-[160px] block">
-                        {cardHolder || "CARDHOLDER NAME"}
-                      </span>
-                    </div>
-                    <div className="text-end">
-                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">تنتهي في</span>
-                      <span dir="ltr" className="font-mono font-bold text-white block">
-                        {cardExpiry || "MM/YY"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Dedicated Bank Card Form Fields */}
-                <div>
-                  <FormLabel htmlFor="add-card-label">
-                    تسمية البطاقة
-                  </FormLabel>
-                  <Input
-                    id="add-card-label"
-                    placeholder="مثال: بطاقة الراتب، فيزا المشتريات، بطاقة السفر..."
-                    value={accLabel}
-                    onChange={(e) => setAccLabel(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="add-card-holder">
-                    اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
-                  </FormLabel>
-                  <Input
-                    id="add-card-holder"
-                    placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية (e.g. MOHAMMED AL-OTAIBI)"
-                    value={cardHolder}
-                    onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <FormLabel htmlFor="add-card-number" inline required>
-                      رقم البطاقة (16 رقماً)
-                    </FormLabel>
-                    <span className="text-xs font-bold text-primary" dir="ltr">
-                      {detectCardBrand(cardNumber, selectedService?.name).badge}
-                    </span>
-                  </div>
-                  <SecretInput
-                    id="add-card-number"
-                    revealed={showCardNumber}
-                    onToggleReveal={() => setShowCardNumber(!showCardNumber)}
-                    revealLabel="إظهار رقم البطاقة"
-                    hideLabel="إخفاء رقم البطاقة"
-                    codeStyleWhenFilled
-                    filledTrackingClass="tracking-widest"
-                    placeholder="0000 0000 0000 0000"
-                    value={cardNumber}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
-                      const formatted = raw.replace(/(\d{4})(?=\d)/g, "$1 ");
-                      setCardNumber(formatted);
-                    }}
-                    className="text-lg font-bold rounded-xl border-2"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <FormLabel htmlFor="add-card-expiry">
-                      تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
-                    </FormLabel>
-                    <Input
-                      id="add-card-expiry"
-                      placeholder="08/29"
-                      value={cardExpiry}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/\D/g, "").slice(0, 4);
-                        const formatted = raw.length >= 3 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
-                        setCardExpiry(formatted);
-                      }}
-                      style={{ direction: "ltr", textAlign: "center" }}
-                      className="h-12 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-1.5">
-                      <FormLabel htmlFor="add-card-cvv" inline>
-                        رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
-                      </FormLabel>
-                      <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
-                    </div>
-                    <SecretInput
-                      id="add-card-cvv"
-                      revealed={showCardCvv}
-                      onToggleReveal={() => setShowCardCvv(!showCardCvv)}
-                      revealLabel="إظهار رمز الأمان"
-                      hideLabel="إخفاء رمز الأمان"
-                      centered
-                      codeStyleWhenFilled
-                      filledTrackingClass="tracking-widest"
-                      placeholder="123"
-                      value={cardCvv}
-                      onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      className="text-base font-bold rounded-xl border-2"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="add-card-pin">
-                    الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi>)
-                  </FormLabel>
-                  <SecretInput
-                    id="add-card-pin"
-                    revealed={showCardPin}
-                    onToggleReveal={() => setShowCardPin(!showCardPin)}
-                    revealLabel="إظهار الرمز السري"
-                    hideLabel="إخفاء الرمز السري"
-                    centered
-                    codeStyleWhenFilled
-                    filledTrackingClass="tracking-widest"
-                    placeholder="رمز الصراف المكون من 4 أرقام"
-                    value={cardPin}
-                    onChange={(e) => setCardPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className="text-base font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="add-card-notes">
-                    ملاحظات إضافية
-                  </FormLabel>
-                  <Input
-                    id="add-card-notes"
-                    placeholder="ملاحظات أو تعليمات خاصة بالبطاقة..."
-                    value={accNotes}
-                    onChange={(e) => setAccNotes(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <FormLabel htmlFor="add-acc-label">
-                    تسمية الحساب
-                  </FormLabel>
-                  <Input
-                    id="add-acc-label"
-                    placeholder="مثال: الحساب الشخصي، العمل، حساب الألعاب..."
-                    value={accLabel}
-                    onChange={(e) => setAccLabel(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <FormLabel htmlFor="add-acc-username">
-                      اسم المستخدم (<bdi dir="ltr">Username</bdi>)
-                    </FormLabel>
-                    <Input
-                      id="add-acc-username"
-                      placeholder="اسم المستخدم في الخدمة"
-                      value={accUsername}
-                      onChange={(e) => setAccUsername(e.target.value)}
-                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                    />
-                  </div>
-
-                  <div>
-                    <FormLabel htmlFor="add-acc-email">
-                      البريد الإلكتروني (<bdi dir="ltr">Email</bdi>)
-                    </FormLabel>
-                    <Input
-                      id="add-acc-email"
-                      type="email"
-                      placeholder="user@example.com"
-                      value={accEmail}
-                      onChange={(e) => setAccEmail(e.target.value)}
-                      style={{ direction: "ltr", textAlign: "right" }}
-                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <FormLabel htmlFor="add-acc-password" inline>
-                      كلمة المرور
-                    </FormLabel>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGeneratePassword("add")}
-                      className="h-9 px-3 text-xs font-bold gap-1.5 rounded-lg border-primary/50 text-primary hover:bg-primary/10"
-                    >
-                      <Dices className="w-4 h-4" />
-                      <span>توليد كلمة مرور قوية</span>
-                    </Button>
-                  </div>
-                  <SecretInput
-                    id="add-acc-password"
-                    revealed={showAccPassword}
-                    onToggleReveal={() => setShowAccPassword(!showAccPassword)}
-                    revealLabel="إظهار كلمة المرور"
-                    hideLabel="إخفاء كلمة المرور"
-                    placeholder="كلمة المرور المشفرة"
-                    value={accPassword}
-                    onChange={(e) => setAccPassword(e.target.value)}
-                    className="text-base font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="add-acc-recovery">
-                    مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi>)
-                  </FormLabel>
-                  <SecretInput
-                    id="add-acc-recovery"
-                    revealed={showAccRecoveryKey}
-                    onToggleReveal={() => setShowAccRecoveryKey(!showAccRecoveryKey)}
-                    revealLabel="إظهار مفتاح الاسترداد"
-                    hideLabel="إخفاء مفتاح الاسترداد"
-                    placeholder="مفتاح استرجاع الحساب الذي يقدمه الموقع للطوارئ"
-                    value={accRecoveryKey}
-                    onChange={(e) => setAccRecoveryKey(e.target.value)}
-                    className="text-base font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="add-acc-url">
-                    رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi>)
-                  </FormLabel>
-                  <Input
-                    id="add-acc-url"
-                    placeholder="https://example.com/login"
-                    value={accUrl}
-                    onChange={(e) => setAccUrl(e.target.value)}
-                    style={{ direction: "ltr", textAlign: "right" }}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="add-acc-notes">
-                    ملاحظات إضافية
-                  </FormLabel>
-                  <Input
-                    id="add-acc-notes"
-                    placeholder="ملاحظات سرية إضافية..."
-                    value={accNotes}
-                    onChange={(e) => setAccNotes(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-              </div>
-            )}
+            <AccountFormFields
+              mode={accountFormMode}
+              isEdit={false}
+              idPrefix="add"
+              cardPreviewBadge={detectCardBrand(cardNumber, selectedService?.name).badge}
+              label={accLabel}
+              onLabelChange={setAccLabel}
+              notes={accNotes}
+              onNotesChange={setAccNotes}
+              username={accUsername}
+              onUsernameChange={setAccUsername}
+              email={accEmail}
+              onEmailChange={setAccEmail}
+              password={accPassword}
+              onPasswordChange={setAccPassword}
+              showPassword={showAccPassword}
+              onToggleShowPassword={() => setShowAccPassword((prev) => !prev)}
+              onGeneratePassword={() => handleGeneratePassword("add")}
+              recoveryKey={accRecoveryKey}
+              onRecoveryKeyChange={setAccRecoveryKey}
+              showRecoveryKey={showAccRecoveryKey}
+              onToggleShowRecoveryKey={() => setShowAccRecoveryKey((prev) => !prev)}
+              url={accUrl}
+              onUrlChange={setAccUrl}
+              cardHolder={cardHolder}
+              onCardHolderChange={setCardHolder}
+              cardNumber={cardNumber}
+              onCardNumberChange={setCardNumber}
+              showCardNumber={showCardNumber}
+              onToggleShowCardNumber={() => setShowCardNumber((prev) => !prev)}
+              cardExpiry={cardExpiry}
+              onCardExpiryChange={setCardExpiry}
+              cardCvv={cardCvv}
+              onCardCvvChange={setCardCvv}
+              showCardCvv={showCardCvv}
+              onToggleShowCardCvv={() => setShowCardCvv((prev) => !prev)}
+              cardPin={cardPin}
+              onCardPinChange={setCardPin}
+              showCardPin={showCardPin}
+              onToggleShowCardPin={() => setShowCardPin((prev) => !prev)}
+            />
 
             <div className="flex justify-end gap-3 pt-4 border-t border-border/40">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setShowAddAccount(false)}
+                disabled={isSavingAccount}
+                onClick={closeAddAccountModal}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
-              <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
+              <Button
+                type="submit"
+                disabled={isSavingAccount}
+                className="h-12 px-8 rounded-xl text-base font-bold shadow-lg"
+              >
                 حفظ الحساب
               </Button>
             </div>
@@ -4950,12 +4780,7 @@ export default function App() {
         open={Boolean(editingAccount)}
         onOpenChange={(open) => {
           if (!open) {
-            setEditingAccount(null);
-            setShowCardNumber(false);
-            setShowCardCvv(false);
-            setShowCardPin(false);
-            setShowEditPassword(false);
-            setShowEditRecoveryKey(false);
+            closeEditAccountModal();
           }
         }}
       >
@@ -4965,10 +4790,8 @@ export default function App() {
               <Pencil className="w-7 h-7 text-primary shrink-0" />
               <span>{accountFormMode === "card" ? "تعديل بيانات البطاقة" : "تعديل الحساب"}</span>
             </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
-              {accountFormMode === "card"
-                ? "تعديل بيانات البطاقة البنكية المشفرة."
-                : "تعديل بيانات حساب تسجيل الدخول."}
+            <DialogDescription className="sr-only">
+              نموذج تعديل بيانات الحساب أو البطاقة
             </DialogDescription>
           </DialogHeader>
 
@@ -5019,386 +4842,69 @@ export default function App() {
           )}
 
           <form onSubmit={handleUpdateAccount} className="space-y-4 pt-2">
-            {accountFormMode === "card" ? (
-              <div className="space-y-4">
-                {/* Live Card Preview */}
-                <div className="relative rounded-2xl p-5 sm:p-6 shadow-xl border border-white/10 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white max-w-md mx-auto">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-7 rounded bg-gradient-to-br from-amber-300 to-yellow-600 p-0.5 border border-yellow-200/50 shadow-inner flex flex-col justify-between">
-                        <div className="h-1.5 border-b border-amber-600/40"></div>
-                        <div className="h-1.5 border-b border-amber-600/40"></div>
-                      </div>
-                      <span className="text-xs font-bold text-slate-300">
-                        {editLabel || "بطاقة دفع"}
-                      </span>
-                    </div>
-                    <Badge className="px-2.5 py-0.5 text-[10px] font-black tracking-wider bg-white/10 text-white border border-white/20">
-                      {detectCardBrand(cardNumber, selectedService?.name).badge}
-                    </Badge>
-                  </div>
-
-                  <div className="my-4 font-mono text-lg sm:text-xl font-bold tracking-[0.2em] text-center text-white/90 select-none" dir="ltr">
-                    {cardNumber ? cardNumber : "•••• •••• •••• ••••"}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-slate-300 pt-2 border-t border-white/10">
-                    <div className="text-start">
-                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">حامل البطاقة</span>
-                      <span dir="auto" className="font-bold tracking-normal uppercase text-white truncate max-w-[160px] block">
-                        {cardHolder || "CARDHOLDER NAME"}
-                      </span>
-                    </div>
-                    <div className="text-end">
-                      <span className="text-[9px] tracking-normal text-slate-400 block font-bold">تنتهي في</span>
-                      <span dir="ltr" className="font-mono font-bold text-white block">
-                        {cardExpiry || "MM/YY"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Dedicated Bank Card Form Fields */}
-                <div>
-                  <FormLabel htmlFor="edit-card-label">
-                    تسمية البطاقة
-                  </FormLabel>
-                  <Input
-                    id="edit-card-label"
-                    placeholder="مثال: بطاقة الراتب، فيزا المشتريات، بطاقة السفر..."
-                    value={editLabel}
-                    onChange={(e) => setEditLabel(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="edit-card-holder">
-                    اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
-                  </FormLabel>
-                  <Input
-                    id="edit-card-holder"
-                    placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية"
-                    value={cardHolder}
-                    onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <FormLabel htmlFor="edit-card-number" inline>
-                      رقم البطاقة الجديد (16 رقماً)
-                    </FormLabel>
-                    <span className="text-xs font-bold text-primary" dir="ltr">
-                      {detectCardBrand(cardNumber, selectedService?.name).badge}
-                    </span>
-                  </div>
-                  <SecretInput
-                    id="edit-card-number"
-                    revealed={showCardNumber}
-                    onToggleReveal={() => setShowCardNumber(!showCardNumber)}
-                    revealLabel="إظهار رقم البطاقة"
-                    hideLabel="إخفاء رقم البطاقة"
-                    codeStyleWhenFilled
-                    filledTrackingClass="tracking-widest"
-                    placeholder="اتركه فارغاً للإبقاء على رقم البطاقة الحالي"
-                    value={cardNumber}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
-                      const formatted = raw.replace(/(\d{4})(?=\d)/g, "$1 ");
-                      setCardNumber(formatted);
-                    }}
-                    className="text-lg font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <FormLabel htmlFor="edit-card-expiry">
-                      تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
-                    </FormLabel>
-                    <Input
-                      id="edit-card-expiry"
-                      placeholder="08/29"
-                      value={cardExpiry}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/\D/g, "").slice(0, 4);
-                        const formatted = raw.length >= 3 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
-                        setCardExpiry(formatted);
-                      }}
-                      style={{ direction: "ltr", textAlign: "center" }}
-                      className="h-12 text-base px-4 font-mono font-bold rounded-xl border-2 text-center"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-1.5">
-                      <FormLabel htmlFor="edit-card-cvv" inline>
-                        رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
-                      </FormLabel>
-                      <div className="flex items-center gap-2">
-                        {editingAccount?.has_recovery_key && (
-                          clearRecoveryKey ? (
-                            <button
-                              type="button"
-                              onClick={() => setClearRecoveryKey(false)}
-                              className="text-xs text-amber-400 hover:text-amber-300 font-bold"
-                            >
-                              سيتم الحذف (تراجع)
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setClearRecoveryKey(true);
-                                setCardCvv("");
-                              }}
-                              className="text-xs text-rose-400 hover:text-rose-300 font-bold"
-                            >
-                              إزالة <bdi dir="ltr">CVV</bdi>
-                            </button>
-                          )
-                        )}
-                        <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
-                      </div>
-                    </div>
-                    <SecretInput
-                      id="edit-card-cvv"
-                      revealed={showCardCvv}
-                      onToggleReveal={() => setShowCardCvv(!showCardCvv)}
-                      revealLabel="إظهار رمز الأمان"
-                      hideLabel="إخفاء رمز الأمان"
-                      centered
-                      centeredPlaceholder={false}
-                      codeStyleWhenFilled
-                      filledTrackingClass="tracking-widest"
-                      placeholder={clearRecoveryKey ? "سيتم حذف رمز CVV عند الحفظ" : "اتركه فارغاً للإبقاء على رمز الأمان الحالي"}
-                      disabled={clearRecoveryKey}
-                      value={clearRecoveryKey ? "" : cardCvv}
-                      onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      className={`text-base font-bold rounded-xl border-2 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <FormLabel htmlFor="edit-card-pin" inline>
-                      الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi>)
-                    </FormLabel>
-                    {editingAccount?.has_pin && (
-                      clearCardPin ? (
-                        <button
-                          type="button"
-                          onClick={() => setClearCardPin(false)}
-                          className="text-xs text-amber-400 hover:text-amber-300 font-bold"
-                        >
-                          سيتم الحذف (تراجع)
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setClearCardPin(true);
-                            setCardPin("");
-                          }}
-                          className="text-xs text-rose-400 hover:text-rose-300 font-bold"
-                        >
-                          إزالة الرمز السري
-                        </button>
-                      )
-                    )}
-                  </div>
-                  <SecretInput
-                    id="edit-card-pin"
-                    revealed={showCardPin}
-                    onToggleReveal={() => setShowCardPin(!showCardPin)}
-                    revealLabel="إظهار الرمز السري"
-                    hideLabel="إخفاء الرمز السري"
-                    centered
-                    centeredPlaceholder={false}
-                    codeStyleWhenFilled
-                    filledTrackingClass="tracking-widest"
-                    placeholder={clearCardPin ? "سيتم حذف الرمز السري عند الحفظ" : "اتركه فارغاً للإبقاء على الرمز السري الحالي"}
-                    disabled={clearCardPin}
-                    value={clearCardPin ? "" : cardPin}
-                    onChange={(e) => setCardPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className={`text-base font-bold rounded-xl border-2 ${clearCardPin ? "opacity-50 line-through bg-destructive/10" : ""}`}
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="edit-card-notes">
-                    ملاحظات إضافية
-                  </FormLabel>
-                  <Input
-                    id="edit-card-notes"
-                    placeholder="ملاحظات أو تعليمات خاصة بالبطاقة..."
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <FormLabel htmlFor="edit-acc-label">
-                    تسمية الحساب
-                  </FormLabel>
-                  <Input
-                    id="edit-acc-label"
-                    value={editLabel}
-                    onChange={(e) => setEditLabel(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <FormLabel htmlFor="edit-acc-username">
-                      اسم المستخدم
-                    </FormLabel>
-                    <Input
-                      id="edit-acc-username"
-                      value={editUsername}
-                      onChange={(e) => setEditUsername(e.target.value)}
-                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                    />
-                  </div>
-
-                  <div>
-                    <FormLabel htmlFor="edit-acc-email">
-                      البريد الإلكتروني
-                    </FormLabel>
-                    <Input
-                      id="edit-acc-email"
-                      type="email"
-                      value={editEmail}
-                      onChange={(e) => setEditEmail(e.target.value)}
-                      style={{ direction: "ltr", textAlign: "right" }}
-                      className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <FormLabel htmlFor="edit-acc-password" inline>
-                      كلمة المرور الجديدة
-                    </FormLabel>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGeneratePassword("edit")}
-                      className="h-9 px-3 text-xs font-bold gap-1.5 rounded-lg border-primary/50 text-primary hover:bg-primary/10"
-                    >
-                      <Dices className="w-4 h-4" />
-                      <span>توليد كلمة جديدة</span>
-                    </Button>
-                  </div>
-                  <SecretInput
-                    id="edit-acc-password"
-                    revealed={showEditPassword}
-                    onToggleReveal={() => setShowEditPassword(!showEditPassword)}
-                    revealLabel="إظهار كلمة المرور"
-                    hideLabel="إخفاء كلمة المرور"
-                    placeholder="اتركه فارغاً للإبقاء على كلمة المرور الحالية"
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                    className="text-base font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <FormLabel htmlFor="edit-acc-recovery" inline>
-                      مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi>)
-                    </FormLabel>
-                    {editingAccount?.has_recovery_key && (
-                      clearRecoveryKey ? (
-                        <button
-                          type="button"
-                          onClick={() => setClearRecoveryKey(false)}
-                          className="text-xs text-amber-400 hover:text-amber-300 font-bold"
-                        >
-                          سيتم الحذف (تراجع)
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setClearRecoveryKey(true);
-                            setEditRecoveryKey("");
-                          }}
-                          className="text-xs text-rose-400 hover:text-rose-300 font-bold"
-                        >
-                          إزالة مفتاح الاسترداد
-                        </button>
-                      )
-                    )}
-                  </div>
-                  <SecretInput
-                    id="edit-acc-recovery"
-                    revealed={showEditRecoveryKey}
-                    onToggleReveal={() => setShowEditRecoveryKey(!showEditRecoveryKey)}
-                    revealLabel="إظهار مفتاح الاسترداد"
-                    hideLabel="إخفاء مفتاح الاسترداد"
-                    placeholder={clearRecoveryKey ? "سيتم حذف مفتاح الاسترداد عند الحفظ" : "اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"}
-                    disabled={clearRecoveryKey}
-                    value={clearRecoveryKey ? "" : editRecoveryKey}
-                    onChange={(e) => setEditRecoveryKey(e.target.value)}
-                    className={`text-base font-bold rounded-xl border-2 ${clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""}`}
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="edit-acc-url">
-                    الرابط
-                  </FormLabel>
-                  <Input
-                    id="edit-acc-url"
-                    placeholder="https://..."
-                    value={editUrl}
-                    onChange={(e) => setEditUrl(e.target.value)}
-                    style={{ direction: "ltr", textAlign: "right" }}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-
-                <div>
-                  <FormLabel htmlFor="edit-acc-notes">
-                    الملاحظات
-                  </FormLabel>
-                  <Input
-                    id="edit-acc-notes"
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    className="h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
-                  />
-                </div>
-              </div>
-            )}
+            <AccountFormFields
+              mode={accountFormMode}
+              isEdit
+              idPrefix="edit"
+              cardPreviewBadge={detectCardBrand(cardNumber, selectedService?.name).badge}
+              label={editLabel}
+              onLabelChange={setEditLabel}
+              notes={editNotes}
+              onNotesChange={setEditNotes}
+              username={editUsername}
+              onUsernameChange={setEditUsername}
+              email={editEmail}
+              onEmailChange={setEditEmail}
+              password={editPassword}
+              onPasswordChange={setEditPassword}
+              showPassword={showEditPassword}
+              onToggleShowPassword={() => setShowEditPassword((prev) => !prev)}
+              onGeneratePassword={() => handleGeneratePassword("edit")}
+              recoveryKey={editRecoveryKey}
+              onRecoveryKeyChange={setEditRecoveryKey}
+              showRecoveryKey={showEditRecoveryKey}
+              onToggleShowRecoveryKey={() => setShowEditRecoveryKey((prev) => !prev)}
+              url={editUrl}
+              onUrlChange={setEditUrl}
+              cardHolder={cardHolder}
+              onCardHolderChange={setCardHolder}
+              cardNumber={cardNumber}
+              onCardNumberChange={setCardNumber}
+              showCardNumber={showCardNumber}
+              onToggleShowCardNumber={() => setShowCardNumber((prev) => !prev)}
+              cardExpiry={cardExpiry}
+              onCardExpiryChange={setCardExpiry}
+              cardCvv={cardCvv}
+              onCardCvvChange={setCardCvv}
+              showCardCvv={showCardCvv}
+              onToggleShowCardCvv={() => setShowCardCvv((prev) => !prev)}
+              cardPin={cardPin}
+              onCardPinChange={setCardPin}
+              showCardPin={showCardPin}
+              onToggleShowCardPin={() => setShowCardPin((prev) => !prev)}
+              hasExistingRecoveryKey={Boolean(editingAccount?.has_recovery_key)}
+              clearRecoveryKey={clearRecoveryKey}
+              onSetClearRecoveryKey={setClearRecoveryKey}
+              hasExistingPin={Boolean(editingAccount?.has_pin)}
+              clearCardPin={clearCardPin}
+              onSetClearCardPin={setClearCardPin}
+            />
 
             <div className="flex justify-end gap-3 pt-4 border-t border-border/40">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => {
-                  setEditingAccount(null);
-                  setShowCardNumber(false);
-                  setShowCardCvv(false);
-                  setShowCardPin(false);
-                  setShowEditPassword(false);
-                  setShowEditRecoveryKey(false);
-                }}
+                disabled={isSavingAccount}
+                onClick={closeEditAccountModal}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
                 إلغاء
               </Button>
-              <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
+              <Button
+                type="submit"
+                disabled={isSavingAccount}
+                className="h-12 px-8 rounded-xl text-base font-bold shadow-lg"
+              >
                 حفظ التعديلات
               </Button>
             </div>
@@ -5491,6 +4997,7 @@ export default function App() {
             setShowConfirmMasterPassword(false);
             setNewMasterPassword("");
             setConfirmMasterPassword("");
+            setSettingsConfirmTouched(false);
           }
         }}
       >
@@ -5555,7 +5062,7 @@ export default function App() {
                       <p className="text-sm text-muted-foreground mt-0.5">
                         {autoUnlockActive
                           ? `مفعّل: يتم فتح كنانة تلقائياً عبر مخزن الاعتمادات الآمن (${autoUnlockStatus.platform_name}).`
-                          : "معطّل: سيُطلب منك رمز الدخول في كل مرة تشغّل فيها التطبيق."}
+                          : "معطّل: سيُطلب منك إدخال كلمة المرور الرئيسية في كل مرة تشغّل فيها التطبيق."}
                       </p>
                     </div>
                   </div>
@@ -5586,15 +5093,35 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Security Warning: Same-user access trade-off */}
+                {/* Credential store informational/warning notice */}
                 {autoUnlockStatus.available && (
-                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
-                    <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <p className="font-bold text-amber-300">
-                        تنبيه: يتم حفظ رمز الدخول محلياً في {autoUnlockStatus.platform_name}.
+                  <div
+                    className={`p-4 rounded-xl text-sm leading-relaxed flex items-start gap-3 border ${
+                      autoUnlockActive
+                        ? "bg-amber-500/10 border-amber-500/30 text-amber-200"
+                        : "bg-muted/40 border-border/50 text-muted-foreground"
+                    }`}
+                  >
+                    <Info
+                      className={`w-5 h-5 shrink-0 mt-0.5 ${
+                        autoUnlockActive ? "text-amber-400" : "text-muted-foreground"
+                      }`}
+                    />
+                    <div className="space-y-1 text-start">
+                      <p
+                        className={`font-bold ${
+                          autoUnlockActive ? "text-amber-300" : "text-foreground"
+                        }`}
+                      >
+                        {autoUnlockActive
+                          ? `تنبيه: يتم حفظ كلمة المرور محلياً في ${autoUnlockStatus.platform_name}.`
+                          : `عند تفعيل الفتح التلقائي، يتم حفظ كلمة المرور في ${autoUnlockStatus.platform_name}.`}
                       </p>
-                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                      <p
+                        className={`text-xs leading-relaxed ${
+                          autoUnlockActive ? "text-amber-200/90" : "text-muted-foreground"
+                        }`}
+                      >
                         هذا يعني إمكانية قراءة الرمز من أي تطبيق آخر يعمل بنفس حساب المستخدم الحالي على هذا الجهاز.
                         إذا كنت تفضل أعلى درجات الحماية والعزل، اترك الفتح التلقائي معطلاً.
                       </p>
@@ -5700,7 +5227,7 @@ export default function App() {
                     placeholder="عدد الدقائق (مثال: 45)"
                     value={customTimeoutMinutes}
                     onChange={(e) => setCustomTimeoutMinutes(e.target.value)}
-                    className="h-10 text-xs font-bold rounded-xl border-border/70"
+                    className="min-h-10 text-xs font-bold rounded-xl border-border/70"
                   />
                   <Button
                     type="button"
@@ -5731,60 +5258,78 @@ export default function App() {
             </div>
             <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-5">
               <div className="flex items-center gap-3">
-                <Key className="w-6 h-6 text-white" />
+                <Key className="w-6 h-6 text-white shrink-0" />
                 <h4 className="text-lg font-bold text-foreground">
-                  تغيير رمز الدخول (PIN) أو كلمة المرور الرئيسية
+                  تغيير كلمة المرور الرئيسية
                 </h4>
               </div>
 
+              {(() => {
+                const settingsPwValidation = validateMasterPasswordForm({
+                  password: newMasterPassword,
+                  confirmPassword: confirmMasterPassword,
+                  confirmTouched: settingsConfirmTouched,
+                  isSubmitting: isChangingMasterPassword,
+                });
+                return (
               <form onSubmit={handleChangeMasterPassword} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <FormLabel htmlFor="settings-new-password" required className="text-sm">
-                      الرمز أو كلمة المرور الجديدة
-                    </FormLabel>
-                    <SecretInput
-                      id="settings-new-password"
-                      revealed={showNewMasterPassword}
-                      onToggleReveal={() => setShowNewMasterPassword((prev) => !prev)}
-                      revealLabel="إظهار الرمز الجديد"
-                      hideLabel="إخفاء الرمز الجديد"
-                      placeholder="أدخل الرمز الجديد"
-                      value={newMasterPassword}
-                      onChange={(e) => setNewMasterPassword(e.target.value)}
-                      className="text-base font-bold rounded-xl border-2"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <FormLabel htmlFor="settings-confirm-password" required className="text-sm">
-                      تأكيد الرمز الجديد
-                    </FormLabel>
-                    <SecretInput
-                      id="settings-confirm-password"
-                      revealed={showConfirmMasterPassword}
-                      onToggleReveal={() => setShowConfirmMasterPassword((prev) => !prev)}
-                      revealLabel="إظهار تأكيد الرمز"
-                      hideLabel="إخفاء تأكيد الرمز"
-                      placeholder="أعد إدخال الرمز للتأكيد"
-                      value={confirmMasterPassword}
-                      onChange={(e) => setConfirmMasterPassword(e.target.value)}
-                      className="text-base font-bold rounded-xl border-2"
-                      required
-                    />
-                  </div>
+                <div>
+                  <FormLabel htmlFor="settings-new-password" required className="text-sm">
+                    كلمة المرور الرئيسية الجديدة
+                  </FormLabel>
+                  <SecretInput
+                    id="settings-new-password"
+                    revealed={showNewMasterPassword}
+                    onToggleReveal={() => setShowNewMasterPassword((prev) => !prev)}
+                    revealLabel="إظهار كلمة المرور الجديدة"
+                    hideLabel="إخفاء كلمة المرور الجديدة"
+                    placeholder=""
+                    value={newMasterPassword}
+                    onChange={(e) => setNewMasterPassword(e.target.value)}
+                    className="text-base font-bold rounded-xl border-2"
+                    required
+                  />
+                  <PasswordStrengthIndicator password={newMasterPassword} className="mt-2" />
+                </div>
+
+                <div>
+                  <FormLabel htmlFor="settings-confirm-password" required className="text-sm">
+                    تأكيد كلمة المرور الرئيسية
+                  </FormLabel>
+                  <SecretInput
+                    id="settings-confirm-password"
+                    revealed={showConfirmMasterPassword}
+                    onToggleReveal={() => setShowConfirmMasterPassword((prev) => !prev)}
+                    revealLabel="إظهار تأكيد كلمة المرور"
+                    hideLabel="إخفاء تأكيد كلمة المرور"
+                    placeholder=""
+                    value={confirmMasterPassword}
+                    onChange={(e) => {
+                      if (!settingsConfirmTouched) setSettingsConfirmTouched(true);
+                      setConfirmMasterPassword(e.target.value);
+                    }}
+                    className="text-base font-bold rounded-xl border-2"
+                    required
+                  />
+                  {settingsPwValidation.showMismatchError && (
+                    <p role="alert" className="text-sm font-bold text-rose-400 pt-1.5 text-start">
+                      كلمتا المرور غير متطابقتين
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex justify-end">
                   <Button
                     type="submit"
-                    className="h-12 px-6 rounded-xl font-bold shadow-md gap-2"
+                    disabled={!settingsPwValidation.canSubmit}
+                    className="min-h-12 px-6 rounded-xl font-bold shadow-md"
                   >
-                    <Check className="w-4 h-4" />
-                    <span>حفظ وتطبيق الرمز الجديد</span>
+                    <span>حفظ كلمة المرور الجديدة</span>
                   </Button>
                 </div>
               </form>
+                );
+              })()}
             </div>
 
             {/* Section 3: Emergency Recovery Key */}

@@ -10,6 +10,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use kinana_core::{
+    account_ops::{
+        apply_account_update, extract_pin_from_notes, generate_password_string, pack_account_notes,
+        strip_pin_lines, unpack_account_notes, AccountUpdateInput,
+    },
     journal::{create_pre_import_archive, TransactionJournal},
     models::{Account, SecretString, Service, VaultSummary},
     storage::{VaultSession, VaultStorage},
@@ -1010,52 +1014,6 @@ pub struct AccountDetail {
     pub notes: Option<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
-struct AccountMetaPayload {
-    #[serde(default)]
-    email: String,
-    #[serde(default)]
-    recovery_key: String,
-    #[serde(default)]
-    notes: String,
-}
-
-fn unpack_account_notes(raw_notes: Option<&str>) -> (String, String, String) {
-    if let Some(s) = raw_notes {
-        let trimmed = s.trim();
-        if trimmed.starts_with('{') && trimmed.ends_with('}') {
-            if let Ok(meta) = serde_json::from_str::<AccountMetaPayload>(trimmed) {
-                return (meta.email, meta.recovery_key, meta.notes);
-            }
-        }
-        (String::new(), String::new(), trimmed.to_string())
-    } else {
-        (String::new(), String::new(), String::new())
-    }
-}
-
-fn pack_account_notes(email: &str, recovery_key: &str, notes: &str) -> Option<String> {
-    let email_t = email.trim();
-    let rec_t = recovery_key.trim();
-    let notes_t = notes.trim();
-
-    if email_t.is_empty() && rec_t.is_empty() && notes_t.is_empty() {
-        return None;
-    }
-
-    if email_t.is_empty() && rec_t.is_empty() {
-        return Some(notes_t.to_string());
-    }
-
-    let meta = AccountMetaPayload {
-        email: email_t.to_string(),
-        recovery_key: rec_t.to_string(),
-        notes: notes_t.to_string(),
-    };
-
-    serde_json::to_string(&meta).ok()
-}
-
 #[tauri::command]
 async fn get_service_accounts(
     service_id: String,
@@ -1079,11 +1037,11 @@ async fn get_service_accounts(
         .map(|acc| {
             let (email, recovery_key, notes) = unpack_account_notes(acc.notes.as_deref());
             let has_rec = !recovery_key.trim().is_empty();
-            let has_pin = notes.contains("PIN:");
+            let has_pin = notes.lines().any(|l| l.trim().starts_with("PIN:"));
             let has_notes = !notes.trim().is_empty();
             let safe_notes = if has_pin {
-                let filtered: Vec<&str> = notes.lines().filter(|l| !l.trim().starts_with("PIN:")).collect();
-                if filtered.is_empty() { None } else { Some(filtered.join("\n")) }
+                let stripped = strip_pin_lines(&notes);
+                if stripped.is_empty() { None } else { Some(stripped) }
             } else if has_notes {
                 Some(notes)
             } else {
@@ -1185,16 +1143,9 @@ async fn get_account_pin(
         .ok_or_else(|| format!("الحساب بالمعرف '{}' غير موجود", account_id))?;
 
     let (_, _, notes) = unpack_account_notes(acc.notes.as_deref());
-    for line in notes.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("PIN:") {
-            let pin = trimmed["PIN:".len()..].trim();
-            update_activity(&state);
-            return Ok(pin.to_string());
-        }
-    }
+    let pin = extract_pin_from_notes(&notes).unwrap_or_default();
     update_activity(&state);
-    Ok(String::new())
+    Ok(pin)
 }
 
 #[tauri::command]
@@ -1382,11 +1333,10 @@ async fn update_account(
     url: Option<String>,
     clear_recovery_key: Option<bool>,
     clear_pin: Option<bool>,
+    clear_password: Option<bool>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<VaultSummary, String> {
-    let new_secret_pwd = password.map(SecretString::new);
-
     let vault_path = get_vault_path(&app)?;
     let storage = VaultStorage::new(&vault_path);
 
@@ -1413,101 +1363,21 @@ async fn update_account(
             )
         })?;
 
-    let (existing_email, existing_recovery_key, existing_notes) = unpack_account_notes(account.notes.as_deref());
-
-    let final_email = email.unwrap_or(existing_email);
-
-    // Three-state logic for recovery key (CVV or account recovery key):
-    // 1. Explicit clear (clear_recovery_key == true) -> ""
-    // 2. Explicit update (non-empty recovery_key provided) -> new value
-    // 3. Keep existing (empty/None without explicit clear) -> existing_recovery_key
-    let final_recovery_key = if clear_recovery_key.unwrap_or(false) {
-        String::new()
-    } else {
-        match recovery_key {
-            Some(r) => {
-                let trimmed = r.trim().to_string();
-                if trimmed.is_empty() {
-                    existing_recovery_key
-                } else {
-                    trimmed
-                }
-            }
-            None => existing_recovery_key,
-        }
-    };
-
-    // Three-state logic for card PIN:
-    let should_clear_pin = clear_pin.unwrap_or(false);
-    let existing_pin_line = if should_clear_pin {
-        None
-    } else {
-        existing_notes
-            .lines()
-            .find(|l| l.trim().starts_with("PIN:"))
-            .map(|l| l.trim().to_string())
-    };
-
-    let final_notes = match notes {
-        Some(n) => {
-            let trimmed = n.trim().to_string();
-            if should_clear_pin {
-                let clean: Vec<&str> = trimmed.lines().filter(|l| !l.trim().starts_with("PIN:")).collect();
-                clean.join("\n")
-            } else if trimmed.is_empty() {
-                if let Some(pin) = existing_pin_line {
-                    pin
-                } else {
-                    String::new()
-                }
-            } else if !trimmed.contains("PIN:") && existing_pin_line.is_some() {
-                let pin = existing_pin_line.unwrap();
-                if trimmed.starts_with("[CARD]") {
-                    let rest = trimmed["[CARD]".len()..].trim();
-                    if rest.is_empty() {
-                        format!("[CARD]\n{}", pin)
-                    } else {
-                        format!("[CARD]\n{}\n{}", pin, rest)
-                    }
-                } else {
-                    format!("{}\n{}", pin, trimmed)
-                }
-            } else {
-                trimmed
-            }
-        }
-        None => {
-            if should_clear_pin {
-                let clean: Vec<&str> = existing_notes.lines().filter(|l| !l.trim().starts_with("PIN:")).collect();
-                clean.join("\n")
-            } else {
-                existing_notes
-            }
-        }
-    };
-
-    let packed_notes = pack_account_notes(&final_email, &final_recovery_key, &final_notes);
-
-    let clean_url = url.and_then(|u| {
-        let trimmed = u.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    });
-
-    if let Some(lbl) = label {
-        account.label = lbl;
-    }
-    if let Some(user) = username {
-        account.username = user;
-    }
-    if let Some(sec) = new_secret_pwd {
-        account.password = sec;
-    }
-    account.notes = packed_notes;
-    account.url = clean_url;
+    apply_account_update(
+        account,
+        AccountUpdateInput {
+            label,
+            username,
+            password,
+            email,
+            recovery_key,
+            notes,
+            url,
+            clear_recovery_key,
+            clear_pin,
+            clear_password,
+        },
+    );
 
     session.data.updated_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1522,34 +1392,7 @@ async fn update_account(
 
 #[tauri::command]
 async fn generate_password(length: u8, use_symbols: bool) -> Result<String, String> {
-    if !(12..=64).contains(&length) {
-        return Err("Password length must be between 12 and 64 characters".to_string());
-    }
-
-    let mut charset: Vec<u8> = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".to_vec();
-    if use_symbols {
-        charset.extend_from_slice(b"!@#$%^&*");
-    }
-
-    use rand::RngCore;
-    let mut rng = rand::rngs::OsRng;
-    let len = charset.len();
-    let max_valid = 256 - (256 % len);
-    let mut result = String::with_capacity(length as usize);
-
-    for _ in 0..length {
-        let mut byte = [0u8; 1];
-        loop {
-            rng.fill_bytes(&mut byte);
-            let val = byte[0] as usize;
-            if val < max_valid {
-                result.push(charset[val % len] as char);
-                break;
-            }
-        }
-    }
-
-    Ok(result)
+    generate_password_string(length, use_symbols)
 }
 
 #[tauri::command]

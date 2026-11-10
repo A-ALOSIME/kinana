@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.6] - 2026-11-10
+
+### Changed
+- Simplified and unified Add/Edit Account and Bank Card forms through a shared `<AccountFormFields />` layout, removing redundant descriptions, unnecessary field placeholders (retaining helpful hints only on Account Label, Card Label, and Cardholder Name), the extra `BANK CARD` label beside the Card Number field, and verbose empty-state wording.
+- Centered Bank Card number inputs (`0000 0000 0000 0000`) with strict LTR digit grouping across both Add and Edit forms while keeping the eye toggle clear of input values.
+- Redesigned the initial Vault Creation screen with clearer branding spacing, removed `PIN` terminology in favor of `كلمة المرور الرئيسية`, added password confirmation with deferred mismatch validation, integrated a shared 4-level `<PasswordStrengthIndicator />` (neutral-to-emerald palette without red on weakest level), updated recovery notice to reflect Recovery Key + Master Password semantics with a neutral circle-info icon, made `إنشاء الخزنة` full-width high-contrast without an icon, moved the missing-vault note underneath, and placed a full-width outlined Import Vault (`.dat`) button below a divider.
+- Refined the Settings Master Password Change section to reuse the exact same `<PasswordStrengthIndicator />` and confirmation validation behavior, removed `(PIN)` from its title, and updated Auto-Unlock notices to use neutral information icons with warning styling shown only when Auto-Unlock is active.
+
+### Fixed
+- Fixed critical account-update clearing bug where clearing optional text fields (`label`, `username`, `email`, `url`, `notes`, card label, cardholder name, expiry) serialized empty fields as `null` and silently restored prior values; introduced explicit three-state `update_account` / `apply_account_update` semantics while retaining existing secrets when blank unless explicit removal flags are triggered.
+- Fixed generated-password edit/save persistence and UI sync issues by unifying modal secret cleanup, request/session guards, form saving locks, automatic transient reveal of newly generated passwords, and resetting stale per-account reveal states upon `fetchServiceAccounts` refresh so freshly saved passwords reveal and persist reliably across lock/unlock and restarts.
+- Globally resolved remaining Arabic glyph descender clipping (`ي`, `ج`, `ح`, `خ`, `ن`, diacritics) caused by tight declared `hhea`/`OS2` font bounds by raising base input/textarea/placeholder line height (`line-height: 2`), switching rigid fixed input heights to `min-h-*`, and adding vertical clearance on truncated Arabic headings and labels.
+- Re-verified `kinana-linux-x64.deb` packaging internals (confirming zero maintainer scripts and standard `.desktop` metadata) and documented the external Linux Mint `gdebi-gtk` close-button issue alongside terminal/APT workarounds.
+
+---
+
 ## [0.1.5] - 2026-11-10
 
 ### Changed

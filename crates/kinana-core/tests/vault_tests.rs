@@ -1892,3 +1892,325 @@ fn test_cross_platform_synthetic_vault_compatibility_roundtrip() {
     assert_eq!(target_acc.url.as_deref(), Some("https://kinana.local"));
     assert_eq!(target_session.data.recovery_code.as_deref(), Some(recovery_code));
 }
+
+/// 40. اختبار دلالات التحديث ثلاثية الحالة ومسح الحقول الاختيارية واستمرارية كلمات المرور المولدة عبر الإقفال وإعادة التشغيل
+#[test]
+fn test_account_clearing_and_generated_password_persistence_roundtrip() {
+    use kinana_core::account_ops::{
+        apply_account_update, extract_pin_from_notes, generate_password_string,
+        pack_account_notes, strip_pin_lines, unpack_account_notes, AccountUpdateInput,
+    };
+
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("persistence_test_vault.dat");
+    let master_password = "SyntheticTestMasterPassword#2026";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    // المرحلة 1: إنشاء خزنة وحساب بكلمة مرور أولية ثم توليد كلمة جديدة عند الإضافة
+    let initial_generated_pwd = generate_password_string(20, true).unwrap();
+    assert_eq!(initial_generated_pwd.len(), 20);
+
+    {
+        let storage = VaultStorage::new(&vault_path);
+        let mut session = storage
+            .create_new_vault(master_password, Some(fast_params))
+            .unwrap();
+
+        let packed = pack_account_notes(
+            "user@example.com",
+            "REC-INIT-1234",
+            "Initial optional notes",
+        );
+
+        session.data.services.push(Service {
+            id: "svc_1".to_string(),
+            name: "GitHub".to_string(),
+            icon_data: None,
+            accounts: vec![Account {
+                id: "acc_login".to_string(),
+                label: "حساب العمل".to_string(),
+                username: "octocat_dev".to_string(),
+                password: SecretString::new(initial_generated_pwd.clone()),
+                notes: packed,
+                url: Some("https://github.com/login".to_string()),
+            }],
+        });
+
+        storage.save(&mut session).unwrap();
+    }
+
+    // محاكاة القفل ثم الفتح ثم التحقق من بقاء كلمة المرور المولدة عند الإنشاء
+    {
+        let storage_reloaded = VaultStorage::new(&vault_path);
+        let unlocked = storage_reloaded.unlock(master_password).unwrap();
+        let acc = &unlocked.data.services[0].accounts[0];
+        assert_eq!(acc.password.as_str(), initial_generated_pwd);
+        assert_eq!(acc.label, "حساب العمل");
+        assert_eq!(acc.username, "octocat_dev");
+        let (email, rec, notes) = unpack_account_notes(acc.notes.as_deref());
+        assert_eq!(email, "user@example.com");
+        assert_eq!(rec, "REC-INIT-1234");
+        assert_eq!(notes, "Initial optional notes");
+    }
+
+    // المرحلة 2: استبدال التسمية ثم التعديل مع مسح الحقول الاختيارية والحفاظ على الأسرار عندما تترك فارغة
+    {
+        let storage = VaultStorage::new(&vault_path);
+        let mut session = storage.unlock(master_password).unwrap();
+        let acc = &mut session.data.services[0].accounts[0];
+
+        // 2أ: استبدال التسمية بقيمة أخرى مع ترك الحقول غير المرسلة (None) سليمة
+        apply_account_update(
+            acc,
+            AccountUpdateInput {
+                label: Some("التسمية البديلة".to_string()),
+                ..Default::default()
+            },
+        );
+        storage.save(&mut session).unwrap();
+
+        assert_eq!(session.data.services[0].accounts[0].label, "التسمية البديلة");
+        assert_eq!(
+            session.data.services[0].accounts[0].url.as_deref(),
+            Some("https://github.com/login")
+        );
+        assert_eq!(
+            session.data.services[0].accounts[0].password.as_str(),
+            initial_generated_pwd
+        );
+
+        // 2ب: مسح التسمية واسم المستخدم والبريد والملاحظات والرابط صراحة عبر Some("")
+        // مع تمرير كلمة مرور ومفتاح استرداد فارغين (Keep-secret semantics)
+        let acc = &mut session.data.services[0].accounts[0];
+        apply_account_update(
+            acc,
+            AccountUpdateInput {
+                label: Some(String::new()),
+                username: Some(String::new()),
+                password: None,
+                email: Some(String::new()),
+                recovery_key: Some("   ".to_string()),
+                notes: Some(String::new()),
+                url: Some(String::new()),
+                clear_recovery_key: Some(false),
+                clear_pin: Some(false),
+                clear_password: None,
+            },
+        );
+        storage.save(&mut session).unwrap();
+    }
+
+    // المرحلة 3: إعادة فتح من القرص (قفل وفتح / إعادة تشغيل التطبيق) والتحقق أن المسح مستمر والأسرار لم تُمسح
+    let second_generated_pwd = {
+        let mut second = generate_password_string(20, true).unwrap();
+        while second == initial_generated_pwd {
+            second = generate_password_string(20, true).unwrap();
+        }
+        second
+    };
+
+    {
+        let storage_restart = VaultStorage::new(&vault_path);
+        let mut unlocked = storage_restart.unlock(master_password).unwrap();
+        let acc = &mut unlocked.data.services[0].accounts[0];
+
+        assert_eq!(acc.label, "", "Cleared account label must remain empty");
+        assert_eq!(acc.username, "", "Cleared username must remain empty");
+        assert_eq!(acc.url, None, "Cleared URL must remain None");
+        let (email, rec, notes) = unpack_account_notes(acc.notes.as_deref());
+        assert_eq!(email, "", "Cleared email must remain empty");
+        assert_eq!(notes, "", "Cleared notes must remain empty");
+        assert_eq!(
+            rec, "REC-INIT-1234",
+            "Blank recovery key without explicit clear must preserve existing secret"
+        );
+        assert_eq!(
+            acc.password.as_str(),
+            initial_generated_pwd,
+            "Blank password field must preserve existing secret"
+        );
+
+        // المرحلة 4: توليد كلمة مرور جديدة في التعديل وحفظها ثم مسح مفتاح الاسترداد صراحة
+        apply_account_update(
+            acc,
+            AccountUpdateInput {
+                password: Some(second_generated_pwd.clone()),
+                clear_recovery_key: Some(true),
+                ..Default::default()
+            },
+        );
+        storage_restart.save(&mut unlocked).unwrap();
+    }
+
+    // التحقق النهائي بعد إعادة تشغيل محاكاة ثانية أن الكلمة المولدة الجديدة استمرت وأن الحقول الممسوحة ما زالت فارغة
+    {
+        let storage_final = VaultStorage::new(&vault_path);
+        let unlocked = storage_final.unlock(master_password).unwrap();
+        let acc = &unlocked.data.services[0].accounts[0];
+        assert_eq!(acc.password.as_str(), second_generated_pwd);
+        assert_eq!(acc.label, "");
+        assert_eq!(acc.username, "");
+        assert_eq!(acc.url, None);
+        let (email, rec, notes) = unpack_account_notes(acc.notes.as_deref());
+        assert_eq!(email, "");
+        assert_eq!(rec, "");
+        assert_eq!(notes, "");
+    }
+
+    // المرحلة 5: اختبار البطاقة البنكية وتحديثها ومسح الحقول والـ CVV والـ PIN
+    {
+        let storage = VaultStorage::new(&vault_path);
+        let mut session = storage.unlock(master_password).unwrap();
+        session.data.services.push(Service {
+            id: "svc_bank".to_string(),
+            name: "Al Rajhi Bank".to_string(),
+            icon_data: None,
+            accounts: vec![Account {
+                id: "acc_card".to_string(),
+                label: "بطاقة السفر".to_string(),
+                username: "TEST HOLDER".to_string(),
+                password: SecretString::new("4111111111111111".to_string()),
+                notes: pack_account_notes("", "999", "[CARD]\nPIN: 4321\nTravel limit 5k"),
+                url: Some("08/29".to_string()),
+            }],
+        });
+        storage.save(&mut session).unwrap();
+
+        // مسح تسمية البطاقة وحامل البطاقة والتاريخ والملاحظات مع بقاء رقم البطاقة وCVV وPIN
+        let card = &mut session.data.services[1].accounts[0];
+        apply_account_update(
+            card,
+            AccountUpdateInput {
+                label: Some(String::new()),
+                username: Some(String::new()),
+                password: None,
+                email: Some(String::new()),
+                recovery_key: None,
+                notes: Some("[CARD]".to_string()),
+                url: Some(String::new()),
+                clear_recovery_key: Some(false),
+                clear_pin: Some(false),
+                clear_password: None,
+            },
+        );
+        storage.save(&mut session).unwrap();
+    }
+
+    {
+        let storage_recheck = VaultStorage::new(&vault_path);
+        let mut session = storage_recheck.unlock(master_password).unwrap();
+        let card = &mut session.data.services[1].accounts[0];
+        assert_eq!(card.label, "");
+        assert_eq!(card.username, "");
+        assert_eq!(card.url, None);
+        assert_eq!(card.password.as_str(), "4111111111111111");
+        let (_, cvv, notes) = unpack_account_notes(card.notes.as_deref());
+        assert_eq!(cvv, "999");
+        assert!(notes.contains("[CARD]"));
+        assert_eq!(extract_pin_from_notes(&notes).as_deref(), Some("4321"));
+        assert_eq!(strip_pin_lines(&notes), "[CARD]");
+
+        // مسح CVV والـ PIN صراحة وتحديث رقم البطاقة
+        apply_account_update(
+            card,
+            AccountUpdateInput {
+                password: Some("5222222222222222".to_string()),
+                notes: Some("[CARD]".to_string()),
+                clear_recovery_key: Some(true),
+                clear_pin: Some(true),
+                ..Default::default()
+            },
+        );
+        storage_recheck.save(&mut session).unwrap();
+    }
+
+    {
+        let storage_after_card_clear = VaultStorage::new(&vault_path);
+        let session = storage_after_card_clear.unlock(master_password).unwrap();
+        let card = &session.data.services[1].accounts[0];
+        assert_eq!(card.password.as_str(), "5222222222222222");
+        let (_, cvv, notes) = unpack_account_notes(card.notes.as_deref());
+        assert_eq!(cvv, "");
+        assert_eq!(extract_pin_from_notes(&notes), None);
+        assert_eq!(notes, "[CARD]");
+    }
+}
+
+/// 41. اختبار تغيير كلمة المرور الرئيسية مع بقاء التعديلات وتوافق الاسترداد بعد التغيير
+#[test]
+fn test_master_password_change_preserves_account_updates_and_recovery() {
+    use kinana_core::account_ops::{apply_account_update, generate_password_string, AccountUpdateInput};
+    use kinana_core::crypto::{decrypt_payload, derive_key, encrypt_payload, VaultHeader};
+
+    let dir = tempdir().unwrap();
+    let vault_path = dir.path().join("rekey_vault.dat");
+    let storage = VaultStorage::new(&vault_path);
+
+    let old_master = "OldMasterPass#2026";
+    let new_master = "NewMasterPass#2027!";
+    let recovery_code = "KN-REKEY-TEST-2026";
+    let fast_params = Argon2Parameters {
+        m_cost: 16 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+    };
+
+    let generated_acc_pwd = generate_password_string(20, true).unwrap();
+
+    let mut session = storage
+        .create_new_vault(old_master, Some(fast_params))
+        .unwrap();
+    session.data.recovery_code = Some(recovery_code.to_string());
+    session.data.services.push(Service {
+        id: "svc_r".to_string(),
+        name: "Mail".to_string(),
+        icon_data: None,
+        accounts: vec![Account {
+            id: "acc_r".to_string(),
+            label: "Old Label".to_string(),
+            username: "old_user".to_string(),
+            password: SecretString::new("temp".to_string()),
+            notes: None,
+            url: Some("https://mail.example".to_string()),
+        }],
+    });
+    apply_account_update(
+        &mut session.data.services[0].accounts[0],
+        AccountUpdateInput {
+            label: Some(String::new()),
+            username: Some("updated_user".to_string()),
+            password: Some(generated_acc_pwd.clone()),
+            ..Default::default()
+        },
+    );
+    storage.save(&mut session).unwrap();
+
+    // تغيير كلمة المرور الرئيسية عبر save_rekey وتشفير كلمة المرور الجديدة بمفتاح الاسترداد
+    let old_key = kinana_core::crypto::DerivedKey::new(*session.key.as_bytes());
+    let new_header = VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let new_key = derive_key(new_master, &new_header.salt, &new_header.argon2_params).unwrap();
+    session.header = new_header;
+    session.key = new_key;
+    storage.save_rekey(&mut session, &old_key).unwrap();
+
+    let rec_header = VaultHeader::new_with_fresh_salts(fast_params).unwrap();
+    let rec_key = derive_key(recovery_code, &rec_header.salt, &rec_header.argon2_params).unwrap();
+    let rec_blob = encrypt_payload(new_master.as_bytes(), &rec_key, &rec_header).unwrap();
+
+    // كلمة المرور القديمة مرفوضة، والجديدة تسترجع الحساب والتعديلات بدقة
+    assert!(storage.unlock(old_master).is_err());
+    let (_, recovered_master_bytes) = decrypt_payload(&rec_blob, &rec_key).unwrap();
+    let recovered_master = String::from_utf8(recovered_master_bytes.to_vec()).unwrap();
+    assert_eq!(recovered_master, new_master);
+
+    let unlocked = storage.unlock(&recovered_master).unwrap();
+    let acc = &unlocked.data.services[0].accounts[0];
+    assert_eq!(acc.label, "");
+    assert_eq!(acc.username, "updated_user");
+    assert_eq!(acc.password.as_str(), generated_acc_pwd);
+    assert_eq!(unlocked.data.recovery_code.as_deref(), Some(recovery_code));
+}
