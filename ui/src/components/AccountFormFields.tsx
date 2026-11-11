@@ -60,9 +60,13 @@ export interface AccountFormFieldsProps {
   hasExistingPassword?: boolean;
   revealedStoredPassword?: string | null;
   hasExistingRecoveryKey?: boolean;
+  revealedStoredRecoveryKey?: string | null;
+  revealedStoredCardNumber?: string | null;
+  revealedStoredCardCvv?: string | null;
+  hasExistingPin?: boolean;
+  revealedStoredCardPin?: string | null;
   clearRecoveryKey?: boolean;
   onSetClearRecoveryKey?: (clear: boolean) => void;
-  hasExistingPin?: boolean;
   clearCardPin?: boolean;
   onSetClearCardPin?: (clear: boolean) => void;
 }
@@ -110,9 +114,13 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
   hasExistingPassword = false,
   revealedStoredPassword = null,
   hasExistingRecoveryKey = false,
+  revealedStoredRecoveryKey = null,
+  revealedStoredCardNumber = null,
+  revealedStoredCardCvv = null,
+  hasExistingPin = false,
+  revealedStoredCardPin = null,
   clearRecoveryKey = false,
   onSetClearRecoveryKey,
-  hasExistingPin = false,
   clearCardPin = false,
   onSetClearCardPin,
 }) => {
@@ -204,6 +212,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             codeStyleWhenFilled
             filledTrackingClass="tracking-widest"
             storedSecretMask={isEdit && hasExistingPassword && !cardNumber}
+            revealedStoredValue={isEdit ? revealedStoredCardNumber : null}
             style={{ direction: "ltr", textAlign: "center" }}
             value={cardNumber}
             onChange={(e) => {
@@ -280,7 +289,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
               centered
               codeStyleWhenFilled
               filledTrackingClass="tracking-widest"
-              storedSecretMask={isEdit && hasExistingRecoveryKey && !clearRecoveryKey && !cardCvv}
+              storedSecretMask={isEdit && hasExistingRecoveryKey && !cardCvv}
+              revealedStoredValue={isEdit && !clearRecoveryKey ? revealedStoredCardCvv : null}
               disabled={isEdit && clearRecoveryKey}
               value={isEdit && clearRecoveryKey ? "" : cardCvv}
               onChange={(e) =>
@@ -337,7 +347,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             centered
             codeStyleWhenFilled
             filledTrackingClass="tracking-widest"
-            storedSecretMask={isEdit && hasExistingPin && !clearCardPin && !cardPin}
+            storedSecretMask={isEdit && hasExistingPin && !cardPin}
+            revealedStoredValue={isEdit && !clearCardPin ? revealedStoredCardPin : null}
             disabled={isEdit && clearCardPin}
             value={isEdit && clearCardPin ? "" : cardPin}
             onChange={(e) =>
@@ -484,7 +495,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           onToggleReveal={onToggleShowRecoveryKey}
           revealLabel="إظهار مفتاح الاسترداد"
           hideLabel="إخفاء مفتاح الاسترداد"
-          storedSecretMask={isEdit && hasExistingRecoveryKey && !clearRecoveryKey && !recoveryKey}
+          storedSecretMask={isEdit && hasExistingRecoveryKey && !recoveryKey}
+          revealedStoredValue={isEdit && !clearRecoveryKey ? revealedStoredRecoveryKey : null}
           disabled={isEdit && clearRecoveryKey}
           value={isEdit && clearRecoveryKey ? "" : recoveryKey}
           onChange={(e) => onRecoveryKeyChange(e.target.value)}

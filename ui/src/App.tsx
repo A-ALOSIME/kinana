@@ -91,12 +91,21 @@ import { AccountFormFields } from "@/components/AccountFormFields";
 import { DestructiveConfirmDialog } from "@/components/ui/destructive-confirm-dialog";
 import { validateMasterPasswordForm } from "./passwordValidation";
 import {
+  clearNonEditableDocumentSelection,
   getZoomActionFromKeyboardEvent,
   shouldActivateServiceCard,
   shouldHandleDeleteSelectionShortcut,
   shouldHandleSelectAllShortcut,
   shouldHandleSelectionEscape,
+  shouldPreventNativeSelectAll,
 } from "./keyboard";
+import {
+  EditSecretRevealController,
+  createHiddenEditSecretMap,
+  type EditSecretFieldKey,
+  type EditSecretRevealMap,
+} from "./editSecretReveal";
+import { useTimedNotification } from "./useTimedNotification";
 import {
   POPULAR_SERVICES,
   generateCinematicCoverSvg,
@@ -307,26 +316,30 @@ export default function App() {
   useEffect(() => {
     summaryRef.current = summary;
   }, [summary]);
-  const [notification, setNotification] = useState<{
+  const {
+    value: notification,
+    show: showNotification,
+    dismiss: dismissNotification,
+  } = useTimedNotification<{
     type: "error" | "warning" | "success";
     message: string;
     detail?: string;
-  } | null>(null);
+  }>();
 
   const setError = (msg: string | null, detail?: string) => {
     if (!msg) {
-      setNotification(null);
+      dismissNotification();
     } else {
-      setNotification({ type: "error", message: msg, detail });
+      showNotification({ type: "error", message: msg, detail });
     }
   };
 
   const setSuccess = (msg: string, detail?: string) => {
-    setNotification({ type: "success", message: msg, detail });
+    showNotification({ type: "success", message: msg, detail });
   };
 
   const setWarning = (msg: string, detail?: string) => {
-    setNotification({ type: "warning", message: msg, detail });
+    showNotification({ type: "warning", message: msg, detail });
   };
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -366,7 +379,17 @@ export default function App() {
   const [showAutoUnlockPassword, setShowAutoUnlockPassword] = useState<boolean>(false);
   const [autoUnlockModalError, setAutoUnlockModalError] = useState<string | null>(null);
   const [autoUnlockModalLoading, setAutoUnlockModalLoading] = useState<boolean>(false);
-  const [settingsFeedback, setSettingsFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const {
+    value: settingsFeedback,
+    show: showSettingsFeedback,
+    dismiss: dismissSettingsFeedback,
+  } = useTimedNotification<{ type: "success" | "error"; message: string }>();
+  const setSettingsFeedback = (
+    val: { type: "success" | "error"; message: string } | null
+  ) => {
+    if (!val) dismissSettingsFeedback();
+    else showSettingsFeedback(val);
+  };
 
   // Auto-lock inactivity timeout settings (null = never, number = seconds)
   const [autoLockTimeout, setAutoLockTimeout] = useState<number | null>(() => {
@@ -411,6 +434,9 @@ export default function App() {
   const selectionModeRef = useRef<boolean>(selectionMode);
   useEffect(() => {
     selectionModeRef.current = selectionMode;
+    if (selectionMode) {
+      clearNonEditableDocumentSelection(document);
+    }
   }, [selectionMode]);
 
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
@@ -455,8 +481,6 @@ export default function App() {
   const [isCreatingVault, setIsCreatingVault] = useState<boolean>(false);
   const [showAccPassword, setShowAccPassword] = useState<boolean>(false);
   const [showAccRecoveryKey, setShowAccRecoveryKey] = useState<boolean>(false);
-  const [showEditPassword, setShowEditPassword] = useState<boolean>(false);
-  const [showEditRecoveryKey, setShowEditRecoveryKey] = useState<boolean>(false);
   const [showNewMasterPassword, setShowNewMasterPassword] = useState<boolean>(false);
   const [showConfirmMasterPassword, setShowConfirmMasterPassword] = useState<boolean>(false);
 
@@ -465,12 +489,17 @@ export default function App() {
   const [confirmMasterPassword, setConfirmMasterPassword] = useState<string>("");
   const [settingsConfirmTouched, setSettingsConfirmTouched] = useState<boolean>(false);
   const [isChangingMasterPassword, setIsChangingMasterPassword] = useState<boolean>(false);
-  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
+  const {
+    value: passwordChangeFeedback,
+    show: showPasswordChangeFeedback,
+    dismiss: dismissPasswordChangeFeedback,
+  } = useTimedNotification<{ type: "success" | "warning"; message: string }>();
 
   // Emergency Recovery Key state
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   const [showVaultRecoveryKey, setShowVaultRecoveryKey] = useState<boolean>(false);
   const [copiedRecoveryKey, setCopiedRecoveryKey] = useState<boolean>(false);
+  const copiedRecoveryKeyTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
   const [inputRecoveryKey, setInputRecoveryKey] = useState<string>("");
   const [showInputRecoveryKey, setShowInputRecoveryKey] = useState<boolean>(false);
@@ -489,10 +518,14 @@ export default function App() {
   const zoomHudTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Backup Export & Import State
-  const [exportImportStatus, setExportImportStatus] = useState<{
+  const {
+    value: exportImportStatus,
+    show: showExportImportStatus,
+    dismiss: dismissExportImportStatus,
+  } = useTimedNotification<{
     type: "success" | "error";
     message: string;
-  } | null>(null);
+  }>();
   const [isProcessingBackup, setIsProcessingBackup] = useState<boolean>(false);
 
   // Selected service for detail view
@@ -627,7 +660,15 @@ export default function App() {
   const [editUsername, setEditUsername] = useState<string>("");
   const [editEmail, setEditEmail] = useState<string>("");
   const [editPassword, setEditPassword] = useState<string>("");
-  const [editRevealedStoredPassword, setEditRevealedStoredPassword] = useState<string | null>(null);
+  const [editSecretState, setEditSecretState] = useState<EditSecretRevealMap>(
+    createHiddenEditSecretMap
+  );
+  const editSecretControllerRef = useRef<EditSecretRevealController | null>(null);
+  if (!editSecretControllerRef.current) {
+    editSecretControllerRef.current = new EditSecretRevealController((next) => {
+      setEditSecretState(next);
+    });
+  }
   const [editRecoveryKey, setEditRecoveryKey] = useState<string>("");
   const [editUrl, setEditUrl] = useState<string>("");
   const [editNotes, setEditNotes] = useState<string>("");
@@ -754,6 +795,19 @@ export default function App() {
 
   // Copy feedback state: key = `${accountId}_${field}`
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copiedKeyTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const clearDetailRevealedSecrets = () => {
+    setRevealedAccountPasswords({});
+    setRevealedAccountRecoveryKeys({});
+    setRevealedCardNumbers({});
+    setRevealedCardCvvs({});
+    setRevealedCardPins({});
+    setRevealedCardPinValues({});
+    setServiceAccounts((prev) =>
+      prev.map((a) => ({ ...a, password: null, recovery_key: null }))
+    );
+  };
 
   const selectedService = summary?.services.find((s) => s.id === selectedServiceId) || null;
 
@@ -793,6 +847,9 @@ export default function App() {
     showAutoUnlockModal;
   useEffect(() => {
     hasOpenDialogRef.current = isAnyDialogOpen;
+    if (isAnyDialogOpen) {
+      clearNonEditableDocumentSelection(document);
+    }
   }, [isAnyDialogOpen]);
 
   // Zoom management helper with on-screen HUD toast
@@ -854,11 +911,13 @@ export default function App() {
     setRevealedCardCvvs({});
     setRevealedCardPins({});
     setRevealedCardPinValues({});
+    editSecretControllerRef.current?.setTarget(null, null);
 
     if (selectedServiceId) {
       fetchServiceAccounts(selectedServiceId);
     } else {
       setServiceAccounts([]);
+      setEditingAccount(null);
     }
   }, [selectedServiceId]);
 
@@ -960,7 +1019,7 @@ export default function App() {
     setAccEmail("");
     setAccLabel("");
     setEditPassword("");
-    setEditRevealedStoredPassword(null);
+    editSecretControllerRef.current?.setTarget(null, null);
     setEditRecoveryKey("");
     setEditNotes("");
     setEditUsername("");
@@ -986,11 +1045,21 @@ export default function App() {
     setShowCreatePassword(false);
     setShowAccPassword(false);
     setShowAccRecoveryKey(false);
-    setShowEditPassword(false);
-    setShowEditRecoveryKey(false);
     setShowCardNumber(false);
     setShowCardCvv(false);
     setShowCardPin(false);
+    setCopiedKey(null);
+    if (copiedKeyTimerRef.current) {
+      clearTimeout(copiedKeyTimerRef.current);
+      copiedKeyTimerRef.current = null;
+    }
+    if (copiedRecoveryKeyTimerRef.current) {
+      clearTimeout(copiedRecoveryKeyTimerRef.current);
+      copiedRecoveryKeyTimerRef.current = null;
+    }
+    dismissSettingsFeedback();
+    dismissPasswordChangeFeedback();
+    dismissExportImportStatus();
     setShowAddService(false);
     setShowEditService(false);
     setShowAddAccount(false);
@@ -1029,8 +1098,8 @@ export default function App() {
       setSavedPasswordHint(null);
       setShowVaultRecoveryKey(false);
       setRecoveryKey(null);
-      setShowEditPassword(false);
-      setEditRevealedStoredPassword(null);
+      editSecretControllerRef.current?.hideAll();
+      clearDetailRevealedSecrets();
     };
     window.addEventListener("blur", handleBlur);
 
@@ -1047,7 +1116,14 @@ export default function App() {
 
       if (shouldHandleSelectAllShortcut(e, shortcutCtx)) {
         e.preventDefault();
+        clearNonEditableDocumentSelection(document);
         setSelectedServiceIds(displayedServicesRef.current.map((s) => s.id));
+        return;
+      }
+
+      if (shouldPreventNativeSelectAll(e, e.target)) {
+        e.preventDefault();
+        clearNonEditableDocumentSelection(document);
         return;
       }
 
@@ -1129,6 +1205,8 @@ export default function App() {
       window.removeEventListener("resize", syncFullscreen);
       window.removeEventListener("blur", handleBlur);
       if (zoomHudTimerRef.current) clearTimeout(zoomHudTimerRef.current);
+      if (copiedKeyTimerRef.current) clearTimeout(copiedKeyTimerRef.current);
+      if (copiedRecoveryKeyTimerRef.current) clearTimeout(copiedRecoveryKeyTimerRef.current);
     };
   }, []);
 
@@ -1740,11 +1818,16 @@ export default function App() {
       setShowNewMasterPassword(false);
       setShowConfirmMasterPassword(false);
       if (res?.warning) {
-        setPasswordChangeSuccess(`تم تغيير كلمة المرور الرئيسية بنجاح مع تنبيه: ${res.warning}`);
+        showPasswordChangeFeedback({
+          type: "warning",
+          message: `تم تغيير كلمة المرور الرئيسية بنجاح مع تنبيه: ${res.warning}`,
+        });
       } else {
-        setPasswordChangeSuccess("تم تغيير كلمة المرور الرئيسية بنجاح وتحديث بيانات الحماية!");
+        showPasswordChangeFeedback({
+          type: "success",
+          message: "تم تغيير كلمة المرور الرئيسية بنجاح وتحديث بيانات الحماية!",
+        });
       }
-      setTimeout(() => setPasswordChangeSuccess(null), 5000);
     } catch (err: any) {
       setError(err?.toString() || "فشل تغيير كلمة المرور الرئيسية");
     } finally {
@@ -1779,7 +1862,11 @@ export default function App() {
     try {
       await copyVaultRecoveryKeySecurely(invoke);
       setCopiedRecoveryKey(true);
-      setTimeout(() => setCopiedRecoveryKey(false), 2000);
+      if (copiedRecoveryKeyTimerRef.current) clearTimeout(copiedRecoveryKeyTimerRef.current);
+      copiedRecoveryKeyTimerRef.current = setTimeout(() => {
+        setCopiedRecoveryKey(false);
+        copiedRecoveryKeyTimerRef.current = null;
+      }, 2000);
     } catch (err: any) {
       setSettingsFeedback({
         type: "error",
@@ -1810,19 +1897,22 @@ export default function App() {
   const handleExportVault = async () => {
     try {
       setIsProcessingBackup(true);
-      setExportImportStatus(null);
+      dismissExportImportStatus();
       const savedPath = await invoke<string | null>("export_vault_backup");
       if (savedPath) {
-        setExportImportStatus({
+        showExportImportStatus({
           type: "success",
           message: `تم تصدير نسخة الخزنة المشفرة بنجاح إلى:\n${savedPath}`,
         });
       }
     } catch (err: any) {
-      setExportImportStatus({
-        type: "error",
-        message: err?.toString() || "فشل تصدير الخزنة",
-      });
+      showExportImportStatus(
+        {
+          type: "error",
+          message: err?.toString() || "فشل تصدير الخزنة",
+        },
+        { durationMs: null }
+      );
     } finally {
       setIsProcessingBackup(false);
     }
@@ -1895,7 +1985,7 @@ export default function App() {
     setEditUsername("");
     setEditEmail("");
     setEditPassword("");
-    setEditRevealedStoredPassword(null);
+    editSecretControllerRef.current?.setTarget(null, null);
     setEditRecoveryKey("");
     setEditUrl("");
     setEditNotes("");
@@ -1909,8 +1999,6 @@ export default function App() {
     setShowCardPin(false);
     setShowAccPassword(false);
     setShowAccRecoveryKey(false);
-    setShowEditPassword(false);
-    setShowEditRecoveryKey(false);
     setClearRecoveryKey(false);
     setClearCardPin(false);
   };
@@ -1942,7 +2030,11 @@ export default function App() {
       if (target === "add") {
         setAccPassword(generated);
       } else {
-        setEditRevealedStoredPassword(null);
+        editSecretControllerRef.current?.onDraftChanged(
+          "password",
+          generated,
+          Boolean(editingAccount?.has_password)
+        );
         setEditPassword(generated);
       }
     } catch (err: any) {
@@ -1955,33 +2047,67 @@ export default function App() {
     }
   };
 
-  // Explicit on-demand guarded reveal/hide for Edit password field
-  const handleToggleEditPasswordReveal = async () => {
-    if (showEditPassword) {
-      setShowEditPassword(false);
-      setEditRevealedStoredPassword(null);
-      return;
-    }
+  const handleEditSecretDraftChange = (
+    field: EditSecretFieldKey,
+    nextVal: string,
+    hasExistingSecret: boolean,
+    setDraft: (val: string) => void
+  ) => {
+    editSecretControllerRef.current?.onDraftChanged(
+      field,
+      nextVal,
+      hasExistingSecret
+    );
+    setDraft(nextVal);
+  };
 
-    if (editPassword.length > 0 || !editingAccount?.has_password || !selectedServiceId) {
-      setShowEditPassword(true);
-      return;
-    }
+  // Explicit on-demand guarded reveal/hide across all Edit Account / Card secret fields
+  const handleToggleEditSecretField = async (field: EditSecretFieldKey) => {
+    const controller = editSecretControllerRef.current;
+    if (!controller) return;
 
-    const epoch = sessionGuardRef.current.epoch;
-    try {
-      const pwd = await invoke<string>("get_account_password", {
+    const hasExistingMap: Record<EditSecretFieldKey, boolean> = {
+      password: Boolean(editingAccount?.has_password),
+      recoveryKey: Boolean(editingAccount?.has_recovery_key),
+      cardNumber: Boolean(editingAccount?.has_password),
+      cardCvv: Boolean(editingAccount?.has_recovery_key),
+      cardPin: Boolean(editingAccount?.has_pin),
+    };
+    const draftMap: Record<EditSecretFieldKey, string> = {
+      password: editPassword,
+      recoveryKey: editRecoveryKey,
+      cardNumber,
+      cardCvv,
+      cardPin,
+    };
+    const pendingRemovalMap: Record<EditSecretFieldKey, boolean> = {
+      password: false,
+      recoveryKey: clearRecoveryKey,
+      cardNumber: false,
+      cardCvv: clearRecoveryKey,
+      cardPin: clearCardPin,
+    };
+
+    const result = await controller.toggle(
+      {
+        field,
         serviceId: selectedServiceId,
-        accountId: editingAccount.id,
-      });
-      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
-      setEditRevealedStoredPassword(pwd);
-      setShowEditPassword(true);
-    } catch (err: any) {
-      if (!sessionGuardRef.current.isResponseValid(epoch)) return;
-      setEditAccountError(err?.toString() || "فشل استرجاع كلمة المرور المحفوظة");
+        accountId: editingAccount?.id,
+        hasExistingSecret: hasExistingMap[field],
+        hasDraftValue: draftMap[field].length > 0,
+        markedForRemoval: pendingRemovalMap[field],
+      },
+      sessionGuardRef.current,
+      invoke
+    );
+    if (!result.stale && result.error) {
+      const err: any = result.error;
+      setEditAccountError(err?.toString() || "فشل استرجاع القيمة السرية المحفوظة");
     }
   };
+
+  // Explicit on-demand guarded reveal/hide for Edit password field
+  const handleToggleEditPasswordReveal = () => handleToggleEditSecretField("password");
 
   // Add Service Handler
   const handleAddService = async (e: React.FormEvent) => {
@@ -2102,13 +2228,10 @@ export default function App() {
     if (isCard) {
       setCardHolder(acc.username || "");
       setCardExpiry(acc.url || "");
-      setCardCvv(acc.recovery_key || "");
-      setCardPin(extractCardPin(acc.notes));
       setAccNotes(extractCleanCardNotes(acc.notes));
     } else {
       setAccUsername(acc.username || "");
       setAccEmail(acc.email || "");
-      setAccRecoveryKey(acc.recovery_key || "");
       setAccUrl(acc.url || "");
       setAccNotes(acc.notes || "");
     }
@@ -2117,23 +2240,21 @@ export default function App() {
     setShowAddAccount(true);
   };
 
-  // Open Edit Account Modal
+  // Open Edit Account Modal (strictly starts masked with zero preloaded secrets)
   const openEditAccountModal = (acc: AccountDetail) => {
     const isCard = isAccountCard(acc);
     resetAccountFormFields();
+    editSecretControllerRef.current?.setTarget(selectedServiceId, acc.id);
     setEditingAccount(acc);
     setAccountFormMode(isCard ? "card" : "login");
     setEditLabel(acc.label || "");
     if (isCard) {
       setCardHolder(acc.username || "");
       setCardExpiry(acc.url || "");
-      setCardCvv(acc.recovery_key || "");
-      setCardPin(extractCardPin(acc.notes));
       setEditNotes(extractCleanCardNotes(acc.notes));
     } else {
       setEditUsername(acc.username || "");
       setEditEmail(acc.email || "");
-      setEditRecoveryKey(acc.recovery_key || "");
       setEditUrl(acc.url || "");
       setEditNotes(acc.notes || "");
     }
@@ -2229,7 +2350,11 @@ export default function App() {
         if (value) await navigator.clipboard.writeText(value);
       }
       setCopiedKey(`${accountId}_${field}`);
-      setTimeout(() => setCopiedKey(null), 2000);
+      if (copiedKeyTimerRef.current) clearTimeout(copiedKeyTimerRef.current);
+      copiedKeyTimerRef.current = setTimeout(() => {
+        setCopiedKey(null);
+        copiedKeyTimerRef.current = null;
+      }, 2000);
     } catch (err: any) {
       setError(err?.toString() || "فشل نسخ القيمة");
     }
@@ -2255,7 +2380,11 @@ export default function App() {
     try {
       await invoke("copy_password", { serviceId, accountId });
       setCopiedKey(`${accountId}_password`);
-      setTimeout(() => setCopiedKey(null), 2000);
+      if (copiedKeyTimerRef.current) clearTimeout(copiedKeyTimerRef.current);
+      copiedKeyTimerRef.current = setTimeout(() => {
+        setCopiedKey(null);
+        copiedKeyTimerRef.current = null;
+      }, 2000);
     } catch (err: any) {
       setError(err?.toString() || "فشل نسخ كلمة المرور");
     }
@@ -2379,7 +2508,7 @@ export default function App() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setNotification(null)}
+              onClick={() => dismissNotification()}
               className="hover:bg-white/10 rounded-xl h-8 w-8 p-0 shrink-0 rtl:mr-2 ltr:ml-2"
             >
               <X className="w-4 h-4" />
@@ -2809,6 +2938,8 @@ export default function App() {
                   size="icon"
                   onClick={() => {
                     setSettingsFeedback(null);
+                    dismissPasswordChangeFeedback();
+                    dismissExportImportStatus();
                     setShowVaultRecoveryKey(false);
                     setRecoveryKey(null);
                     setCopiedRecoveryKey(false);
@@ -4923,7 +5054,10 @@ export default function App() {
           <div className="flex p-1 bg-muted/60 rounded-2xl border border-border/60 mt-3 mb-2">
             <button
               type="button"
-              onClick={() => setAccountFormMode("login")}
+              onClick={() => {
+                editSecretControllerRef.current?.hideAll();
+                setAccountFormMode("login");
+              }}
               className={`flex-1 py-2.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 accountFormMode === "login"
                   ? "bg-primary text-primary-foreground shadow-md"
@@ -4935,7 +5069,10 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setAccountFormMode("card")}
+              onClick={() => {
+                editSecretControllerRef.current?.hideAll();
+                setAccountFormMode("card");
+              }}
               className={`flex-1 py-2.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 accountFormMode === "card"
                   ? "bg-primary text-primary-foreground shadow-md"
@@ -4980,45 +5117,90 @@ export default function App() {
               email={editEmail}
               onEmailChange={setEditEmail}
               password={editPassword}
-              onPasswordChange={(val) => {
-                if (editRevealedStoredPassword !== null) {
-                  setEditRevealedStoredPassword(null);
-                }
-                setEditPassword(val);
-              }}
-              showPassword={showEditPassword}
+              onPasswordChange={(val) =>
+                handleEditSecretDraftChange(
+                  "password",
+                  val,
+                  Boolean(editingAccount?.has_password),
+                  setEditPassword
+                )
+              }
+              showPassword={editSecretState.password.revealed}
               onToggleShowPassword={handleToggleEditPasswordReveal}
               onGeneratePassword={() => handleGeneratePassword("edit")}
               recoveryKey={editRecoveryKey}
-              onRecoveryKeyChange={setEditRecoveryKey}
-              showRecoveryKey={showEditRecoveryKey}
-              onToggleShowRecoveryKey={() => setShowEditRecoveryKey((prev) => !prev)}
+              onRecoveryKeyChange={(val) =>
+                handleEditSecretDraftChange(
+                  "recoveryKey",
+                  val,
+                  Boolean(editingAccount?.has_recovery_key),
+                  setEditRecoveryKey
+                )
+              }
+              showRecoveryKey={editSecretState.recoveryKey.revealed}
+              onToggleShowRecoveryKey={() => handleToggleEditSecretField("recoveryKey")}
               url={editUrl}
               onUrlChange={setEditUrl}
               cardHolder={cardHolder}
               onCardHolderChange={setCardHolder}
               cardNumber={cardNumber}
-              onCardNumberChange={setCardNumber}
-              showCardNumber={showCardNumber}
-              onToggleShowCardNumber={() => setShowCardNumber((prev) => !prev)}
+              onCardNumberChange={(val) =>
+                handleEditSecretDraftChange(
+                  "cardNumber",
+                  val,
+                  Boolean(editingAccount?.has_password),
+                  setCardNumber
+                )
+              }
+              showCardNumber={editSecretState.cardNumber.revealed}
+              onToggleShowCardNumber={() => handleToggleEditSecretField("cardNumber")}
               cardExpiry={cardExpiry}
               onCardExpiryChange={setCardExpiry}
               cardCvv={cardCvv}
-              onCardCvvChange={setCardCvv}
-              showCardCvv={showCardCvv}
-              onToggleShowCardCvv={() => setShowCardCvv((prev) => !prev)}
+              onCardCvvChange={(val) =>
+                handleEditSecretDraftChange(
+                  "cardCvv",
+                  val,
+                  Boolean(editingAccount?.has_recovery_key),
+                  setCardCvv
+                )
+              }
+              showCardCvv={editSecretState.cardCvv.revealed}
+              onToggleShowCardCvv={() => handleToggleEditSecretField("cardCvv")}
               cardPin={cardPin}
-              onCardPinChange={setCardPin}
-              showCardPin={showCardPin}
-              onToggleShowCardPin={() => setShowCardPin((prev) => !prev)}
+              onCardPinChange={(val) =>
+                handleEditSecretDraftChange(
+                  "cardPin",
+                  val,
+                  Boolean(editingAccount?.has_pin),
+                  setCardPin
+                )
+              }
+              showCardPin={editSecretState.cardPin.revealed}
+              onToggleShowCardPin={() => handleToggleEditSecretField("cardPin")}
               hasExistingPassword={Boolean(editingAccount?.has_password)}
-              revealedStoredPassword={editRevealedStoredPassword}
+              revealedStoredPassword={editSecretState.password.revealedStoredValue}
               hasExistingRecoveryKey={Boolean(editingAccount?.has_recovery_key)}
-              clearRecoveryKey={clearRecoveryKey}
-              onSetClearRecoveryKey={setClearRecoveryKey}
+              revealedStoredRecoveryKey={editSecretState.recoveryKey.revealedStoredValue}
+              revealedStoredCardNumber={editSecretState.cardNumber.revealedStoredValue}
+              revealedStoredCardCvv={editSecretState.cardCvv.revealedStoredValue}
               hasExistingPin={Boolean(editingAccount?.has_pin)}
+              revealedStoredCardPin={editSecretState.cardPin.revealedStoredValue}
+              clearRecoveryKey={clearRecoveryKey}
+              onSetClearRecoveryKey={(clear) => {
+                setClearRecoveryKey(clear);
+                if (clear) {
+                  editSecretControllerRef.current?.hideField("recoveryKey");
+                  editSecretControllerRef.current?.hideField("cardCvv");
+                }
+              }}
               clearCardPin={clearCardPin}
-              onSetClearCardPin={setClearCardPin}
+              onSetClearCardPin={(clear) => {
+                setClearCardPin(clear);
+                if (clear) {
+                  editSecretControllerRef.current?.hideField("cardPin");
+                }
+              }}
             />
 
             <div className="flex justify-end gap-3 pt-4 border-t border-border/40">
@@ -5120,6 +5302,9 @@ export default function App() {
             setNewMasterPassword("");
             setConfirmMasterPassword("");
             setSettingsConfirmTouched(false);
+            dismissSettingsFeedback();
+            dismissPasswordChangeFeedback();
+            dismissExportImportStatus();
           }
         }}
       >
@@ -5156,7 +5341,7 @@ export default function App() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSettingsFeedback(null)}
+                  onClick={() => dismissSettingsFeedback()}
                   className="h-8 w-8 p-0 rounded-lg hover:bg-white/10"
                 >
                   <X className="w-4 h-4" />
@@ -5164,10 +5349,31 @@ export default function App() {
               </div>
             )}
 
-            {passwordChangeSuccess && (
-              <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 font-semibold text-base flex items-center gap-3">
-                <Check className="w-5 h-5 shrink-0" />
-                <span>{passwordChangeSuccess}</span>
+            {passwordChangeFeedback && (
+              <div
+                className={`p-4 rounded-2xl border font-semibold text-base flex items-center justify-between gap-3 ${
+                  passwordChangeFeedback.type === "warning"
+                    ? "bg-amber-500/15 border-amber-500/40 text-amber-200"
+                    : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  {passwordChangeFeedback.type === "warning" ? (
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                  ) : (
+                    <Check className="w-5 h-5 shrink-0" />
+                  )}
+                  <span>{passwordChangeFeedback.message}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => dismissPasswordChangeFeedback()}
+                  className="h-8 w-8 p-0 rounded-lg hover:bg-white/10"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
               </div>
             )}
 
@@ -5536,18 +5742,29 @@ export default function App() {
 
               {exportImportStatus && (
                 <div
-                  className={`p-4 rounded-xl text-sm font-semibold flex items-center gap-3 whitespace-pre-line ${
+                  className={`p-4 rounded-xl text-sm font-semibold flex items-center justify-between gap-3 whitespace-pre-line ${
                     exportImportStatus.type === "success"
                       ? "bg-emerald-500/15 border border-emerald-500/40 text-emerald-400"
                       : "bg-destructive/15 border border-destructive/40 text-destructive-foreground"
                   }`}
                 >
-                  {exportImportStatus.type === "success" ? (
-                    <Check className="w-5 h-5 shrink-0" />
-                  ) : (
-                    <ShieldAlert className="w-5 h-5 shrink-0" />
-                  )}
-                  <span>{exportImportStatus.message}</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {exportImportStatus.type === "success" ? (
+                      <Check className="w-5 h-5 shrink-0" />
+                    ) : (
+                      <ShieldAlert className="w-5 h-5 shrink-0" />
+                    )}
+                    <span className="[overflow-wrap:anywhere]">{exportImportStatus.message}</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => dismissExportImportStatus()}
+                    className="h-8 w-8 p-0 rounded-lg hover:bg-white/10 shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
                 </div>
               )}
 

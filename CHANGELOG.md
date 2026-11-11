@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.10] - 2026-11-11
+
+### Changed
+- Unified Edit form secret reveal through `EditSecretRevealController` (`ui/src/editSecretReveal.ts`) across Login passwords, Account Recovery Keys, Bank Card numbers, CVVs, and PINs: stored secrets are never preloaded into Edit forms, retrieve on-demand on explicit eye click with epoch, service/account ID, and request-generation guards, re-hide/clear on hide, replacement typing, removal mark, modal close, navigation, window blur, and vault lock, and strictly keep untouched/replaced/cleared save semantics without ever submitting bullets or revealed previews as edits.
+- Prevented native browser `Ctrl+A` / `Cmd+A` document highlighting when open dialogs or non-editable UI controls are focused (`shouldPreventNativeSelectAll`), and cleared stale non-editable DOM selections upon entering Selection Mode or opening dialogs (`clearNonEditableDocumentSelection`), while preserving native text selection inside inputs, textareas, and contenteditable regions.
+- Added a unified auto-dismissing notification lifecycle (`TimedNotificationController` & `useTimedNotification`) across floating toasts (`4s` success, `6s` warning, `8s` error), Settings feedback, Master Password change banners, and export success notices with timer reset on replacement, stale-token guards, manual close preservation, unmount cleanup, and persistent inline handling for actionable form/export errors.
+
+---
+
 ## [0.1.9] - 2026-11-11
 
 ### Changed

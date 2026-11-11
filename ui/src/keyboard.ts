@@ -134,3 +134,40 @@ export function getDestructiveDialogArrowTarget(
   }
   return null;
 }
+
+/**
+ * Returns true when a Ctrl+A / Cmd+A event targets non-editable application UI
+ * (such as open dialogs or main service containers) where browser native Select All
+ * would otherwise highlight unrelated UI text. Editable controls always remain exempt.
+ */
+export function shouldPreventNativeSelectAll(
+  e: KeyboardEventLike,
+  target?: EventTarget | null
+): boolean {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false;
+  if (!(e.ctrlKey || e.metaKey)) return false;
+  if (isEditableTarget(target ?? e.target)) return false;
+  return isKeyA(e);
+}
+
+/**
+ * Clears any existing non-editable document text selection (e.g. before entering selection mode
+ * or opening dialogs), strictly preserving active text selections inside editable fields.
+ */
+export function clearNonEditableDocumentSelection(doc?: Document | null): boolean {
+  const d = doc ?? (typeof document !== "undefined" ? document : null);
+  if (!d) return false;
+  if (isEditableTarget(d.activeElement)) return false;
+  const sel = d.defaultView?.getSelection?.() ?? (typeof window !== "undefined" ? window.getSelection?.() : null);
+  if (!sel || sel.rangeCount === 0) return false;
+  const resolveElement = (node: Node | null | undefined): EventTarget | null =>
+    node ? (node.nodeType === 1 ? node : node.parentElement) : null;
+  if (
+    isEditableTarget(resolveElement(sel.anchorNode)) ||
+    isEditableTarget(resolveElement(sel.focusNode))
+  ) {
+    return false;
+  }
+  sel.removeAllRanges();
+  return true;
+}

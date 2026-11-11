@@ -284,9 +284,9 @@ jobs:
             Kinana is an offline-first, local desktop password manager built with Rust, Tauri 2, and React. All sensitive data is encrypted locally using AES-256-GCM and Argon2id key derivation, with zero external server telemetry or cloud synchronization.
 
             #### What is New in This Release:
-            - Neutral Destructive Dialog Styling: Replaced the prominent red outer border on confirmation modals with Kinana's standard neutral `border-border/80` dialog border while preserving the dark surface, red trash icon badge, and red destructive confirm button.
-            - Subtle Dark-Theme Keyboard Focus Indicators: Refined `:focus-visible` outlines on shared dialog action and close buttons to a restrained 1px neutral ring (`ring-ring/50`) without mouse-click outlines or layout shifts.
-            - RTL Visual Arrow-Key Confirmation Navigation: Added dialog-scoped `ArrowRight` (Delete on the right) and `ArrowLeft` (Cancel on the left) focus navigation alongside `Cancel` initial focus, `Enter`/`Space` button activation, `Escape` dismissal, `Tab`/`Shift+Tab` focus wrapping, synchronous + async double-submit locking, and controlled-dialog trigger focus restoration.
+            - Complete Edit-Form Secret Reveal: Account Recovery Keys, Bank Card numbers, CVVs, and PINs now retrieve on-demand with eye toggle parity alongside login passwords (`EditSecretRevealController`), strictly guarding async responses by session epoch, active account/service ID, and request generation while clearing revealed previews on hide, draft edit, pending removal, close, blur, navigation, and lock.
+            - Clean Keyboard Selection Boundaries: Blocked unintended native WebView `Ctrl+A`/`Cmd+A` text highlighting across open Delete/Settings dialogs and non-editable views (`shouldPreventNativeSelectAll` & non-editable range clearing) while keeping service selection in Selection Mode and native text selection inside inputs/textareas intact.
+            - Auto-Dismissing Notification Lifecycle: Unified timed dismissal (`4s` success, `6s` warning, `8s` error toast) across floating notifications, Settings feedback, Master Password change banners, and backup export success notices with manual dismiss buttons, timer reset on replacement, stale-timer prevention, and persistent inline form/actionable error handling.
 
             #### Download Options:
             - Windows (x64): `kinana-windows-x64-setup.exe` (NSIS Installer)
