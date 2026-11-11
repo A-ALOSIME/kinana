@@ -109,3 +109,28 @@ export function shouldActivateServiceCard(e: KeyboardEventLike): boolean {
   if (e.target && e.currentTarget && e.target !== e.currentTarget) return false;
   return true;
 }
+
+export type DestructiveDialogArrowTarget = "delete" | "cancel";
+
+/**
+ * Resolves visual arrow navigation inside the RTL destructive confirmation dialog
+ * (Delete on the right, Cancel on the left), strictly ignoring modified or editable events.
+ */
+export function getDestructiveDialogArrowTarget(
+  e: KeyboardEventLike,
+  target?: EventTarget | null
+): DestructiveDialogArrowTarget | null {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+    return null;
+  }
+  if (isEditableTarget(target ?? e.target)) {
+    return null;
+  }
+  if (e.key === "ArrowRight") {
+    return "delete";
+  }
+  if (e.key === "ArrowLeft") {
+    return "cancel";
+  }
+  return null;
+}

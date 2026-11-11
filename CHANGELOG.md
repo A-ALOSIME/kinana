@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.9] - 2026-11-11
+
+### Changed
+- Updated the shared destructive confirmation modal (`<DestructiveConfirmDialog />`) to use Kinana's standard neutral outer dialog border (`border-border/80`) while preserving the dark card background, neutral typography, red trash icon badge, and red destructive action button.
+- Refined keyboard `:focus-visible` indicator styling on the shared dialog action buttons and dialog close button to a subtle 1px neutral ring (`ring-1 ring-ring/50` with `ring-offset-1 ring-offset-card`) matching the dark theme without harsh bright white outlines or mouse-click focus rings.
+- Added RTL visual arrow-key navigation inside `<DestructiveConfirmDialog />` (`ArrowRight` focuses Delete on the right, `ArrowLeft` focuses Cancel on the left) alongside `Enter`/`Space` activation, `Escape` cancellation, `Tab`/`Shift+Tab` focus wrapping, synchronous + asynchronous duplicate-submission locking, and reliable focus restoration upon dismissal or underlying-dialog retention when the triggering element unmounts.
+
+---
+
 ## [0.1.8] - 2026-11-10
 
 ### Changed

@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  getDestructiveDialogArrowTarget,
   getZoomActionFromKeyboardEvent,
   isEditableTarget,
   shouldActivateServiceCard,
@@ -168,6 +169,10 @@ test("English Kinana identity, NSIS upgrade hooks, destructive dialog RTL orderi
     path.join(uiRoot, "src/components/ui/destructive-confirm-dialog.tsx"),
     "utf8"
   );
+  const dialogSrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/ui/dialog.tsx"),
+    "utf8"
+  );
   const deletePos = confirmDialogSrc.indexOf('variant="destructive"');
   const cancelPos = confirmDialogSrc.indexOf('variant="outline"');
   assert.ok(
@@ -175,7 +180,36 @@ test("English Kinana identity, NSIS upgrade hooks, destructive dialog RTL orderi
     "In RTL flex-row, Delete button must precede Cancel in DOM order so Delete renders on the right and Cancel immediately on the left"
   );
   assert.ok(confirmDialogSrc.includes("cancelButtonRef.current?.focus()"));
+  assert.ok(confirmDialogSrc.includes("border-border/80"));
+  assert.ok(!confirmDialogSrc.includes("border-destructive/45"));
+  assert.ok(confirmDialogSrc.includes("bg-destructive/15 border border-destructive/35"));
+  assert.ok(confirmDialogSrc.includes("focus-visible:ring-1 focus-visible:ring-ring/50"));
+  assert.ok(!confirmDialogSrc.includes("focus-visible:ring-2"));
+  assert.ok(confirmDialogSrc.includes("getDestructiveDialogArrowTarget"));
+  assert.ok(confirmDialogSrc.includes("confirmLockedRef"));
+  assert.ok(confirmDialogSrc.includes("onCloseAutoFocus"));
+  assert.ok(!confirmDialogSrc.includes("window.addEventListener"));
   assert.ok(!confirmDialogSrc.includes('type="submit"'));
+  assert.ok(dialogSrc.includes("focus-visible:ring-1 focus-visible:ring-ring/50"));
+  assert.ok(!dialogSrc.includes("focus:ring-2"));
+
+  // Unit assertions for RTL arrow navigation inside DestructiveConfirmDialog
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowRight" }), "delete");
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowLeft" }), "cancel");
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowUp" }), null);
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowDown" }), null);
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowRight", ctrlKey: true }), null);
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowLeft", altKey: true }), null);
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowRight", shiftKey: true }), null);
+  assert.equal(getDestructiveDialogArrowTarget({ key: "ArrowRight", defaultPrevented: true }), null);
+  assert.equal(
+    getDestructiveDialogArrowTarget({ key: "ArrowRight" }, { tagName: "INPUT" }),
+    null
+  );
+  assert.equal(
+    getDestructiveDialogArrowTarget({ key: "ArrowLeft" }, { tagName: "TEXTAREA" }),
+    null
+  );
 
   const inputSrc = fs.readFileSync(path.join(uiRoot, "src/components/ui/input.tsx"), "utf8");
   assert.ok(inputSrc.includes('autoComplete = "off"'));
