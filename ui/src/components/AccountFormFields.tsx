@@ -59,12 +59,22 @@ export interface AccountFormFieldsProps {
   // Edit-only existing-secret & clearing flags (never preload plaintext into React state)
   hasExistingPassword?: boolean;
   revealedStoredPassword?: string | null;
+  onCopyPassword?: () => void;
+  copiedPassword?: boolean;
   hasExistingRecoveryKey?: boolean;
   revealedStoredRecoveryKey?: string | null;
+  onCopyRecoveryKey?: () => void;
+  copiedRecoveryKey?: boolean;
   revealedStoredCardNumber?: string | null;
+  onCopyCardNumber?: () => void;
+  copiedCardNumber?: boolean;
   revealedStoredCardCvv?: string | null;
+  onCopyCardCvv?: () => void;
+  copiedCardCvv?: boolean;
   hasExistingPin?: boolean;
   revealedStoredCardPin?: string | null;
+  onCopyCardPin?: () => void;
+  copiedCardPin?: boolean;
   clearRecoveryKey?: boolean;
   onSetClearRecoveryKey?: (clear: boolean) => void;
   clearCardPin?: boolean;
@@ -113,12 +123,22 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
   onToggleShowCardPin,
   hasExistingPassword = false,
   revealedStoredPassword = null,
+  onCopyPassword,
+  copiedPassword = false,
   hasExistingRecoveryKey = false,
   revealedStoredRecoveryKey = null,
+  onCopyRecoveryKey,
+  copiedRecoveryKey = false,
   revealedStoredCardNumber = null,
+  onCopyCardNumber,
+  copiedCardNumber = false,
   revealedStoredCardCvv = null,
+  onCopyCardCvv,
+  copiedCardCvv = false,
   hasExistingPin = false,
   revealedStoredCardPin = null,
+  onCopyCardPin,
+  copiedCardPin = false,
   clearRecoveryKey = false,
   onSetClearRecoveryKey,
   clearCardPin = false,
@@ -213,6 +233,10 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             filledTrackingClass="tracking-widest"
             storedSecretMask={isEdit && hasExistingPassword && !cardNumber}
             revealedStoredValue={isEdit ? revealedStoredCardNumber : null}
+            onCopy={onCopyCardNumber}
+            copied={copiedCardNumber}
+            copyLabel="نسخ رقم البطاقة"
+            copiedLabel="تم نسخ رقم البطاقة"
             style={{ direction: "ltr", textAlign: "center" }}
             value={cardNumber}
             onChange={(e) => {
@@ -291,6 +315,10 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
               filledTrackingClass="tracking-widest"
               storedSecretMask={isEdit && hasExistingRecoveryKey && !cardCvv}
               revealedStoredValue={isEdit && !clearRecoveryKey ? revealedStoredCardCvv : null}
+              onCopy={onCopyCardCvv}
+              copied={copiedCardCvv}
+              copyLabel="نسخ رمز الأمان"
+              copiedLabel="تم نسخ رمز الأمان"
               disabled={isEdit && clearRecoveryKey}
               value={isEdit && clearRecoveryKey ? "" : cardCvv}
               onChange={(e) =>
@@ -349,6 +377,10 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             filledTrackingClass="tracking-widest"
             storedSecretMask={isEdit && hasExistingPin && !cardPin}
             revealedStoredValue={isEdit && !clearCardPin ? revealedStoredCardPin : null}
+            onCopy={onCopyCardPin}
+            copied={copiedCardPin}
+            copyLabel="نسخ الرمز السري"
+            copiedLabel="تم نسخ الرمز السري"
             disabled={isEdit && clearCardPin}
             value={isEdit && clearCardPin ? "" : cardPin}
             onChange={(e) =>
@@ -441,6 +473,10 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           hideLabel="إخفاء كلمة المرور"
           storedSecretMask={isEdit && hasExistingPassword && password.length === 0}
           revealedStoredValue={isEdit ? revealedStoredPassword : null}
+          onCopy={onCopyPassword}
+          copied={copiedPassword}
+          copyLabel="نسخ كلمة المرور"
+          copiedLabel="تم نسخ كلمة المرور"
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
           className="text-base font-bold rounded-xl border-2"
@@ -497,6 +533,10 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           hideLabel="إخفاء مفتاح الاسترداد"
           storedSecretMask={isEdit && hasExistingRecoveryKey && !recoveryKey}
           revealedStoredValue={isEdit && !clearRecoveryKey ? revealedStoredRecoveryKey : null}
+          onCopy={onCopyRecoveryKey}
+          copied={copiedRecoveryKey}
+          copyLabel="نسخ مفتاح الاسترداد"
+          copiedLabel="تم نسخ مفتاح الاسترداد"
           disabled={isEdit && clearRecoveryKey}
           value={isEdit && clearRecoveryKey ? "" : recoveryKey}
           onChange={(e) => onRecoveryKeyChange(e.target.value)}

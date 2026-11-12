@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.11] - 2026-11-12
+
+### Changed
+- Standardized secret Copy and Eye (reveal/hide) behavior across Account Details views, Bank Card Details views, and Add/Edit forms (`SecretInput`, `AccountFormFields`, `ui/src/secretCopy.ts`, and `ui/src/App.tsx`) for all 5 account/card secret types (login passwords, account recovery keys, bank card numbers, CVV/CVC, and card PINs): Eye reveals/hides without auto-copying, and Copy copies directly via the native Rust clipboard backend (`copy_password`, `copy_account_recovery_key`, `copy_account_pin`, `copy_secure_text`) without requiring the Eye button, without revealing masked fields, and without preloading stored plaintext into React.
+- Updated Add/Edit `<SecretInput />` fields (`AccountFormFields`) with an inline Copy control when a copyable stored secret or typed draft exists, cleanly routing untouched stored secrets directly through backend copy commands while routing typed drafts through `copy_secure_text` and suppressing misleading Copy controls for empty, missing, or pending-removal secrets; Master Password, Vault Unlock, Vault Setup, Master Password Change, Auto-Unlock, and Vault Import inputs never expose a Copy button.
+- Gated Bank Card Number Details view Eye and Copy actions on `acc.has_password` (displaying `—` when absent) and routed `copyFieldValue(..., "number")` consistently through `copy_password` when `selectedServiceId` is present.
+
+---
+
 ## [0.1.10] - 2026-11-11
 
 ### Changed

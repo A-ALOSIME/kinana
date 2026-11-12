@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Check, Copy, Eye, EyeOff } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,10 @@ export interface SecretInputProps
    * Never submitted directly as a replacement value until the user types new characters.
    */
   revealedStoredValue?: string | null;
+  onCopy?: () => void;
+  copied?: boolean;
+  copyLabel?: string;
+  copiedLabel?: string;
 }
 
 const STORED_SECRET_BULLETS = "••••••••••••";
@@ -59,6 +63,10 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
       filledTrackingClass,
       storedSecretMask = false,
       revealedStoredValue = null,
+      onCopy,
+      copied = false,
+      copyLabel = "نسخ",
+      copiedLabel = "تم النسخ",
       autoComplete = "new-password",
       value,
       defaultValue,
@@ -96,17 +104,26 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
     const showStoredDotsOverlay = storedSecretMask && !hasValue;
 
     const isLarge = buttonSize === "lg";
+    const showCopyButton = typeof onCopy === "function";
     const toggleLabel = revealed ? hideLabel : revealLabel;
     const alignCenteredPlaceholder = centeredPlaceholder ?? centered;
     const sizeClasses = extractTextSizeClasses(className);
     const hasStrikeThrough = Boolean(className?.includes("line-through"));
     const paddingClasses = alignCenteredPlaceholder
-      ? isLarge
-        ? "px-16"
-        : "px-14"
-      : isLarge
-        ? "rtl:pr-4 rtl:pl-16 ltr:pl-4 ltr:pr-16"
-        : "rtl:pr-4 rtl:pl-14 ltr:pl-4 ltr:pr-14";
+      ? showCopyButton
+        ? isLarge
+          ? "px-28"
+          : "px-[5.25rem]"
+        : isLarge
+          ? "px-16"
+          : "px-14"
+      : showCopyButton
+        ? isLarge
+          ? "rtl:pr-4 rtl:pl-28 ltr:pl-4 ltr:pr-28"
+          : "rtl:pr-4 rtl:pl-[5.25rem] ltr:pl-4 ltr:pr-[5.25rem]"
+        : isLarge
+          ? "rtl:pr-4 rtl:pl-16 ltr:pl-4 ltr:pr-16"
+          : "rtl:pr-4 rtl:pl-14 ltr:pl-4 ltr:pr-14";
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (showingRevealedStored) {
@@ -144,12 +161,20 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
           className={cn(
             isLarge ? "min-h-16" : "min-h-12",
             centered
-              ? isLarge
-                ? "px-16 text-center"
-                : "px-14 text-center"
-              : isLarge
-                ? "rtl:pl-16 rtl:pr-4 ltr:pr-16 ltr:pl-4"
-                : "rtl:pl-14 rtl:pr-4 ltr:pr-14 ltr:pl-4",
+              ? showCopyButton
+                ? isLarge
+                  ? "px-28 text-center"
+                  : "px-[5.25rem] text-center"
+                : isLarge
+                  ? "px-16 text-center"
+                  : "px-14 text-center"
+              : showCopyButton
+                ? isLarge
+                  ? "rtl:pl-28 rtl:pr-4 ltr:pr-28 ltr:pl-4"
+                  : "rtl:pl-[5.25rem] rtl:pr-4 ltr:pr-[5.25rem] ltr:pl-4"
+                : isLarge
+                  ? "rtl:pl-16 rtl:pr-4 ltr:pr-16 ltr:pl-4"
+                  : "rtl:pl-14 rtl:pr-4 ltr:pr-14 ltr:pl-4",
             codeStyleWhenFilled && hasValue ? "font-mono" : "font-sans",
             hasValue && filledTrackingClass
               ? filledTrackingClass
@@ -186,28 +211,55 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
           )
         )}
 
-        <Button
-          type="button"
-          variant="ghost"
-          size={isLarge ? "icon" : "sm"}
-          disabled={disabled}
-          onClick={onToggleReveal}
-          aria-label={toggleLabel}
-          aria-pressed={revealed}
-          title={toggleLabel}
+        <div
           className={cn(
-            "absolute top-1/2 -translate-y-1/2 p-0 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-lg",
-            isLarge
-              ? "h-10 w-10 rtl:left-3 ltr:right-3"
-              : "h-8 w-8 rtl:left-2.5 ltr:right-2.5"
+            "absolute top-1/2 -translate-y-1/2 flex items-center gap-1",
+            isLarge ? "rtl:left-3 ltr:right-3" : "rtl:left-2.5 ltr:right-2.5"
           )}
         >
-          {revealed ? (
-            <EyeOff className={isLarge ? "w-5 h-5" : "w-4 h-4"} />
-          ) : (
-            <Eye className={isLarge ? "w-5 h-5" : "w-4 h-4"} />
+          <Button
+            type="button"
+            variant="ghost"
+            size={isLarge ? "icon" : "sm"}
+            disabled={disabled}
+            onClick={onToggleReveal}
+            aria-label={toggleLabel}
+            aria-pressed={revealed}
+            title={toggleLabel}
+            className={cn(
+              "p-0 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-lg",
+              isLarge ? "h-10 w-10" : "h-8 w-8"
+            )}
+          >
+            {revealed ? (
+              <EyeOff className={isLarge ? "w-5 h-5" : "w-4 h-4"} />
+            ) : (
+              <Eye className={isLarge ? "w-5 h-5" : "w-4 h-4"} />
+            )}
+          </Button>
+          {showCopyButton && (
+            <Button
+              type="button"
+              variant="ghost"
+              size={isLarge ? "icon" : "sm"}
+              disabled={disabled}
+              onClick={onCopy}
+              aria-label={copied ? copiedLabel : copyLabel}
+              title={copied ? copiedLabel : copyLabel}
+              className={cn(
+                "p-0 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-lg",
+                isLarge ? "h-10 w-10" : "h-8 w-8",
+                copied && "text-emerald-400 hover:text-emerald-300"
+              )}
+            >
+              {copied ? (
+                <Check className={isLarge ? "w-5 h-5" : "w-4 h-4"} />
+              ) : (
+                <Copy className={isLarge ? "w-5 h-5" : "w-4 h-4"} />
+              )}
+            </Button>
           )}
-        </Button>
+        </div>
       </div>
     );
   }

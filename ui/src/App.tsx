@@ -121,6 +121,12 @@ import {
   isBankOrCardService,
   resolveAccountKind,
 } from "./accountForm";
+import {
+  canCopySecretField,
+  executeSecretCopy,
+  type SecretCopyField,
+  type SecretCopyTarget,
+} from "./secretCopy";
 
 interface AccountSummary {
   id: string;
@@ -2223,6 +2229,9 @@ export default function App() {
   const handleDuplicateAccount = async (acc: AccountDetail) => {
     const isCard = isAccountCard(acc);
     resetAccountFormFields();
+    setCopiedKey((prev) =>
+      prev && (prev.startsWith("add_") || prev.startsWith("edit_")) ? null : prev
+    );
     setAccountFormMode(isCard ? "card" : "login");
     setAccLabel(`${acc.label || (isCard ? "بطاقة" : "حساب")} (نسخة)`);
     if (isCard) {
@@ -2244,6 +2253,9 @@ export default function App() {
   const openEditAccountModal = (acc: AccountDetail) => {
     const isCard = isAccountCard(acc);
     resetAccountFormFields();
+    setCopiedKey((prev) =>
+      prev && (prev.startsWith("add_") || prev.startsWith("edit_")) ? null : prev
+    );
     editSecretControllerRef.current?.setTarget(selectedServiceId, acc.id);
     setEditingAccount(acc);
     setAccountFormMode(isCard ? "card" : "login");
@@ -2323,10 +2335,87 @@ export default function App() {
     }
   };
 
-  // Universal Field Copy Handler (direct zero-leak Rust Win32 memory copy when available)
+  const triggerCopiedIndicator = (key: string) => {
+    setCopiedKey(key);
+    if (copiedKeyTimerRef.current) clearTimeout(copiedKeyTimerRef.current);
+    copiedKeyTimerRef.current = setTimeout(() => {
+      setCopiedKey(null);
+      copiedKeyTimerRef.current = null;
+    }, 2000);
+  };
+
+  const getFormSecretCopyTarget = (
+    isEditForm: boolean,
+    field: SecretCopyField
+  ): SecretCopyTarget => {
+    const draftMap: Record<SecretCopyField, string> = {
+      password: isEditForm ? editPassword : accPassword,
+      recoveryKey: isEditForm ? editRecoveryKey : accRecoveryKey,
+      cardNumber,
+      cardCvv,
+      cardPin,
+    };
+    const hasExistingMap: Record<SecretCopyField, boolean> = {
+      password: Boolean(editingAccount?.has_password),
+      recoveryKey: Boolean(editingAccount?.has_recovery_key),
+      cardNumber: Boolean(editingAccount?.has_password),
+      cardCvv: Boolean(editingAccount?.has_recovery_key),
+      cardPin: Boolean(editingAccount?.has_pin),
+    };
+    const pendingRemovalMap: Record<SecretCopyField, boolean> = {
+      password: false,
+      recoveryKey: clearRecoveryKey,
+      cardNumber: false,
+      cardCvv: clearRecoveryKey,
+      cardPin: clearCardPin,
+    };
+
+    return {
+      field,
+      isEdit: isEditForm,
+      serviceId: selectedServiceId,
+      accountId: editingAccount?.id,
+      hasExistingSecret: hasExistingMap[field],
+      draftValue: draftMap[field],
+      markedForRemoval: isEditForm && pendingRemovalMap[field],
+    };
+  };
+
+  // Copies secret fields directly through the backend without preloading or changing reveal state
+  const handleCopyFormSecretField = async (
+    isEditForm: boolean,
+    field: SecretCopyField
+  ) => {
+    try {
+      const result = await executeSecretCopy(
+        getFormSecretCopyTarget(isEditForm, field),
+        invoke
+      );
+      if (result.copied) {
+        triggerCopiedIndicator(`${isEditForm ? "edit" : "add"}_${field}`);
+      }
+    } catch (err: any) {
+      const msg = err?.toString() || "فشل نسخ القيمة السرية";
+      if (isEditForm) {
+        setEditAccountError(msg);
+      } else {
+        setAddAccountError(msg);
+      }
+    }
+  };
+
+  const formCopyHandler = (
+    isEditForm: boolean,
+    field: SecretCopyField
+  ): (() => void) | undefined =>
+    canCopySecretField(getFormSecretCopyTarget(isEditForm, field))
+      ? () => void handleCopyFormSecretField(isEditForm, field)
+      : undefined;
+
+  // Universal Field Copy Handler (direct zero-leak Rust secure clipboard when available)
   const copyFieldValue = async (accountId: string, field: string, value?: string | null) => {
     try {
-      if (field === "password") {
+      if (field === "password" || field === "number") {
         if (selectedServiceId) {
           await invoke("copy_password", { serviceId: selectedServiceId, accountId });
         } else if (value) {
@@ -2344,17 +2433,10 @@ export default function App() {
         } else if (value) {
           await invoke("copy_secure_text", { text: value });
         }
-      } else if (field === "number") {
-        if (value) await invoke("copy_secure_text", { text: value });
       } else {
         if (value) await navigator.clipboard.writeText(value);
       }
-      setCopiedKey(`${accountId}_${field}`);
-      if (copiedKeyTimerRef.current) clearTimeout(copiedKeyTimerRef.current);
-      copiedKeyTimerRef.current = setTimeout(() => {
-        setCopiedKey(null);
-        copiedKeyTimerRef.current = null;
-      }, 2000);
+      triggerCopiedIndicator(`${accountId}_${field}`);
     } catch (err: any) {
       setError(err?.toString() || "فشل نسخ القيمة");
     }
@@ -2379,12 +2461,7 @@ export default function App() {
   const copyAccountPassword = async (serviceId: string, accountId: string) => {
     try {
       await invoke("copy_password", { serviceId, accountId });
-      setCopiedKey(`${accountId}_password`);
-      if (copiedKeyTimerRef.current) clearTimeout(copiedKeyTimerRef.current);
-      copiedKeyTimerRef.current = setTimeout(() => {
-        setCopiedKey(null);
-        copiedKeyTimerRef.current = null;
-      }, 2000);
+      triggerCopiedIndicator(`${accountId}_password`);
     } catch (err: any) {
       setError(err?.toString() || "فشل نسخ كلمة المرور");
     }
@@ -3787,45 +3864,49 @@ export default function App() {
                                 رقم البطاقة (<bdi dir="ltr">Card Number</bdi>)
                               </span>
                               <div className="font-mono text-xl sm:text-2xl font-bold tracking-[0.22em] text-white text-start" dir="ltr">
-                                {revealedAccountPasswords[acc.id] && acc.password
+                                {!acc.has_password
+                                  ? "—"
+                                  : revealedAccountPasswords[acc.id] && acc.password
                                   ? acc.password.replace(/(.{4})/g, "$1 ").trim()
                                   : "•••• •••• •••• ••••"}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                type="button"
-                                onClick={() => toggleRevealAccountPassword(selectedService.id, acc)}
-                                className="h-10 w-10 p-0 rounded-xl text-slate-400 hover:text-white hover:bg-white/10"
-                                title={revealedAccountPasswords[acc.id] ? "إخفاء رقم البطاقة" : "إظهار رقم البطاقة"}
-                              >
-                                {revealedAccountPasswords[acc.id] ? (
-                                  <EyeOff className="w-4 h-4" />
-                                ) : (
-                                  <Eye className="w-4 h-4" />
-                                )}
-                              </Button>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => copyAccountPassword(selectedService.id, acc.id)}
-                                className="h-10 px-4 rounded-xl font-bold text-xs gap-2 shadow-lg shrink-0"
-                              >
-                              {copiedKey === `${acc.id}_password` ? (
-                                <>
-                                  <Check className="w-4 h-4 text-emerald-300" />
-                                  <span>تم نسخ الرقم!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-4 h-4" />
-                                  <span>نسخ رقم البطاقة</span>
-                                </>
-                              )}
-                            </Button>
-                            </div>
+                            {acc.has_password && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  type="button"
+                                  onClick={() => toggleRevealAccountPassword(selectedService.id, acc)}
+                                  className="h-10 w-10 p-0 rounded-xl text-slate-400 hover:text-white hover:bg-white/10"
+                                  title={revealedAccountPasswords[acc.id] ? "إخفاء رقم البطاقة" : "إظهار رقم البطاقة"}
+                                >
+                                  {revealedAccountPasswords[acc.id] ? (
+                                    <EyeOff className="w-4 h-4" />
+                                  ) : (
+                                    <Eye className="w-4 h-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  onClick={() => copyAccountPassword(selectedService.id, acc.id)}
+                                  className="h-10 px-4 rounded-xl font-bold text-xs gap-2 shadow-lg shrink-0"
+                                >
+                                  {copiedKey === `${acc.id}_password` ? (
+                                    <>
+                                      <Check className="w-4 h-4 text-emerald-300" />
+                                      <span>تم نسخ الرقم!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-4 h-4" />
+                                      <span>نسخ رقم البطاقة</span>
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            )}
                           </div>
 
                           {/* Bottom Info Grid: Cardholder, Expiry, CVV, PIN */}
@@ -4984,10 +5065,14 @@ export default function App() {
               showPassword={showAccPassword}
               onToggleShowPassword={() => setShowAccPassword((prev) => !prev)}
               onGeneratePassword={() => handleGeneratePassword("add")}
+              onCopyPassword={formCopyHandler(false, "password")}
+              copiedPassword={copiedKey === "add_password"}
               recoveryKey={accRecoveryKey}
               onRecoveryKeyChange={setAccRecoveryKey}
               showRecoveryKey={showAccRecoveryKey}
               onToggleShowRecoveryKey={() => setShowAccRecoveryKey((prev) => !prev)}
+              onCopyRecoveryKey={formCopyHandler(false, "recoveryKey")}
+              copiedRecoveryKey={copiedKey === "add_recoveryKey"}
               url={accUrl}
               onUrlChange={setAccUrl}
               cardHolder={cardHolder}
@@ -4996,16 +5081,22 @@ export default function App() {
               onCardNumberChange={setCardNumber}
               showCardNumber={showCardNumber}
               onToggleShowCardNumber={() => setShowCardNumber((prev) => !prev)}
+              onCopyCardNumber={formCopyHandler(false, "cardNumber")}
+              copiedCardNumber={copiedKey === "add_cardNumber"}
               cardExpiry={cardExpiry}
               onCardExpiryChange={setCardExpiry}
               cardCvv={cardCvv}
               onCardCvvChange={setCardCvv}
               showCardCvv={showCardCvv}
               onToggleShowCardCvv={() => setShowCardCvv((prev) => !prev)}
+              onCopyCardCvv={formCopyHandler(false, "cardCvv")}
+              copiedCardCvv={copiedKey === "add_cardCvv"}
               cardPin={cardPin}
               onCardPinChange={setCardPin}
               showCardPin={showCardPin}
               onToggleShowCardPin={() => setShowCardPin((prev) => !prev)}
+              onCopyCardPin={formCopyHandler(false, "cardPin")}
+              copiedCardPin={copiedKey === "add_cardPin"}
             />
 
             <div className="flex justify-end gap-3 pt-4 border-t border-border/40">
@@ -5180,12 +5271,22 @@ export default function App() {
               onToggleShowCardPin={() => handleToggleEditSecretField("cardPin")}
               hasExistingPassword={Boolean(editingAccount?.has_password)}
               revealedStoredPassword={editSecretState.password.revealedStoredValue}
+              onCopyPassword={formCopyHandler(true, "password")}
+              copiedPassword={copiedKey === "edit_password"}
               hasExistingRecoveryKey={Boolean(editingAccount?.has_recovery_key)}
               revealedStoredRecoveryKey={editSecretState.recoveryKey.revealedStoredValue}
+              onCopyRecoveryKey={formCopyHandler(true, "recoveryKey")}
+              copiedRecoveryKey={copiedKey === "edit_recoveryKey"}
               revealedStoredCardNumber={editSecretState.cardNumber.revealedStoredValue}
+              onCopyCardNumber={formCopyHandler(true, "cardNumber")}
+              copiedCardNumber={copiedKey === "edit_cardNumber"}
               revealedStoredCardCvv={editSecretState.cardCvv.revealedStoredValue}
+              onCopyCardCvv={formCopyHandler(true, "cardCvv")}
+              copiedCardCvv={copiedKey === "edit_cardCvv"}
               hasExistingPin={Boolean(editingAccount?.has_pin)}
               revealedStoredCardPin={editSecretState.cardPin.revealedStoredValue}
+              onCopyCardPin={formCopyHandler(true, "cardPin")}
+              copiedCardPin={copiedKey === "edit_cardPin"}
               clearRecoveryKey={clearRecoveryKey}
               onSetClearRecoveryKey={(clear) => {
                 setClearRecoveryKey(clear);
