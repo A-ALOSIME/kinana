@@ -139,11 +139,11 @@
   }
 
   .kinana-card-pin {
-    left: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
+    inset-inline-end: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
     padding: clamp(0.25rem, min(calc(0.35rem * var(--vault-zoom, 1)), 2cqw), 0.75rem);
   }
 
   .kinana-card-select {
-    right: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
+    inset-inline-start: clamp(0.4rem, min(calc(0.7rem * var(--vault-zoom, 1)), 4cqw), 1.5rem);
   }
 }

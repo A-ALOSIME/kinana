@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Dices } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,6 +145,13 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
   clearCardPin = false,
   onSetClearCardPin,
 }) => {
+  const { t, i18n } = useTranslation();
+  const isRtl = i18n.dir() !== "ltr";
+  const ltrFieldAlign: React.CSSProperties = {
+    direction: "ltr",
+    textAlign: isRtl ? "right" : "left",
+  };
+
   if (mode === "card") {
     return (
       <div className="space-y-4">
@@ -156,7 +164,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                 <div className="h-1.5 border-b border-amber-600/40" />
               </div>
               <span className="text-xs font-bold text-slate-300 truncate leading-relaxed py-0.5">
-                {label || "بطاقة دفع"}
+                {label || t("card.defaultLabel")}
               </span>
             </div>
             <Badge className="px-2.5 py-0.5 text-[10px] font-black tracking-wider bg-white/10 text-white border border-white/20 shrink-0">
@@ -174,7 +182,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           <div className="flex items-center justify-between text-xs text-slate-300 pt-2 border-t border-white/10">
             <div className="text-start">
               <span className="text-[9px] tracking-normal text-slate-400 block font-bold">
-                حامل البطاقة
+                {t("card.holderLabel")}
               </span>
               <span
                 dir="auto"
@@ -185,7 +193,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             </div>
             <div className="text-end">
               <span className="text-[9px] tracking-normal text-slate-400 block font-bold">
-                تنتهي في
+                {t("card.expiryLabel")}
               </span>
               <span dir="ltr" className="font-mono font-bold text-white block">
                 {cardExpiry || "MM/YY"}
@@ -195,10 +203,12 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
         </div>
 
         <div>
-          <FormLabel htmlFor={`${idPrefix}-card-label`}>تسمية البطاقة</FormLabel>
+          <FormLabel htmlFor={`${idPrefix}-card-label`}>
+            {t("accountForm.card.label")}
+          </FormLabel>
           <Input
             id={`${idPrefix}-card-label`}
-            placeholder="بطاقة الراتب، بطاقة السفر..."
+            placeholder={t("accountForm.card.labelPlaceholder")}
             value={label}
             onChange={(e) => onLabelChange(e.target.value)}
             className="min-h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
@@ -207,11 +217,16 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
 
         <div>
           <FormLabel htmlFor={`${idPrefix}-card-holder`}>
-            اسم حامل البطاقة (<bdi dir="ltr">Cardholder Name</bdi>)
+            {t("accountForm.card.holderLabel")}
+            {isRtl && (
+              <>
+                {" "}(<bdi dir="ltr">Cardholder Name</bdi>)
+              </>
+            )}
           </FormLabel>
           <Input
             id={`${idPrefix}-card-holder`}
-            placeholder="الاسم كما هو مطبوع على البطاقة بالإنجليزية"
+            placeholder={t("accountForm.card.holderPlaceholder")}
             value={cardHolder}
             onChange={(e) => onCardHolderChange(e.target.value.toUpperCase())}
             className="min-h-12 text-base px-4 font-sans font-bold rounded-xl border-2 uppercase"
@@ -220,14 +235,16 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
 
         <div>
           <FormLabel htmlFor={`${idPrefix}-card-number`} required={!isEdit}>
-            رقم البطاقة (16 رقماً)
+            {isEdit
+              ? t("accountForm.card.numberLabelEdit")
+              : t("accountForm.card.numberLabel")}
           </FormLabel>
           <SecretInput
             id={`${idPrefix}-card-number`}
             revealed={showCardNumber}
             onToggleReveal={onToggleShowCardNumber}
-            revealLabel="إظهار رقم البطاقة"
-            hideLabel="إخفاء رقم البطاقة"
+            revealLabel={t("accountForm.card.showNumber")}
+            hideLabel={t("accountForm.card.hideNumber")}
             centered
             codeStyleWhenFilled
             filledTrackingClass="tracking-widest"
@@ -235,8 +252,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             revealedStoredValue={isEdit ? revealedStoredCardNumber : null}
             onCopy={onCopyCardNumber}
             copied={copiedCardNumber}
-            copyLabel="نسخ رقم البطاقة"
-            copiedLabel="تم نسخ رقم البطاقة"
+            copyLabel={t("accountForm.card.copyNumber")}
+            copiedLabel={t("accountForm.card.copiedNumber")}
             style={{ direction: "ltr", textAlign: "center" }}
             value={cardNumber}
             onChange={(e) => {
@@ -249,7 +266,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           />
           {isEdit && (
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              اتركه فارغاً للإبقاء على رقم البطاقة الحالي
+              {t("accountForm.card.numberKeepHint")}
             </p>
           )}
         </div>
@@ -257,7 +274,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <FormLabel htmlFor={`${idPrefix}-card-expiry`}>
-              تاريخ الانتهاء (<bdi dir="ltr">MM/YY</bdi>)
+              {t("accountForm.card.expiryLabel")} (<bdi dir="ltr">MM/YY</bdi>)
             </FormLabel>
             <Input
               id={`${idPrefix}-card-expiry`}
@@ -276,7 +293,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           <div>
             <div className="flex justify-between items-center mb-1.5">
               <FormLabel htmlFor={`${idPrefix}-card-cvv`} inline>
-                رمز الأمان (<bdi dir="ltr">CVV / CVC</bdi>)
+                {t("accountForm.card.cvvLabel")} (<bdi dir="ltr">CVV / CVC</bdi>)
               </FormLabel>
               <div className="flex items-center gap-2">
                 {isEdit && hasExistingRecoveryKey && onSetClearRecoveryKey && (
@@ -286,7 +303,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                       onClick={() => onSetClearRecoveryKey(false)}
                       className="text-xs text-amber-400 hover:text-amber-300 font-bold"
                     >
-                      سيتم الحذف (تراجع)
+                      {t("accountForm.card.cvvRemovePending")}
                     </button>
                   ) : (
                     <button
@@ -297,19 +314,21 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                       }}
                       className="text-xs text-rose-400 hover:text-rose-300 font-bold"
                     >
-                      إزالة <bdi dir="ltr">CVV</bdi>
+                      {t("accountForm.card.cvvRemove")} <bdi dir="ltr">CVV</bdi>
                     </button>
                   )
                 )}
-                <span className="text-xs text-muted-foreground">3 أو 4 أرقام</span>
+                <span className="text-xs text-muted-foreground">
+                  {t("accountForm.card.cvvDigitsHint")}
+                </span>
               </div>
             </div>
             <SecretInput
               id={`${idPrefix}-card-cvv`}
               revealed={showCardCvv}
               onToggleReveal={onToggleShowCardCvv}
-              revealLabel="إظهار رمز الأمان"
-              hideLabel="إخفاء رمز الأمان"
+              revealLabel={t("accountForm.card.showCvv")}
+              hideLabel={t("accountForm.card.hideCvv")}
               centered
               codeStyleWhenFilled
               filledTrackingClass="tracking-widest"
@@ -317,8 +336,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
               revealedStoredValue={isEdit && !clearRecoveryKey ? revealedStoredCardCvv : null}
               onCopy={onCopyCardCvv}
               copied={copiedCardCvv}
-              copyLabel="نسخ رمز الأمان"
-              copiedLabel="تم نسخ رمز الأمان"
+              copyLabel={t("accountForm.card.copyCvv")}
+              copiedLabel={t("accountForm.card.copiedCvv")}
               disabled={isEdit && clearRecoveryKey}
               value={isEdit && clearRecoveryKey ? "" : cardCvv}
               onChange={(e) =>
@@ -331,8 +350,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             {isEdit && (
               <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                 {clearRecoveryKey
-                  ? "سيتم حذف رمز الأمان عند الحفظ"
-                  : "اتركه فارغاً للإبقاء على رمز الأمان الحالي"}
+                  ? t("accountForm.card.cvvClearOnSave")
+                  : t("accountForm.card.cvvKeepHint")}
               </p>
             )}
           </div>
@@ -341,7 +360,12 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
         <div>
           <div className="flex justify-between items-center mb-1.5">
             <FormLabel htmlFor={`${idPrefix}-card-pin`} inline>
-              الرمز السري للبطاقة (<bdi dir="ltr">PIN</bdi>)
+              {t("accountForm.card.pinLabel")}
+              {isRtl && (
+                <>
+                  {" "}(<bdi dir="ltr">PIN</bdi>)
+                </>
+              )}
             </FormLabel>
             {isEdit && hasExistingPin && onSetClearCardPin && (
               clearCardPin ? (
@@ -350,7 +374,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                   onClick={() => onSetClearCardPin(false)}
                   className="text-xs text-amber-400 hover:text-amber-300 font-bold"
                 >
-                  سيتم الحذف (تراجع)
+                  {t("accountForm.card.pinRemovePending")}
                 </button>
               ) : (
                 <button
@@ -361,7 +385,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                   }}
                   className="text-xs text-rose-400 hover:text-rose-300 font-bold"
                 >
-                  إزالة الرمز السري
+                  {t("accountForm.card.pinRemove")}
                 </button>
               )
             )}
@@ -370,8 +394,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             id={`${idPrefix}-card-pin`}
             revealed={showCardPin}
             onToggleReveal={onToggleShowCardPin}
-            revealLabel="إظهار الرمز السري"
-            hideLabel="إخفاء الرمز السري"
+            revealLabel={t("accountForm.card.showPin")}
+            hideLabel={t("accountForm.card.hidePin")}
             centered
             codeStyleWhenFilled
             filledTrackingClass="tracking-widest"
@@ -379,8 +403,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             revealedStoredValue={isEdit && !clearCardPin ? revealedStoredCardPin : null}
             onCopy={onCopyCardPin}
             copied={copiedCardPin}
-            copyLabel="نسخ الرمز السري"
-            copiedLabel="تم نسخ الرمز السري"
+            copyLabel={t("accountForm.card.copyPin")}
+            copiedLabel={t("accountForm.card.copiedPin")}
             disabled={isEdit && clearCardPin}
             value={isEdit && clearCardPin ? "" : cardPin}
             onChange={(e) =>
@@ -393,14 +417,16 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           {isEdit && (
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
               {clearCardPin
-                ? "سيتم حذف الرمز السري عند الحفظ"
-                : "اتركه فارغاً للإبقاء على الرمز السري الحالي"}
+                ? t("accountForm.card.pinClearOnSave")
+                : t("accountForm.card.pinKeepHint")}
             </p>
           )}
         </div>
 
         <div>
-          <FormLabel htmlFor={`${idPrefix}-card-notes`}>ملاحظات إضافية</FormLabel>
+          <FormLabel htmlFor={`${idPrefix}-card-notes`}>
+            {t("accountForm.card.notesLabel")}
+          </FormLabel>
           <Input
             id={`${idPrefix}-card-notes`}
             value={notes}
@@ -415,10 +441,12 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
   return (
     <div className="space-y-4">
       <div>
-        <FormLabel htmlFor={`${idPrefix}-acc-label`}>تسمية الحساب</FormLabel>
+        <FormLabel htmlFor={`${idPrefix}-acc-label`}>
+          {t("accountForm.login.label")}
+        </FormLabel>
         <Input
           id={`${idPrefix}-acc-label`}
-          placeholder="حساب شخصي، حساب العمل..."
+          placeholder={t("accountForm.login.labelPlaceholder")}
           value={label}
           onChange={(e) => onLabelChange(e.target.value)}
           className="min-h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
@@ -427,7 +455,9 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <FormLabel htmlFor={`${idPrefix}-acc-username`}>اسم المستخدم</FormLabel>
+          <FormLabel htmlFor={`${idPrefix}-acc-username`}>
+            {t("accountForm.login.usernameLabel")}
+          </FormLabel>
           <Input
             id={`${idPrefix}-acc-username`}
             value={username}
@@ -437,13 +467,15 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
         </div>
 
         <div>
-          <FormLabel htmlFor={`${idPrefix}-acc-email`}>البريد الإلكتروني</FormLabel>
+          <FormLabel htmlFor={`${idPrefix}-acc-email`}>
+            {t("accountForm.login.emailLabel")}
+          </FormLabel>
           <Input
             id={`${idPrefix}-acc-email`}
             type="email"
             value={email}
             onChange={(e) => onEmailChange(e.target.value)}
-            style={{ direction: "ltr", textAlign: "right" }}
+            style={ltrFieldAlign}
             className="min-h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
           />
         </div>
@@ -452,7 +484,9 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
       <div>
         <div className="flex justify-between items-center mb-1.5">
           <FormLabel htmlFor={`${idPrefix}-acc-password`} inline>
-            كلمة المرور
+            {isEdit
+              ? t("accountForm.login.passwordLabelEdit")
+              : t("accountForm.login.passwordLabel")}
           </FormLabel>
           <Button
             type="button"
@@ -462,21 +496,25 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             className="h-9 px-3 text-xs font-bold gap-1.5 rounded-lg border-primary/50 text-primary hover:bg-primary/10"
           >
             <Dices className="w-4 h-4" />
-            <span>{isEdit ? "توليد كلمة جديدة" : "توليد كلمة مرور قوية"}</span>
+            <span>
+              {isEdit
+                ? t("accountForm.login.generateNew")
+                : t("accountForm.login.generateStrong")}
+            </span>
           </Button>
         </div>
         <SecretInput
           id={`${idPrefix}-acc-password`}
           revealed={showPassword}
           onToggleReveal={onToggleShowPassword}
-          revealLabel="إظهار كلمة المرور"
-          hideLabel="إخفاء كلمة المرور"
+          revealLabel={t("accountForm.login.showPassword")}
+          hideLabel={t("accountForm.login.hidePassword")}
           storedSecretMask={isEdit && hasExistingPassword && password.length === 0}
           revealedStoredValue={isEdit ? revealedStoredPassword : null}
           onCopy={onCopyPassword}
           copied={copiedPassword}
-          copyLabel="نسخ كلمة المرور"
-          copiedLabel="تم نسخ كلمة المرور"
+          copyLabel={t("accountForm.login.copyPassword")}
+          copiedLabel={t("accountForm.login.copiedPassword")}
           value={password}
           onChange={(e) => onPasswordChange(e.target.value)}
           className="text-base font-bold rounded-xl border-2"
@@ -488,11 +526,11 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
             {password.length > 0
               ? hasExistingPassword
-                ? "سيتم استبدال كلمة المرور المحفوظة بالكلمة الجديدة عند الحفظ."
-                : "سيتم حفظ كلمة المرور الجديدة لهذا الحساب."
+                ? t("accountForm.login.passwordReplaceHint")
+                : t("accountForm.login.passwordNewHint")
               : hasExistingPassword
-              ? "توجد كلمة مرور محفوظة ومخفية — اتركه فارغاً للإبقاء عليها أو اكتب كلمة جديدة للاستبدال."
-              : "لا توجد كلمة مرور محفوظة لهذا الحساب حالياً."}
+                ? t("accountForm.login.passwordKeepHint")
+                : t("accountForm.login.passwordNoneHint")}
           </p>
         )}
       </div>
@@ -500,7 +538,12 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
       <div>
         <div className="flex justify-between items-center mb-1.5">
           <FormLabel htmlFor={`${idPrefix}-acc-recovery`} inline>
-            مفتاح استرداد الحساب (<bdi dir="ltr">Recovery Key</bdi>)
+            {t("accountForm.login.recoveryKeyLabel")}
+            {isRtl && (
+              <>
+                {" "}(<bdi dir="ltr">Recovery Key</bdi>)
+              </>
+            )}
           </FormLabel>
           {isEdit && hasExistingRecoveryKey && onSetClearRecoveryKey && (
             clearRecoveryKey ? (
@@ -509,7 +552,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                 onClick={() => onSetClearRecoveryKey(false)}
                 className="text-xs text-amber-400 hover:text-amber-300 font-bold"
               >
-                سيتم الحذف (تراجع)
+                {t("accountForm.login.recoveryRemovePending")}
               </button>
             ) : (
               <button
@@ -520,7 +563,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                 }}
                 className="text-xs text-rose-400 hover:text-rose-300 font-bold"
               >
-                إزالة مفتاح الاسترداد
+                {t("accountForm.login.recoveryRemove")}
               </button>
             )
           )}
@@ -529,14 +572,14 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           id={`${idPrefix}-acc-recovery`}
           revealed={showRecoveryKey}
           onToggleReveal={onToggleShowRecoveryKey}
-          revealLabel="إظهار مفتاح الاسترداد"
-          hideLabel="إخفاء مفتاح الاسترداد"
+          revealLabel={t("accountForm.login.showRecoveryKey")}
+          hideLabel={t("accountForm.login.hideRecoveryKey")}
           storedSecretMask={isEdit && hasExistingRecoveryKey && !recoveryKey}
           revealedStoredValue={isEdit && !clearRecoveryKey ? revealedStoredRecoveryKey : null}
           onCopy={onCopyRecoveryKey}
           copied={copiedRecoveryKey}
-          copyLabel="نسخ مفتاح الاسترداد"
-          copiedLabel="تم نسخ مفتاح الاسترداد"
+          copyLabel={t("accountForm.login.copyRecoveryKey")}
+          copiedLabel={t("accountForm.login.copiedRecoveryKey")}
           disabled={isEdit && clearRecoveryKey}
           value={isEdit && clearRecoveryKey ? "" : recoveryKey}
           onChange={(e) => onRecoveryKeyChange(e.target.value)}
@@ -547,27 +590,34 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
         {isEdit && (
           <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
             {clearRecoveryKey
-              ? "سيتم حذف مفتاح الاسترداد عند الحفظ"
-              : "اتركه فارغاً للإبقاء على مفتاح الاسترداد الحالي"}
+              ? t("accountForm.login.recoveryClearOnSave")
+              : t("accountForm.login.recoveryKeepHint")}
           </p>
         )}
       </div>
 
       <div>
         <FormLabel htmlFor={`${idPrefix}-acc-url`}>
-          رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi>)
+          {t("accountForm.login.urlLabel")}
+          {isRtl && (
+            <>
+              {" "}(<bdi dir="ltr">URL</bdi>)
+            </>
+          )}
         </FormLabel>
         <Input
           id={`${idPrefix}-acc-url`}
           value={url}
           onChange={(e) => onUrlChange(e.target.value)}
-          style={{ direction: "ltr", textAlign: "right" }}
+          style={ltrFieldAlign}
           className="min-h-12 text-base px-4 font-sans font-bold rounded-xl border-2"
         />
       </div>
 
       <div>
-        <FormLabel htmlFor={`${idPrefix}-acc-notes`}>الملاحظات</FormLabel>
+        <FormLabel htmlFor={`${idPrefix}-acc-notes`}>
+          {t("accountForm.login.notesLabel")}
+        </FormLabel>
         <Input
           id={`${idPrefix}-acc-notes`}
           value={notes}

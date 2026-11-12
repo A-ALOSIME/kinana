@@ -225,9 +225,17 @@ test("English Kinana identity, NSIS upgrade hooks, destructive dialog RTL orderi
     path.join(uiRoot, "src/components/AccountFormFields.tsx"),
     "utf8"
   );
+  const arLocale = JSON.parse(
+    fs.readFileSync(path.join(uiRoot, "src/i18n/locales/ar.json"), "utf8")
+  );
   assert.ok(accountFormFieldsSrc.includes("hasExistingPassword"));
-  assert.ok(accountFormFieldsSrc.includes("توجد كلمة مرور محفوظة ومخفية"));
-  assert.ok(accountFormFieldsSrc.includes("لا توجد كلمة مرور محفوظة لهذا الحساب حالياً"));
+  assert.ok(accountFormFieldsSrc.includes('t("accountForm.login.passwordKeepHint")'));
+  assert.ok(accountFormFieldsSrc.includes('t("accountForm.login.passwordNoneHint")'));
+  assert.ok(arLocale.accountForm.login.passwordKeepHint.includes("توجد كلمة مرور محفوظة ومخفية"));
+  assert.equal(
+    arLocale.accountForm.login.passwordNoneHint,
+    "لا توجد كلمة مرور محفوظة لهذا الحساب حالياً."
+  );
 
   const appSrc = fs.readFileSync(path.join(uiRoot, "src/App.tsx"), "utf8");
   assert.ok(!appSrc.includes("isBankOrCardService(serviceName)"));

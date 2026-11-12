@@ -219,6 +219,15 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.ok(!appSrcNoComments.includes("لا توجد حسابات مسجلة تحت هذه الخدمة حتى الآن."), "Verbose empty-state wording must be removed");
   assert.ok(!accountFormFieldsSrc.includes("BANK CARD"), "Redundant BANK CARD badge beside card number label must be removed");
 
+  const arLocale = JSON.parse(
+    fs.readFileSync(path.join(uiRoot, "src/i18n/locales/ar.json"), "utf8")
+  );
+  const enLocale = JSON.parse(
+    fs.readFileSync(path.join(uiRoot, "src/i18n/locales/en.json"), "utf8")
+  );
+  const getLocaleKey = (localeObj, dottedKey) =>
+    dottedKey.split(".").reduce((acc, part) => (acc ? acc[part] : undefined), localeObj);
+
   const combinedFormSrc = appSrcNoComments + "\n" + accountFormFieldsSrc;
   const formLabelBlocks =
     combinedFormSrc.match(/<FormLabel\b[^>]*>[\s\S]*?<\/FormLabel>/g) || [];
@@ -228,6 +237,14 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
       !labelBlock.includes("اختياري"),
       `Field label must not contain اختياري: ${labelBlock}`
     );
+    for (const keyMatch of labelBlock.matchAll(/t\("([^"]+)"\)/g)) {
+      const arLabel = String(getLocaleKey(arLocale, keyMatch[1]) ?? "");
+      const enLabel = String(getLocaleKey(enLocale, keyMatch[1]) ?? "").toLowerCase();
+      assert.ok(
+        !arLabel.includes("اختياري") && !enLabel.includes("(optional)"),
+        `Localized field label ${keyMatch[1]} must not contain optional suffix: ${arLabel} / ${enLabel}`
+      );
+    }
   }
 
   // Required fields in App.tsx (10 static required fields including Create Vault confirmation) + Add Card Number dynamic required in AccountFormFields
@@ -271,15 +288,26 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
       !generateSection.includes("setShowEditPassword(true)"),
     "Account password fields must remain masked by default even after generating a password"
   );
-  const accountPlaceholders = [...accountFormFieldsSrc.matchAll(/placeholder="([^"]*)"/g)].map((m) => m[1]);
+  const accountPlaceholderKeys = [
+    ...accountFormFieldsSrc.matchAll(/placeholder=\{t\("([^"]+)"\)\}/g),
+  ].map((m) => m[1]);
   assert.deepEqual(
-    accountPlaceholders,
+    accountPlaceholderKeys,
+    [
+      "accountForm.card.labelPlaceholder",
+      "accountForm.card.holderPlaceholder",
+      "accountForm.login.labelPlaceholder",
+    ],
+    "Account/Card forms must retain placeholders solely for card label, cardholder name, and account label"
+  );
+  assert.deepEqual(
+    accountPlaceholderKeys.map((k) => getLocaleKey(arLocale, k)),
     [
       "بطاقة الراتب، بطاقة السفر...",
       "الاسم كما هو مطبوع على البطاقة بالإنجليزية",
       "حساب شخصي، حساب العمل...",
     ],
-    "Account/Card forms must retain placeholders solely for card label, cardholder name, and account label"
+    "Account/Card Arabic placeholders must match the exact expected wording"
   );
   assert.ok(
     accountFormFieldsSrc.includes('id={`${idPrefix}-card-number`}') &&
@@ -298,21 +326,24 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   assert.ok(!createSection.includes("PIN"), "Initial Vault Creation screen must not contain PIN terminology");
   assert.ok(!createSection.includes("ShieldCheck"), "Initial Vault Creation screen must replace shield icons with neutral Info icon");
   assert.ok(createSection.includes("<Info"), "Initial Vault Creation recovery notice must use circle-i Info icon");
-  assert.ok(createSection.includes("احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد في مكان آمن"), "Initial Vault Creation must accurately state recovery key + master password behavior");
-  assert.ok(createSection.includes("كلمتا المرور غير متطابقتين"), "Initial Vault Creation must show deferred mismatch feedback");
+  assert.ok(createSection.includes('t("auth.create.recoveryNotice")'), "Initial Vault Creation must render localized recovery notice");
+  assert.ok(arLocale.auth.create.recoveryNotice.includes("احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد في مكان آمن"), "Initial Vault Creation must accurately state recovery key + master password behavior");
+  assert.ok(createSection.includes('t("auth.create.mismatchError")'), "Initial Vault Creation must render localized mismatch feedback");
+  assert.ok(arLocale.auth.create.mismatchError.includes("كلمتا المرور غير متطابقتين"), "Initial Vault Creation must show deferred mismatch feedback");
   assert.ok(createSection.includes("disabled={!createValidation.canSubmit}"), "Create Vault button must remain disabled until valid and matching");
-  assert.ok(createSection.includes("لم يتم العثور على خزنة سابقة على هذا الجهاز"), "Initial Vault Creation must display missing-vault note below Create button");
+  assert.ok(createSection.includes('t("auth.create.noExistingVaultNote")'), "Initial Vault Creation must render localized missing-vault note");
+  assert.ok(arLocale.auth.create.noExistingVaultNote.includes("لم يتم العثور على خزنة سابقة على هذا الجهاز"), "Initial Vault Creation must display missing-vault note below Create button");
 
   // Verify exact Create Vault order
   const orderMarkers = [
     'id="create-vault-password"',
     "<PasswordStrengthIndicator",
     'id="create-vault-confirm-password"',
-    "كلمتا المرور غير متطابقتين",
-    "احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد",
-    "إنشاء الخزنة",
-    "لم يتم العثور على خزنة سابقة على هذا الجهاز",
-    "هل لديك نسخة سابقة؟ استيراد الخزنة",
+    't("auth.create.mismatchError")',
+    't("auth.create.recoveryNotice")',
+    't("auth.create.submit")',
+    't("auth.create.noExistingVaultNote")',
+    't("auth.create.importExistingPrompt")',
   ];
   let lastOrderPos = -1;
   for (const marker of orderMarkers) {
@@ -322,8 +353,20 @@ test("UI components avoid Arabic letter-spacing bugs, RTL alignment regressions,
   }
 
   // Settings Password Change & Auto-Unlock notice
-  assert.ok(!appSrcNoComments.includes("تغيير رمز الدخول (PIN)"), "Settings title must remove PIN reference");
-  assert.ok(appSrcNoComments.includes("تغيير كلمة المرور الرئيسية"), "Settings title must use تغيير كلمة المرور الرئيسية");
+  assert.ok(
+    !appSrcNoComments.includes("تغيير رمز الدخول (PIN)") &&
+      !JSON.stringify(arLocale).includes("تغيير رمز الدخول (PIN)"),
+    "Settings title must remove PIN reference"
+  );
+  assert.ok(
+    appSrcNoComments.includes('t("settings.changePassword.title")'),
+    "Settings title must use localized changePassword title key"
+  );
+  assert.equal(
+    arLocale.settings.changePassword.title,
+    "تغيير كلمة المرور الرئيسية",
+    "Settings title must use تغيير كلمة المرور الرئيسية"
+  );
   assert.ok((appSrcNoComments.match(/<PasswordStrengthIndicator/g) || []).length === 2, "Settings and Vault Creation must share the exact same PasswordStrengthIndicator component");
   assert.ok(!strengthIndicatorSrc.includes("red") && !strengthIndicatorSrc.includes("rose") && !strengthIndicatorSrc.includes("destructive"), "PasswordStrengthIndicator must not use red styling for weakest level");
 

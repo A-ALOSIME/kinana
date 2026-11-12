@@ -129,14 +129,15 @@ export function buildAddAccountPayload(
   serviceId: string,
   mode: AccountFormMode,
   login: LoginFormValues,
-  card: CardFormValues
+  card: CardFormValues,
+  defaultCardLabel: string = "بطاقة بنكية"
 ): AddAccountPayload {
   if (mode === "card") {
     const cleanNum = card.number.replace(/\s+/g, "").trim();
     return {
       serviceId,
       accountKind: "card",
-      label: card.label.trim() || "بطاقة بنكية",
+      label: card.label.trim() || defaultCardLabel,
       username: card.holder.trim() || null,
       password: cleanNum || null,
       email: null,

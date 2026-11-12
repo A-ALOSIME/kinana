@@ -278,7 +278,7 @@ test("SecretInput, AccountFormFields, and Details View maintain consistent Copy 
   // Card Number Detail View must gate Eye & Copy on acc.has_password so missing card numbers show no Copy action
   assert.match(
     appSrc,
-    /!acc\.has_password\s*\?\s*"—"\s*:\s*revealedAccountPasswords\[acc\.id\]/
+    /!acc\.has_password\s*\?\s*(?:"—"|t\("common\.dash"\))\s*:\s*revealedAccountPasswords\[acc\.id\]/
   );
   assert.match(
     appSrc,

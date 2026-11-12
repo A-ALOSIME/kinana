@@ -113,12 +113,14 @@ export function shouldActivateServiceCard(e: KeyboardEventLike): boolean {
 export type DestructiveDialogArrowTarget = "delete" | "cancel";
 
 /**
- * Resolves visual arrow navigation inside the RTL destructive confirmation dialog
- * (Delete on the right, Cancel on the left), strictly ignoring modified or editable events.
+ * Resolves visual arrow navigation inside the destructive confirmation dialog
+ * matching active text direction (RTL: Delete right, Cancel left; LTR: Delete left, Cancel right),
+ * strictly ignoring modified or editable events.
  */
 export function getDestructiveDialogArrowTarget(
   e: KeyboardEventLike,
-  target?: EventTarget | null
+  target?: EventTarget | null,
+  dir: "rtl" | "ltr" = "rtl"
 ): DestructiveDialogArrowTarget | null {
   if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
     return null;
@@ -127,10 +129,10 @@ export function getDestructiveDialogArrowTarget(
     return null;
   }
   if (e.key === "ArrowRight") {
-    return "delete";
+    return dir === "rtl" ? "delete" : "cancel";
   }
   if (e.key === "ArrowLeft") {
-    return "cancel";
+    return dir === "rtl" ? "cancel" : "delete";
   }
   return null;
 }

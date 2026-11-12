@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Check, Copy, Eye, EyeOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -54,8 +55,8 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
       className,
       revealed,
       onToggleReveal,
-      revealLabel = "إظهار القيمة",
-      hideLabel = "إخفاء القيمة",
+      revealLabel,
+      hideLabel,
       buttonSize = "default",
       centered = false,
       centeredPlaceholder,
@@ -65,8 +66,8 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
       revealedStoredValue = null,
       onCopy,
       copied = false,
-      copyLabel = "نسخ",
-      copiedLabel = "تم النسخ",
+      copyLabel,
+      copiedLabel,
       autoComplete = "new-password",
       value,
       defaultValue,
@@ -79,6 +80,13 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
     },
     ref
   ) => {
+    const { t, i18n } = useTranslation();
+    const resolvedDir = i18n.dir() === "ltr" ? "ltr" : "rtl";
+    const resolvedRevealLabel = revealLabel ?? t("common.show");
+    const resolvedHideLabel = hideLabel ?? t("common.hide");
+    const resolvedCopyLabel = copyLabel ?? t("common.copy");
+    const resolvedCopiedLabel = copiedLabel ?? t("common.copied");
+
     const [uncontrolledHasValue, setUncontrolledHasValue] = React.useState(
       () =>
         defaultValue !== undefined &&
@@ -105,7 +113,7 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
 
     const isLarge = buttonSize === "lg";
     const showCopyButton = typeof onCopy === "function";
-    const toggleLabel = revealed ? hideLabel : revealLabel;
+    const toggleLabel = revealed ? resolvedHideLabel : resolvedRevealLabel;
     const alignCenteredPlaceholder = centeredPlaceholder ?? centered;
     const sizeClasses = extractTextSizeClasses(className);
     const hasStrikeThrough = Boolean(className?.includes("line-through"));
@@ -153,7 +161,11 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
             ...(codeStyleWhenFilled && hasValue
               ? {
                   direction: "ltr" as const,
-                  textAlign: centered ? ("center" as const) : ("right" as const),
+                  textAlign: centered
+                    ? ("center" as const)
+                    : resolvedDir === "ltr"
+                      ? ("left" as const)
+                      : ("right" as const),
                 }
               : {}),
             ...style,
@@ -244,8 +256,8 @@ const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
               size={isLarge ? "icon" : "sm"}
               disabled={disabled}
               onClick={onCopy}
-              aria-label={copied ? copiedLabel : copyLabel}
-              title={copied ? copiedLabel : copyLabel}
+              aria-label={copied ? resolvedCopiedLabel : resolvedCopyLabel}
+              title={copied ? resolvedCopiedLabel : resolvedCopyLabel}
               className={cn(
                 "p-0 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-lg",
                 isLarge ? "h-10 w-10" : "h-8 w-8",

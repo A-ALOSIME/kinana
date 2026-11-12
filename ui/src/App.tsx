@@ -2,6 +2,10 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTranslation } from "react-i18next";
+import i18n, { getLanguageDirection, normalizeLanguage, syncDocumentLanguage } from "./i18n";
+import { localizeBackendMessage, localizePlatformName } from "./i18n/errorMapper";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import {
   SessionGuard,
   unlockWithPassword,
@@ -179,18 +183,22 @@ interface ImportVaultResult {
   warning?: string | null;
 }
 
-// Category labels for popular presets
-const PRESET_CATEGORY_LABELS: Record<string, string> = {
-  gaming: "ألعاب",
-  social: "تواصل",
-  entertainment: "ترفيه",
-  tech: "تقنية",
-  work: "تسوق وعمل",
-  finance: "بنوك وبطاقات",
+// Category labels are resolved via i18next keys under serviceForm.categories
+const PRESET_CATEGORY_KEYS: Record<string, string> = {
+  gaming: "serviceForm.categories.gaming",
+  social: "serviceForm.categories.social",
+  entertainment: "serviceForm.categories.entertainment",
+  tech: "serviceForm.categories.tech",
+  work: "serviceForm.categories.workShort",
+  finance: "serviceForm.categories.finance",
 };
 
 // Detect card brand/network from number or service name
-function detectCardBrand(num: string = "", serviceName: string = ""): { name: string; color: string; badge: string } {
+function detectCardBrand(
+  num: string = "",
+  serviceName: string = "",
+  isRtl: boolean = true
+): { name: string; color: string; badge: string } {
   const clean = num.replace(/\D/g, "");
   if (clean.startsWith("4") || serviceName.toLowerCase().includes("visa")) {
     return { name: "Visa", color: "#1A1F71", badge: "VISA" };
@@ -199,16 +207,16 @@ function detectCardBrand(num: string = "", serviceName: string = ""): { name: st
     return { name: "Mastercard", color: "#EB001B", badge: "Mastercard" };
   }
   if (/^(588845|588846|588847|588848|588849|588850|588851|588852|588853|588854|588855|588856|588857|588858|588859|484783|9682)/.test(clean) || serviceName.includes("مدى") || serviceName.toLowerCase().includes("mada")) {
-    return { name: "Mada", color: "#004A80", badge: "مدى mada" };
+    return { name: "Mada", color: "#004A80", badge: isRtl ? "مدى mada" : "MADA" };
   }
   if (serviceName.includes("الراجحي") || serviceName.toLowerCase().includes("rajhi")) {
-    return { name: "Al Rajhi Bank", color: "#0C2340", badge: "مصرف الراجحي" };
+    return { name: "Al Rajhi Bank", color: "#0C2340", badge: isRtl ? "مصرف الراجحي" : "Al Rajhi Bank" };
   }
   if (serviceName.includes("الأهلي") || serviceName.toLowerCase().includes("snb")) {
-    return { name: "SNB", color: "#006837", badge: "الأهلي SNB" };
+    return { name: "SNB", color: "#006837", badge: isRtl ? "الأهلي SNB" : "SNB" };
   }
   if (serviceName.includes("الإنماء") || serviceName.toLowerCase().includes("alinma")) {
-    return { name: "Alinma Bank", color: "#8C6239", badge: "مصرف الإنماء" };
+    return { name: "Alinma Bank", color: "#8C6239", badge: isRtl ? "مصرف الإنماء" : "Alinma Bank" };
   }
   if (serviceName.toLowerCase().includes("stc pay") || serviceName.includes("إس تي سي باي")) {
     return { name: "stc pay", color: "#4F008C", badge: "stc pay" };
@@ -250,15 +258,15 @@ function getServiceGradient(name: string): string {
 function processImageUpload(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) {
-      reject("يرجى اختيار ملف صورة صالح (PNG, JPG, WebP)");
+      reject(i18n.t("serviceForm.validation.invalidImageFile"));
       return;
     }
 
     const reader = new FileReader();
-    reader.onerror = () => reject("فشل قراءة ملف الصورة");
+    reader.onerror = () => reject(i18n.t("serviceForm.validation.imageReadFailed"));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject("فشل معالجة أبعاد الصورة");
+      img.onerror = () => reject(i18n.t("serviceForm.validation.imageDimensionsFailed"));
       img.onload = () => {
         const MAX_WIDTH = 1280;
         const MAX_HEIGHT = 720;
@@ -280,7 +288,7 @@ function processImageUpload(file: File): Promise<string> {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          reject("فشل معالجة الصورة في المتصفح");
+          reject(i18n.t("serviceForm.validation.imageProcessFailed"));
           return;
         }
 
@@ -314,6 +322,19 @@ function normalizeArabicSearch(text: string): string {
 }
 
 export default function App() {
+  const { t, i18n: activeI18n } = useTranslation();
+  const activeLang = normalizeLanguage(activeI18n.resolvedLanguage ?? activeI18n.language);
+  const activeDir = getLanguageDirection(activeLang);
+  const isRtl = activeDir === "rtl";
+
+  useEffect(() => {
+    syncDocumentLanguage(activeLang);
+    invoke("set_tray_language", { language: activeLang }).catch(() => {});
+  }, [activeLang]);
+
+  const mapBackendErr = (err: unknown, fallbackKey: string) =>
+    localizeBackendMessage(err, fallbackKey, t);
+
   const [exists, setExists] = useState<boolean | null>(null);
   const [unlocked, setUnlocked] = useState<boolean>(false);
   const [password, setPassword] = useState<string>("");
@@ -881,7 +902,7 @@ export default function App() {
       setUnlocked(true);
       setError(null);
     } catch (err: any) {
-      setError(err?.toString() || "فشل جلب بيانات الخزنة");
+      setError(mapBackendErr(err, "notifications.fetchVaultFailed"));
     }
   };
 
@@ -902,7 +923,7 @@ export default function App() {
       });
     } catch (err: any) {
       if (!sessionGuardRef.current.isResponseValid(epoch)) return;
-      setError(err?.toString() || "فشل جلب تفاصيل الحسابات");
+      setError(mapBackendErr(err, "notifications.fetchAccountsFailed"));
     } finally {
       if (sessionGuardRef.current.epoch === epoch) {
         setLoadingAccounts(false);
@@ -1086,7 +1107,7 @@ export default function App() {
     const unlistenPromise = listen("vault-auto-locked", () => {
       purgeAllSensitiveState();
       invoke("trim_app_memory").catch(() => {});
-      setWarning("تم إقفال Kinana تلقائياً بسبب الخمول لحماية بياناتك.");
+      setWarning(t("notifications.autoLockedInactivity"));
     });
 
     const syncFullscreen = async () => {
@@ -1595,7 +1616,7 @@ export default function App() {
       setSummary(updated);
       setIsAlphabeticallySorted(false);
     } catch (err: any) {
-      setError(err?.toString() || "فشل تكرار الخدمة");
+      setError(mapBackendErr(err, "notifications.duplicateServiceFailed"));
     }
   };
 
@@ -1605,7 +1626,7 @@ export default function App() {
     if (!isAlphabeticallySorted) {
       preSortOrderRef.current = summary.services.map((s) => s.id);
       const sorted = [...summary.services].sort((a, b) =>
-        a.name.localeCompare(b.name, "ar", { sensitivity: "base" })
+        a.name.localeCompare(b.name, activeLang, { sensitivity: "base" })
       );
       setSummary({ ...summary, services: sorted });
       setIsAlphabeticallySorted(true);
@@ -1652,7 +1673,7 @@ export default function App() {
       setSelectionMode(false);
       setShowBatchDeleteModal(false);
     } catch (err: any) {
-      setError(err?.toString() || "فشل حذف الخدمات المحددة");
+      setError(mapBackendErr(err, "notifications.bulkDeleteFailed"));
     } finally {
       setIsDeleting(false);
     }
@@ -1668,12 +1689,12 @@ export default function App() {
       isSubmitting: isCreatingVault,
     });
     if (!validation.minLengthMet) {
-      setError("يجب أن تتكون كلمة المرور الرئيسية من 8 خانات على الأقل لحماية الخزنة.");
+      setError(t("notifications.createPasswordMinLength"));
       return;
     }
     if (!validation.passwordsMatch) {
       setCreateConfirmTouched(true);
-      setError("كلمتا المرور غير متطابقتين");
+      setError(t("notifications.createPasswordMismatch"));
       return;
     }
     try {
@@ -1690,7 +1711,7 @@ export default function App() {
       setExists(true);
       setAutoUnlockActive(false);
     } catch (err: any) {
-      setError(err?.toString() || "فشل إنشاء الخزنة");
+      setError(mapBackendErr(err, "notifications.createVaultFailed"));
     } finally {
       setIsCreatingVault(false);
     }
@@ -1706,7 +1727,7 @@ export default function App() {
         await fetchSummary();
       });
     } catch (err: any) {
-      setError(err?.toString() || "فشل فتح الخزنة: كلمة المرور غير صحيحة");
+      setError(mapBackendErr(err, "notifications.unlockWrongPassword"));
     }
   };
 
@@ -1718,11 +1739,11 @@ export default function App() {
       invoke("trim_app_memory").catch(() => {});
       setError(null);
     } catch (err: any) {
-      setError(err?.toString() || "فشل قفل الخزنة");
+      setError(mapBackendErr(err, "notifications.lockVaultFailed"));
     }
   };
 
-  // Toggle Auto-Unlock (Windows Credential Store)
+  // Toggle Auto-Unlock (OS Credential Store)
   const handleToggleAutoUnlock = async () => {
     setSettingsFeedback(null);
     setError(null);
@@ -1734,12 +1755,12 @@ export default function App() {
         setShowSavedPassword(false);
         setSettingsFeedback({
           type: "success",
-          message: "تم تعطيل الفتح التلقائي: سيُطلب منك رمز الدخول في كل مرة تفتح فيها Kinana.",
+          message: t("settings.autoUnlock.disabledToast"),
         });
       } catch (err: any) {
         setSettingsFeedback({
           type: "error",
-          message: err?.toString() || "فشل تعطيل الفتح التلقائي",
+          message: mapBackendErr(err, "settings.autoUnlock.disableFailed"),
         });
       }
     } else {
@@ -1755,7 +1776,7 @@ export default function App() {
   const handleConfirmEnableAutoUnlock = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!autoUnlockPassword.trim()) {
-      setAutoUnlockModalError("يرجى إدخال رمز الدخول أو كلمة المرور");
+      setAutoUnlockModalError(t("autoUnlockModal.enterPinError"));
       return;
     }
 
@@ -1770,7 +1791,7 @@ export default function App() {
       setShowAutoUnlockModal(false);
       setSettingsFeedback({
         type: "success",
-        message: "تم تفعيل الفتح التلقائي بنجاح: سيتم فتح Kinana تلقائياً عند كل تشغيل.",
+        message: t("settings.autoUnlock.enabledToast"),
       });
     } catch (err: any) {
       const errStr = err?.toString() || "";
@@ -1780,9 +1801,9 @@ export default function App() {
         errStr.toLowerCase().includes("decrypt") ||
         errStr.toLowerCase().includes("key")
       ) {
-        setAutoUnlockModalError("رمز الدخول غير صحيح! يرجى التأكد من كتابة الرمز الصحيح للخزنة.");
+        setAutoUnlockModalError(t("autoUnlockModal.wrongPinError"));
       } else {
-        setAutoUnlockModalError(errStr || "فشل تفعيل الفتح التلقائي");
+        setAutoUnlockModalError(mapBackendErr(errStr, "settings.autoUnlock.enableFailed"));
       }
     } finally {
       setAutoUnlockModalLoading(false);
@@ -1800,16 +1821,16 @@ export default function App() {
       isSubmitting: isChangingMasterPassword,
     });
     if (!newMasterPassword) {
-      setError("يرجى إدخال كلمة المرور الرئيسية الجديدة");
+      setError(t("settings.changePassword.enterNewError"));
       return;
     }
     if (!validation.minLengthMet) {
-      setError("يجب أن تتكون كلمة المرور الرئيسية الجديدة من 8 خانات على الأقل لضمان الحماية ضد التخمين.");
+      setError(t("settings.changePassword.minLengthError"));
       return;
     }
     if (!validation.passwordsMatch) {
       setSettingsConfirmTouched(true);
-      setError("كلمتا المرور غير متطابقتين");
+      setError(t("settings.changePassword.mismatchError"));
       return;
     }
     try {
@@ -1826,16 +1847,18 @@ export default function App() {
       if (res?.warning) {
         showPasswordChangeFeedback({
           type: "warning",
-          message: `تم تغيير كلمة المرور الرئيسية بنجاح مع تنبيه: ${res.warning}`,
+          message: t("settings.changePassword.successWithWarning", {
+            warning: mapBackendErr(res.warning, "settings.changePassword.failed"),
+          }),
         });
       } else {
         showPasswordChangeFeedback({
           type: "success",
-          message: "تم تغيير كلمة المرور الرئيسية بنجاح وتحديث بيانات الحماية!",
+          message: t("settings.changePassword.success"),
         });
       }
     } catch (err: any) {
-      setError(err?.toString() || "فشل تغيير كلمة المرور الرئيسية");
+      setError(mapBackendErr(err, "settings.changePassword.failed"));
     } finally {
       setIsChangingMasterPassword(false);
     }
@@ -1858,7 +1881,7 @@ export default function App() {
     } catch (err: any) {
       setSettingsFeedback({
         type: "error",
-        message: err?.toString() || "فشل استرجاع مفتاح الطوارئ",
+        message: mapBackendErr(err, "settings.recoveryKey.retrieveFailed"),
       });
     }
   };
@@ -1876,7 +1899,7 @@ export default function App() {
     } catch (err: any) {
       setSettingsFeedback({
         type: "error",
-        message: err?.toString() || "فشل نسخ مفتاح الطوارئ",
+        message: mapBackendErr(err, "settings.recoveryKey.copyFailed"),
       });
     }
   };
@@ -1892,10 +1915,10 @@ export default function App() {
         setShowInputRecoveryKey(false);
         setShowRecoveryModal(false);
         await fetchSummary();
-        setSuccess("تمت استعادة الخزنة بنجاح عبر مفتاح الطوارئ! يُنصح بتعيين رمز دخول جديد من الإعدادات.");
+        setSuccess(t("recoveryModal.success"));
       });
     } catch (err: any) {
-      setError(err?.toString() || "فشل الاستعادة: مفتاح الطوارئ غير صحيح أو غير مطابق");
+      setError(mapBackendErr(err, "recoveryModal.failed"));
     }
   };
 
@@ -1908,14 +1931,14 @@ export default function App() {
       if (savedPath) {
         showExportImportStatus({
           type: "success",
-          message: `تم تصدير نسخة الخزنة المشفرة بنجاح إلى:\n${savedPath}`,
+          message: t("settings.backup.exportSuccess", { path: savedPath }),
         });
       }
     } catch (err: any) {
       showExportImportStatus(
         {
           type: "error",
-          message: err?.toString() || "فشل تصدير الخزنة",
+          message: mapBackendErr(err, "settings.backup.exportFailed"),
         },
         { durationMs: null }
       );
@@ -1936,7 +1959,7 @@ export default function App() {
   const handlePerformImport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!importPassword.trim()) {
-      setImportModalError("يرجى إدخال كلمة مرور الخزنة المستوردة للتحقق من سلامة التشفير");
+      setImportModalError(t("importModal.enterPasswordError"));
       return;
     }
     try {
@@ -1953,28 +1976,26 @@ export default function App() {
         setExists(true);
         if (res.warning) {
           setWarning(
-            "تم استيراد الخزنة بنجاح مع تنبيه، يرجى إدخال كلمة المرور الخاصة بها لفتحها.",
-            res.warning
+            t("importModal.successWithWarning"),
+            mapBackendErr(res.warning, "importModal.successWithWarning")
           );
         } else {
-          setSuccess(
-            "تم استيراد الخزنة بنجاح، يرجى إدخال كلمة المرور الخاصة بها لفتحها."
-          );
+          setSuccess(t("importModal.success"));
         }
       }
     } catch (err: any) {
-      setImportModalError(err?.toString() || "فشل استيراد الخزنة");
+      setImportModalError(mapBackendErr(err, "importModal.failed"));
     } finally {
       setIsProcessingBackup(false);
     }
   };
 
-  // Open Vault File Location in Windows Explorer
+  // Open Vault File Location in OS File Manager
   const handleOpenVaultFolder = async () => {
     try {
       await invoke("open_vault_folder");
     } catch (err: any) {
-      setError(err?.toString() || "فشل فتح موقع الخزنة في المتصفح");
+      setError(mapBackendErr(err, "notifications.openFolderFailed"));
     }
   };
 
@@ -2044,7 +2065,7 @@ export default function App() {
         setEditPassword(generated);
       }
     } catch (err: any) {
-      const msg = err?.toString() || "فشل توليد كلمة المرور";
+      const msg = mapBackendErr(err, "notifications.generatePasswordFailed");
       if (target === "add") {
         setAddAccountError(msg);
       } else {
@@ -2108,7 +2129,7 @@ export default function App() {
     );
     if (!result.stale && result.error) {
       const err: any = result.error;
-      setEditAccountError(err?.toString() || "فشل استرجاع القيمة السرية المحفوظة");
+      setEditAccountError(mapBackendErr(err, "notifications.retrieveSecretFailed"));
     }
   };
 
@@ -2119,7 +2140,7 @@ export default function App() {
   const handleAddService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newServiceName.trim()) {
-      setAddServiceError("يرجى إدخال اسم الخدمة");
+      setAddServiceError(t("serviceForm.validation.enterServiceName"));
       return;
     }
     try {
@@ -2133,7 +2154,7 @@ export default function App() {
       setNewServiceIcon(null);
       setShowAddService(false);
     } catch (err: any) {
-      setAddServiceError(err?.toString() || "فشل إضافة التطبيق/الخدمة");
+      setAddServiceError(mapBackendErr(err, "notifications.addServiceFailed"));
     }
   };
 
@@ -2149,7 +2170,7 @@ export default function App() {
   const handleUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedServiceId || !editServiceName.trim()) {
-      setEditServiceError("يرجى إدخال اسم الخدمة");
+      setEditServiceError(t("serviceForm.validation.enterServiceName"));
       return;
     }
     try {
@@ -2163,7 +2184,7 @@ export default function App() {
       setSummary(updated);
       setShowEditService(false);
     } catch (err: any) {
-      setEditServiceError(err?.toString() || "فشل تحديث بيانات الخدمة");
+      setEditServiceError(mapBackendErr(err, "notifications.updateServiceFailed"));
     }
   };
 
@@ -2178,7 +2199,7 @@ export default function App() {
       setSelectedServiceId(null);
       setServiceToDelete(null);
     } catch (err: any) {
-      setError(err?.toString() || "فشل حذف الخدمة");
+      setError(mapBackendErr(err, "notifications.deleteServiceFailed"));
     } finally {
       setIsDeleting(false);
     }
@@ -2211,7 +2232,8 @@ export default function App() {
           cvv: cardCvv,
           pin: cardPin,
           notes: accNotes,
-        }
+        },
+        t("card.defaultBankLabel")
       );
 
       const updated = await invoke<VaultSummary>("add_account", { ...payload });
@@ -2219,7 +2241,7 @@ export default function App() {
       await fetchServiceAccounts(selectedServiceId);
       closeAddAccountModal();
     } catch (err: any) {
-      setAddAccountError(err?.toString() || "فشل إضافة الحساب");
+      setAddAccountError(mapBackendErr(err, "notifications.addAccountFailed"));
     } finally {
       setIsSavingAccount(false);
     }
@@ -2233,7 +2255,8 @@ export default function App() {
       prev && (prev.startsWith("add_") || prev.startsWith("edit_")) ? null : prev
     );
     setAccountFormMode(isCard ? "card" : "login");
-    setAccLabel(`${acc.label || (isCard ? "بطاقة" : "حساب")} (نسخة)`);
+    const fallbackLabel = t(isCard ? "account.duplicateCardFallback" : "account.duplicateItemFallback");
+    setAccLabel(`${acc.label || fallbackLabel} (${t("account.duplicateCopySuffix")})`);
     if (isCard) {
       setCardHolder(acc.username || "");
       setCardExpiry(acc.url || "");
@@ -2312,7 +2335,7 @@ export default function App() {
       await fetchServiceAccounts(selectedServiceId);
       closeEditAccountModal();
     } catch (err: any) {
-      setEditAccountError(err?.toString() || "فشل تحديث بيانات الحساب");
+      setEditAccountError(mapBackendErr(err, "notifications.updateAccountFailed"));
     } finally {
       setIsSavingAccount(false);
     }
@@ -2329,7 +2352,7 @@ export default function App() {
       await fetchServiceAccounts(serviceId);
       setAccountToDelete(null);
     } catch (err: any) {
-      setError(err?.toString() || "فشل حذف الحساب");
+      setError(mapBackendErr(err, "notifications.deleteAccountFailed"));
     } finally {
       setIsDeleting(false);
     }
@@ -2395,7 +2418,7 @@ export default function App() {
         triggerCopiedIndicator(`${isEditForm ? "edit" : "add"}_${field}`);
       }
     } catch (err: any) {
-      const msg = err?.toString() || "فشل نسخ القيمة السرية";
+      const msg = mapBackendErr(err, "notifications.copySecretFailed");
       if (isEditForm) {
         setEditAccountError(msg);
       } else {
@@ -2438,7 +2461,7 @@ export default function App() {
       }
       triggerCopiedIndicator(`${accountId}_${field}`);
     } catch (err: any) {
-      setError(err?.toString() || "فشل نسخ القيمة");
+      setError(mapBackendErr(err, "notifications.copyValueFailed"));
     }
   };
 
@@ -2457,13 +2480,13 @@ export default function App() {
     }
   };
 
-  // Dedicated Password Copy Handler (via native Windows secure clipboard)
+  // Dedicated Password Copy Handler (via native OS secure clipboard)
   const copyAccountPassword = async (serviceId: string, accountId: string) => {
     try {
       await invoke("copy_password", { serviceId, accountId });
       triggerCopiedIndicator(`${accountId}_password`);
     } catch (err: any) {
-      setError(err?.toString() || "فشل نسخ كلمة المرور");
+      setError(mapBackendErr(err, "notifications.copyPasswordFailed"));
     }
   };
 
@@ -2483,7 +2506,7 @@ export default function App() {
       const base64 = await processImageUpload(file);
       setter(base64);
     } catch (err: any) {
-      const msg = err?.toString() || "فشل معالجة الصورة";
+      const msg = mapBackendErr(err, "notifications.processImageFailed");
       if (setErr) setErr(msg);
       else setError(msg);
     }
@@ -2491,7 +2514,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center font-sans bg-background text-muted-foreground">
+      <div className="flex h-screen items-center justify-center font-sans bg-background text-muted-foreground" dir={activeDir}>
         <div className="text-center space-y-6">
           <img
             src={kinanaLogo}
@@ -2500,7 +2523,7 @@ export default function App() {
           />
           <div className="flex items-center justify-center gap-3 text-lg font-medium">
             <RefreshCw className="w-5 h-5 animate-spin text-primary" />
-            <span>جاري فتح Kinana والتحقق من الأمان...</span>
+            <span>{t("status.loadingApp")}</span>
           </div>
         </div>
       </div>
@@ -2510,14 +2533,14 @@ export default function App() {
   return (
     <div
       className="min-h-screen bg-background text-foreground font-sans flex flex-col selection:bg-primary selection:text-primary-foreground relative"
-      dir="rtl"
+      dir={activeDir}
     >
       {/* On-Screen Zoom HUD Toast */}
       {zoomHud.visible && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300">
           <div className="bg-primary text-primary-foreground font-bold px-6 py-2.5 rounded-full shadow-2xl border border-primary-foreground/20 flex items-center gap-2.5 text-base">
             <ZoomIn className="w-5 h-5" />
-            <span>نسبة التكبير: {zoomHud.text}</span>
+            <span>{t("status.zoomHud", { percent: zoomHud.text })}</span>
           </div>
         </div>
       )}
@@ -2546,7 +2569,7 @@ export default function App() {
             className="bg-card/95 backdrop-blur-md border border-border/80 text-foreground px-5 py-2 rounded-full shadow-2xl flex items-center gap-2.5 text-xs font-bold hover:bg-muted hover:border-primary/50 transition-all cursor-pointer"
           >
             <Minimize2 className="w-4 h-4 text-primary" />
-            <span>الخروج من وضع ملء الشاشة (F11 أو Esc)</span>
+            <span>{t("status.exitFullscreen")}</span>
           </button>
         </div>
       )}
@@ -2556,7 +2579,7 @@ export default function App() {
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg px-4 pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300">
           <div
             className={cn(
-              "backdrop-blur-xl border-2 rounded-2xl shadow-2xl p-4 flex items-start justify-between gap-3 text-right",
+              "backdrop-blur-xl border-2 rounded-2xl shadow-2xl p-4 flex items-start justify-between gap-3 text-start",
               notification.type === "success" && "bg-emerald-500/15 border-emerald-500/40 text-emerald-100",
               notification.type === "warning" && "bg-amber-500/15 border-amber-500/40 text-amber-100",
               notification.type === "error" && "bg-destructive/15 border-destructive/40 text-destructive-foreground"
@@ -2596,7 +2619,10 @@ export default function App() {
 
       {!unlocked ? (
         /* ================= AUTHENTICATION VIEW (LOCK SCREEN) ================= */
-        <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-background via-card/30 to-background">
+        <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-background via-card/30 to-background relative">
+          <div className="absolute top-5 end-6 z-20">
+            <LanguageSwitcher variant="minimal" />
+          </div>
           <Card className="w-full max-w-2xl border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 p-6 sm:p-8 rounded-3xl">
             <CardHeader className="text-center pb-6 pt-6">
               <div className="flex justify-center mb-5">
@@ -2607,7 +2633,7 @@ export default function App() {
                 />
               </div>
               <CardDescription className="text-lg text-muted-foreground font-medium pt-3 font-sans leading-relaxed">
-                خزنة كلمات المرور الآمنة والمشفرة محلياً بالكامل
+                {t("auth.tagline")}
               </CardDescription>
             </CardHeader>
 
@@ -2623,15 +2649,15 @@ export default function App() {
                 <form onSubmit={handleCreate} autoComplete="off" className="space-y-4">
                   <div>
                     <FormLabel htmlFor="create-vault-password" required className="mb-2">
-                      كلمة المرور الرئيسية
+                      {t("auth.create.passwordLabel")}
                     </FormLabel>
                     <SecretInput
                       id="create-vault-password"
                       buttonSize="lg"
                       revealed={showCreatePassword}
                       onToggleReveal={() => setShowCreatePassword((prev) => !prev)}
-                      revealLabel="إظهار كلمة المرور الرئيسية"
-                      hideLabel="إخفاء كلمة المرور الرئيسية"
+                      revealLabel={t("auth.create.showPassword")}
+                      hideLabel={t("auth.create.hidePassword")}
                       placeholder=""
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -2644,15 +2670,15 @@ export default function App() {
 
                   <div>
                     <FormLabel htmlFor="create-vault-confirm-password" required className="mb-2">
-                      تأكيد كلمة المرور الرئيسية
+                      {t("auth.create.confirmPasswordLabel")}
                     </FormLabel>
                     <SecretInput
                       id="create-vault-confirm-password"
                       buttonSize="lg"
                       revealed={showConfirmCreatePassword}
                       onToggleReveal={() => setShowConfirmCreatePassword((prev) => !prev)}
-                      revealLabel="إظهار تأكيد كلمة المرور الرئيسية"
-                      hideLabel="إخفاء تأكيد كلمة المرور الرئيسية"
+                      revealLabel={t("auth.create.showConfirmPassword")}
+                      hideLabel={t("auth.create.hideConfirmPassword")}
                       placeholder=""
                       value={confirmCreatePassword}
                       onChange={(e) => {
@@ -2664,7 +2690,7 @@ export default function App() {
                     />
                     {createValidation.showMismatchError && (
                       <p role="alert" className="text-sm font-bold text-rose-400 pt-1.5 text-start">
-                        كلمتا المرور غير متطابقتين
+                        {t("auth.create.mismatchError")}
                       </p>
                     )}
                   </div>
@@ -2672,7 +2698,7 @@ export default function App() {
                   <div className="p-4 rounded-2xl bg-muted/40 border border-border/50 text-sm text-muted-foreground leading-relaxed flex items-start gap-3 text-start">
                     <Info className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
                     <span>
-                      احتفظ بكلمة المرور الرئيسية ومفتاح الاسترداد في مكان آمن. إذا فقدتهما معاً، فلن تتمكن من استعادة الوصول إلى خزنتك.
+                      {t("auth.create.recoveryNotice")}
                     </span>
                   </div>
 
@@ -2681,11 +2707,11 @@ export default function App() {
                     disabled={!createValidation.canSubmit}
                     className="w-full min-h-14 text-lg font-bold shadow-xl rounded-2xl"
                   >
-                    <span>إنشاء الخزنة</span>
+                    <span>{t("auth.create.submit")}</span>
                   </Button>
 
                   <p className="text-xs text-muted-foreground text-center pt-0.5 leading-relaxed">
-                    لم يتم العثور على خزنة سابقة على هذا الجهاز
+                    {t("auth.create.noExistingVaultNote")}
                   </p>
 
                   <div className="pt-4 border-t border-border/40">
@@ -2697,7 +2723,7 @@ export default function App() {
                     >
                       <Upload className="w-4 h-4 shrink-0" />
                       <span>
-                        هل لديك نسخة سابقة؟ استيراد الخزنة (<bdi dir="ltr">.dat</bdi>)
+                        {t("auth.create.importExistingPrompt")} (<bdi dir="ltr">.dat</bdi>)
                       </span>
                     </Button>
                   </div>
@@ -2707,7 +2733,7 @@ export default function App() {
                 <form onSubmit={handleUnlock} autoComplete="off" className="space-y-6">
                   <div>
                     <FormLabel htmlFor="unlock-vault-password" centered required className="mb-2.5">
-                      أدخل رمز الدخول أو كلمة المرور الرئيسية
+                      {t("auth.unlock.passwordLabel")}
                     </FormLabel>
                     <SecretInput
                       id="unlock-vault-password"
@@ -2715,8 +2741,8 @@ export default function App() {
                       centered
                       revealed={showUnlockPassword}
                       onToggleReveal={() => setShowUnlockPassword(!showUnlockPassword)}
-                      revealLabel="إظهار الرمز"
-                      hideLabel="إخفاء الرمز"
+                      revealLabel={t("auth.unlock.showPassword")}
+                      hideLabel={t("auth.unlock.hidePassword")}
                       filledTrackingClass="tracking-widest"
                       placeholder="••••••••••••"
                       value={password}
@@ -2733,7 +2759,7 @@ export default function App() {
                       className="w-full h-16 text-xl font-bold shadow-xl rounded-2xl gap-2.5"
                     >
                       <Unlock className="w-6 h-6" />
-                      <span>فتح الخزنة</span>
+                      <span>{t("auth.unlock.submit")}</span>
                     </Button>
 
                     {autoUnlockActive && isAutoUnlockSupported && (
@@ -2751,20 +2777,20 @@ export default function App() {
                               }
                             );
                             if (!ok) {
-                              setError("فشل الفتح التلقائي: لم يتم العثور على رمز دخول محفوظ");
+                              setError(t("auth.unlock.autoUnlockMissing"));
                             }
                           } catch (e: any) {
                             const errStr = e?.toString() || "";
                             if (errStr.includes("No saved credential")) {
-                              setError("لم يتم العثور على رمز دخول محفوظ في مخزن النظام الآمن. يرجى إدخال الرمز يدوياً.");
+                              setError(t("auth.unlock.autoUnlockMissingDetailed"));
                             } else {
-                              setError(errStr || "فشل الفتح التلقائي");
+                              setError(mapBackendErr(errStr, "auth.unlock.autoUnlockFailed"));
                             }
                           }
                         }}
                       >
                         <Shield className="w-5 h-5 text-primary" />
-                        <span>فتح تلقائياً بدون كلمة مرور</span>
+                        <span>{t("auth.unlock.autoUnlockButton")}</span>
                       </Button>
                     )}
                   </div>
@@ -2777,7 +2803,7 @@ export default function App() {
                       className="text-sm font-semibold text-muted-foreground hover:text-foreground underline underline-offset-4 inline-flex items-center gap-1.5 transition-colors"
                     >
                       <KeyRound className="w-4 h-4 text-primary" />
-                      <span>نسيت كلمة المرور؟ استعادة الخزنة عبر مفتاح الطوارئ</span>
+                      <span>{t("auth.unlock.forgotPassword")}</span>
                     </button>
 
                     <button
@@ -2786,7 +2812,7 @@ export default function App() {
                       className="text-xs font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Upload className="w-3.5 h-3.5 text-primary" />
-                      <span>استيراد أو تبديل الخزنة من ملف (<bdi dir="ltr">.dat</bdi>)</span>
+                      <span>{t("auth.unlock.importOrSwitchVault")} (<bdi dir="ltr">.dat</bdi>)</span>
                     </button>
                   </div>
                 </form>
@@ -2818,8 +2844,8 @@ export default function App() {
               {/* Top Navigation Bar: Hidden completely during Fullscreen Mode! */}
           {!isFullscreen && (
             <header className="bg-card/85 backdrop-blur-xl border-b border-border/70 px-6 py-3 flex items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
-              {/* Right: App Brand & Status */}
-              <div className="flex items-center space-x-4 space-x-reverse shrink-0">
+              {/* Start: App Brand & Status */}
+              <div className="flex items-center gap-4 shrink-0">
                 <img
                   src={kinanaLogo}
                   alt="Kinana"
@@ -2830,7 +2856,10 @@ export default function App() {
                   variant="secondary"
                   className="px-3 py-1 font-bold text-xs rounded-full border border-border/60"
                 >
-                  مفتوحة ({summary?.total_services ?? 0} خدمات / {summary?.total_accounts ?? 0} حساب)
+                  {t("status.vaultStatusOpen", {
+                    services: t("status.servicesCount", { count: summary?.total_services ?? 0 }),
+                    accounts: t("status.accountsCount", { count: summary?.total_accounts ?? 0 }),
+                  })}
                 </Badge>
               </div>
 
@@ -2847,7 +2876,7 @@ export default function App() {
                         ? "shadow-sm text-primary-foreground"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
-                    title="عرض شبكة"
+                    title={t("toolbar.gridView")}
                   >
                     <LayoutGrid className="w-4 h-4" />
                   </Button>
@@ -2860,7 +2889,7 @@ export default function App() {
                         ? "shadow-sm text-primary-foreground"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
-                    title="عرض قائمة"
+                    title={t("toolbar.listView")}
                   >
                     <List className="w-4 h-4" />
                   </Button>
@@ -2875,8 +2904,8 @@ export default function App() {
                     }`}
                     title={
                       isAlphabeticallySorted
-                        ? "إلغاء الترتيب الأبجدي واستعادة الترتيب السابق"
-                        : "ترتيب الخدمات أبجدياً (أ - ي)"
+                        ? t("toolbar.sortAlphaCancel")
+                        : t("toolbar.sortAlpha")
                     }
                   >
                     <ArrowDownAZ className="w-4 h-4" />
@@ -2897,7 +2926,7 @@ export default function App() {
                         ? "bg-amber-500 text-black font-bold shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted"
                     }`}
-                    title={selectionMode ? "إلغاء وضع التحديد" : "وضع تحديد وحذف خدمات متعددة"}
+                    title={selectionMode ? t("toolbar.selectionCancel") : t("toolbar.selectionStart")}
                   >
                     <CheckSquare className="w-4 h-4" />
                   </Button>
@@ -2912,8 +2941,8 @@ export default function App() {
                     className="h-9 w-9 rounded-xl border border-border/50 shadow-sm bg-card hover:bg-muted"
                     title={
                       showCardTitles
-                        ? "إخفاء أسماء الخدمات على البطاقات (العرض النظيف)"
-                        : "إظهار أسماء الخدمات دائماً على البطاقات"
+                        ? t("toolbar.showTitlesHide")
+                        : t("toolbar.showTitlesShow")
                     }
                   >
                     {showCardTitles ? (
@@ -2933,7 +2962,7 @@ export default function App() {
                     size="icon"
                     onClick={() => applyZoom(zoomLevel - 0.1)}
                     className="h-9 w-9 rounded-lg hover:bg-muted"
-                    title="تصغير (Ctrl + -)"
+                    title={t("toolbar.zoomOut")}
                   >
                     <ZoomOut className="w-4 h-4" />
                   </Button>
@@ -2941,7 +2970,7 @@ export default function App() {
                     type="button"
                     onClick={() => applyZoom(1.0)}
                     className="px-2 font-bold text-xs hover:text-primary transition-colors"
-                    title="إعادة ضبط الحجم إلى 100% (Ctrl + 0)"
+                    title={t("toolbar.zoomReset")}
                   >
                     {Math.round(zoomLevel * 100)}%
                   </button>
@@ -2950,7 +2979,7 @@ export default function App() {
                     size="icon"
                     onClick={() => applyZoom(zoomLevel + 0.1)}
                     className="h-9 w-9 rounded-lg hover:bg-muted"
-                    title="تكبير (Ctrl + =)"
+                    title={t("toolbar.zoomIn")}
                   >
                     <ZoomIn className="w-4 h-4" />
                   </Button>
@@ -2958,7 +2987,7 @@ export default function App() {
 
                 <div className="w-px h-5 bg-border/80" />
 
-                {/* + إضافة خدمة Button - Icon Only as requested! */}
+                {/* Add Service Button - Icon Only */}
                 <Button
                   size="icon"
                   onClick={() => {
@@ -2966,13 +2995,13 @@ export default function App() {
                     setShowAddService(true);
                   }}
                   className="h-9 w-9 rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground"
-                  title="إضافة خدمة أو تطبيق جديد"
+                  title={t("toolbar.addService")}
                 >
                   <Plus className="w-4 h-4" />
                 </Button>
               </div>
 
-              {/* Left: Action Buttons (Fullscreen button removed, F11 shortcut works) */}
+              {/* End: Action Buttons (Fullscreen button removed, F11 shortcut works) */}
               <div className="flex items-center gap-2 shrink-0">
                 {/* Quick Export Vault */}
                 <Button
@@ -2981,7 +3010,7 @@ export default function App() {
                   disabled={isProcessingBackup}
                   onClick={handleExportVault}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
-                  title="تصدير نسخة احتياطية من الخزنة (.dat)"
+                  title={t("toolbar.exportVault")}
                 >
                   <Download className="w-4 h-4 text-white" />
                 </Button>
@@ -2993,7 +3022,7 @@ export default function App() {
                   disabled={isProcessingBackup}
                   onClick={handleOpenImportModal}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
-                  title="استيراد خزنة من ملف (.dat)"
+                  title={t("toolbar.importVault")}
                 >
                   <Upload className="w-4 h-4 text-white" />
                 </Button>
@@ -3004,7 +3033,7 @@ export default function App() {
                   size="icon"
                   onClick={handleOpenVaultFolder}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
-                  title="فتح مجلد الخزنة"
+                  title={t("toolbar.openVaultFolder")}
                 >
                   <FolderOpen className="w-4 h-4 text-white" />
                 </Button>
@@ -3023,7 +3052,7 @@ export default function App() {
                     setShowSettings(true);
                   }}
                   className="h-10 w-10 rounded-xl border-border/80 shadow-sm text-white hover:text-white hover:bg-muted transition-colors"
-                  title="إعدادات الأمان واستعادة الخزنة"
+                  title={t("toolbar.settings")}
                 >
                   <Settings className="w-4 h-4 text-white" />
                 </Button>
@@ -3035,7 +3064,7 @@ export default function App() {
                   className="h-10 px-4 rounded-xl gap-2 font-bold shadow-sm text-xs"
                 >
                   <Lock className="w-4 h-4" />
-                  <span>قفل</span>
+                  <span>{t("toolbar.lock")}</span>
                 </Button>
               </div>
             </header>
@@ -3059,12 +3088,12 @@ export default function App() {
                     setShowAddService(true);
                   }}
                   className="group relative w-28 h-28 sm:w-32 sm:h-32 rounded-3xl bg-muted/40 hover:bg-muted/80 border-2 border-dashed border-border/80 hover:border-primary flex items-center justify-center text-muted-foreground hover:text-primary transition-all duration-300 hover:scale-105 hover:shadow-2xl cursor-pointer"
-                  title="إضافة خدمة جديدة"
+                  title={t("emptyVault.addServiceTitle")}
                 >
                   <Plus className="w-12 h-12 transition-transform duration-300 group-hover:rotate-90 group-hover:scale-110" />
                 </button>
                 <h3 className="text-2xl font-bold font-thamaniah text-foreground">
-                  لا توجد خدمات مضافة حتى الآن
+                  {t("emptyVault.title")}
                 </h3>
               </div>
             ) : viewMode === "netflix" ? (
@@ -3085,7 +3114,12 @@ export default function App() {
                         tabIndex={0}
                         aria-label={
                           selectionMode
-                            ? `${service.name} (${selectedServiceIds.includes(service.id) ? "محددة" : "غير محددة"})`
+                            ? t(
+                                selectedServiceIds.includes(service.id)
+                                  ? "services.selectedAria"
+                                  : "services.unselectedAria",
+                                { name: service.name }
+                              )
                             : service.name
                         }
                         onPointerDown={(e) => handlePointerDown(e, service.id)}
@@ -3104,11 +3138,11 @@ export default function App() {
                             : "border-border/70 hover:border-primary hover:scale-[1.03]"
                         }`}
                       >
-                        {/* Pinned Badge (Top Left in RTL) */}
+                        {/* Pinned Badge */}
                         {pinnedServiceIds.includes(service.id) && (
                           <div
                             className="kinana-card-badge-pos kinana-card-pin absolute z-20 bg-black/80 text-white rounded-xl border border-white/20 shadow-md flex items-center justify-center pointer-events-none"
-                            title="خدمة مثبتة في البداية"
+                            title={t("services.pinnedTooltip")}
                           >
                             <Pin className="w-3.5 h-3.5 fill-white text-white rotate-45" />
                           </div>
@@ -3197,33 +3231,33 @@ export default function App() {
                         </div>
                       </Card>
                     </ContextMenuTrigger>
-                    <ContextMenuContent className="w-56 rounded-2xl bg-card/95 backdrop-blur-md border border-border/80 shadow-2xl p-1.5 text-right font-medium text-sm">
+                    <ContextMenuContent className="w-56 rounded-2xl bg-card/95 backdrop-blur-md border border-border/80 shadow-2xl p-1.5 text-start font-medium text-sm">
                       <ContextMenuItem
                         onClick={() => setSelectedServiceId(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2 font-bold"
                       >
-                        <span>تعديل البيانات والحسابات</span>
+                        <span>{t("services.contextMenu.editDataAndAccounts")}</span>
                         <KeyRound className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => openEditServiceModal(service)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>تعديل الخدمة والشعار</span>
+                        <span>{t("services.contextMenu.editServiceAndLogo")}</span>
                         <Pencil className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => handleDuplicateService(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>تكرار الخدمة</span>
+                        <span>{t("services.contextMenu.duplicateService")}</span>
                         <Copy className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => togglePinService(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>{pinnedServiceIds.includes(service.id) ? "إلغاء تثبيت الخدمة" : "تثبيت في البداية"}</span>
+                        <span>{t(pinnedServiceIds.includes(service.id) ? "services.contextMenu.unpin" : "services.contextMenu.pin")}</span>
                         {pinnedServiceIds.includes(service.id) ? (
                           <PinOff className="w-4 h-4 text-white" />
                         ) : (
@@ -3234,7 +3268,7 @@ export default function App() {
                         onClick={() => enterSelectionModeWithService(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>تحديد وحذف</span>
+                        <span>{t("services.contextMenu.selectAndDelete")}</span>
                         <CheckSquare className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuSeparator className="my-1 bg-border/60" />
@@ -3242,7 +3276,7 @@ export default function App() {
                         onClick={() => setServiceToDelete(service)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-destructive/20 text-destructive transition-colors gap-2"
                       >
-                        <span>حذف</span>
+                        <span>{t("services.contextMenu.delete")}</span>
                         <Trash2 className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                     </ContextMenuContent>
@@ -3270,7 +3304,12 @@ export default function App() {
                         tabIndex={0}
                         aria-label={
                           selectionMode
-                            ? `${service.name} (${selectedServiceIds.includes(service.id) ? "محددة" : "غير محددة"})`
+                            ? t(
+                                selectedServiceIds.includes(service.id)
+                                  ? "services.selectedAria"
+                                  : "services.unselectedAria",
+                                { name: service.name }
+                              )
                             : service.name
                         }
                         onPointerDown={(e) => handlePointerDown(e, service.id)}
@@ -3361,10 +3400,10 @@ export default function App() {
                               {pinnedServiceIds.includes(service.id) && (
                                 <span
                                   className="inline-flex items-center gap-1 bg-white/10 text-white text-[11px] px-2 py-0.5 rounded-lg font-bold shrink-0 pointer-events-none border border-white/20"
-                                  title="خدمة مثبتة"
+                                  title={t("services.pinnedShortTooltip")}
                                 >
                                   <Pin className="w-3 h-3 fill-white rotate-45" />
-                                  <span>مثبتة</span>
+                                  <span>{t("common.pinned")}</span>
                                 </span>
                               )}
                             </div>
@@ -3372,13 +3411,13 @@ export default function App() {
                               style={{ fontSize: `${zoomMetrics.listSubtitleFontRem}rem` }}
                               className="text-muted-foreground font-medium pointer-events-none block truncate text-start"
                             >
-                              انقر لفتح الحسابات وإدارة كلمات المرور
+                              {t("services.clickToOpenAccounts")}
                             </span>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-3 shrink-0">
-                          {/* Quick Actions: تعديل البيانات، تعديل الخدمة، تكرار، تثبيت، حذف */}
+                          {/* Quick Actions */}
                           <div className="flex items-center gap-1.5 bg-muted/40 p-1.5 rounded-xl border border-border/50">
                             <Button
                               variant="ghost"
@@ -3388,7 +3427,7 @@ export default function App() {
                                 setSelectedServiceId(service.id);
                               }}
                               className="h-8 w-8 rounded-lg hover:bg-muted text-white transition-colors"
-                              title="تعديل البيانات والحسابات"
+                              title={t("services.contextMenu.editDataAndAccounts")}
                             >
                               <KeyRound className="w-4 h-4 text-white" />
                             </Button>
@@ -3400,7 +3439,7 @@ export default function App() {
                                 openEditServiceModal(service);
                               }}
                               className="h-8 w-8 rounded-lg hover:bg-muted text-white transition-colors"
-                              title="تعديل اسم وشعار الخدمة"
+                              title={t("services.contextMenu.editServiceTooltip")}
                             >
                               <Pencil className="w-4 h-4 text-white" />
                             </Button>
@@ -3412,7 +3451,7 @@ export default function App() {
                                 handleDuplicateService(service.id);
                               }}
                               className="h-8 w-8 rounded-lg hover:bg-muted text-white transition-colors"
-                              title="تكرار الخدمة"
+                              title={t("services.contextMenu.duplicateService")}
                             >
                               <Copy className="w-4 h-4 text-white" />
                             </Button>
@@ -3430,8 +3469,8 @@ export default function App() {
                               }`}
                               title={
                                 pinnedServiceIds.includes(service.id)
-                                  ? "إلغاء تثبيت الخدمة"
-                                  : "تثبيت الخدمة في البداية"
+                                  ? t("services.contextMenu.unpin")
+                                  : t("services.contextMenu.pinTooltip")
                               }
                             >
                               {pinnedServiceIds.includes(service.id) ? (
@@ -3448,7 +3487,7 @@ export default function App() {
                                 setServiceToDelete(service);
                               }}
                               className="h-8 w-8 rounded-lg hover:bg-destructive/20 hover:text-destructive text-white transition-colors"
-                              title="حذف الخدمة"
+                              title={t("services.contextMenu.deleteTooltip")}
                             >
                               <Trash2 className="w-4 h-4 text-white" />
                             </Button>
@@ -3458,40 +3497,38 @@ export default function App() {
                             variant="secondary"
                             className="px-4 py-2 font-bold text-sm rounded-xl border border-border/60 pointer-events-none"
                           >
-                            {service.accounts.length === 1
-                              ? "حساب واحد"
-                              : `${service.accounts.length} حسابات`}
+                            {t("status.serviceCardAccounts", { count: service.accounts.length })}
                           </Badge>
                         </div>
                       </div>
                     </ContextMenuTrigger>
-                    <ContextMenuContent className="w-56 rounded-2xl bg-card/95 backdrop-blur-md border border-border/80 shadow-2xl p-1.5 text-right font-medium text-sm">
+                    <ContextMenuContent className="w-56 rounded-2xl bg-card/95 backdrop-blur-md border border-border/80 shadow-2xl p-1.5 text-start font-medium text-sm">
                       <ContextMenuItem
                         onClick={() => setSelectedServiceId(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2 font-bold"
                       >
-                        <span>تعديل البيانات والحسابات</span>
+                        <span>{t("services.contextMenu.editDataAndAccounts")}</span>
                         <KeyRound className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => openEditServiceModal(service)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>تعديل الخدمة والشعار</span>
+                        <span>{t("services.contextMenu.editServiceAndLogo")}</span>
                         <Pencil className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => handleDuplicateService(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>تكرار الخدمة</span>
+                        <span>{t("services.contextMenu.duplicateService")}</span>
                         <Copy className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => togglePinService(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>{pinnedServiceIds.includes(service.id) ? "إلغاء تثبيت الخدمة" : "تثبيت في البداية"}</span>
+                        <span>{t(pinnedServiceIds.includes(service.id) ? "services.contextMenu.unpin" : "services.contextMenu.pin")}</span>
                         {pinnedServiceIds.includes(service.id) ? (
                           <PinOff className="w-4 h-4 text-white" />
                         ) : (
@@ -3502,7 +3539,7 @@ export default function App() {
                         onClick={() => enterSelectionModeWithService(service.id)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
                       >
-                        <span>تحديد وحذف</span>
+                        <span>{t("services.contextMenu.selectAndDelete")}</span>
                         <CheckSquare className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                       <ContextMenuSeparator className="my-1 bg-border/60" />
@@ -3510,7 +3547,7 @@ export default function App() {
                         onClick={() => setServiceToDelete(service)}
                         className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-destructive/20 text-destructive transition-colors gap-2"
                       >
-                        <span>حذف</span>
+                        <span>{t("services.contextMenu.delete")}</span>
                         <Trash2 className="w-4 h-4 text-white" />
                       </ContextMenuItem>
                     </ContextMenuContent>
@@ -3526,7 +3563,12 @@ export default function App() {
               <div className="bg-card/95 backdrop-blur-2xl border-2 border-primary/50 shadow-2xl rounded-2xl px-6 py-3.5 flex items-center gap-5 text-foreground">
                 <div className="flex items-center gap-2 font-bold text-sm">
                   <CheckSquare className="w-5 h-5 text-primary" />
-                  <span>تم تحديد {selectedServiceIds.length} من {summary?.services.length || 0}</span>
+                  <span>
+                    {t("services.selectionBar.selectedOf", {
+                      selected: selectedServiceIds.length,
+                      total: summary?.services.length || 0,
+                    })}
+                  </span>
                 </div>
 
                 <div className="h-5 w-[1px] bg-border" />
@@ -3547,12 +3589,12 @@ export default function App() {
                     {selectedServiceIds.length === (summary?.services.length || 0) ? (
                       <>
                         <Square className="w-3.5 h-3.5" />
-                        <span>إلغاء تحديد الكل</span>
+                        <span>{t("services.selectionBar.deselectAll")}</span>
                       </>
                     ) : (
                       <>
                         <CheckCheck className="w-3.5 h-3.5 text-primary" />
-                        <span>تحديد الكل</span>
+                        <span>{t("services.selectionBar.selectAll")}</span>
                       </>
                     )}
                   </Button>
@@ -3565,7 +3607,7 @@ export default function App() {
                     className="h-9 px-4 rounded-xl gap-2 font-bold text-xs shadow-md"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>حذف المحددة ({selectedServiceIds.length})</span>
+                    <span>{t("services.selectionBar.deleteSelected", { count: selectedServiceIds.length })}</span>
                   </Button>
 
                   <Button
@@ -3576,7 +3618,7 @@ export default function App() {
                       setSelectedServiceIds([]);
                     }}
                     className="h-9 w-9 rounded-xl hover:bg-muted"
-                    title="إلغاء وضع التحديد (Esc)"
+                    title={t("services.selectionBar.exitTooltip")}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -3589,23 +3631,9 @@ export default function App() {
           <DestructiveConfirmDialog
             open={showBatchDeleteModal}
             onOpenChange={setShowBatchDeleteModal}
-            title={
-              selectedServiceIds.length === 1
-                ? "تأكيد حذف الخدمة المحددة"
-                : "تأكيد حذف الخدمات المحددة"
-            }
-            description={
-              <>
-                أنت على وشك حذف{" "}
-                <strong className="text-foreground">{selectedServiceIds.length}</strong>{" "}
-                {selectedServiceIds.length === 1 ? "خدمة" : "خدمات"} مع كافة الحسابات وكلمات المرور والبيانات المحفوظة داخلها نهائياً. لا يمكن التراجع عن هذا الإجراء.
-              </>
-            }
-            confirmLabel={
-              selectedServiceIds.length === 1
-                ? "حذف الخدمة"
-                : `حذف المحدد (${selectedServiceIds.length})`
-            }
+            title={t("confirmDelete.bulkTitle", { count: selectedServiceIds.length })}
+            description={t("confirmDelete.bulkDesc", { count: selectedServiceIds.length })}
+            confirmLabel={t("confirmDelete.bulkConfirm", { count: selectedServiceIds.length })}
             isSubmitting={isDeleting}
             onCancel={() => setShowBatchDeleteModal(false)}
             onConfirm={handleConfirmBatchDelete}
@@ -3614,7 +3642,7 @@ export default function App() {
       </ContextMenuTrigger>
 
       {/* Page Background Context Menu (Right click anywhere across full viewport / empty space) */}
-      <ContextMenuContent className="w-60 rounded-2xl bg-card/95 backdrop-blur-md border border-border/80 shadow-2xl p-1.5 text-right font-medium text-sm">
+      <ContextMenuContent className="w-60 rounded-2xl bg-card/95 backdrop-blur-md border border-border/80 shadow-2xl p-1.5 text-start font-medium text-sm">
         <ContextMenuItem
           onClick={() => {
             setAddServiceError(null);
@@ -3622,7 +3650,7 @@ export default function App() {
           }}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>إنشاء خدمة جديدة</span>
+          <span>{t("services.contextMenu.createNew")}</span>
           <Plus className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuSeparator className="my-1 bg-border/60" />
@@ -3631,7 +3659,7 @@ export default function App() {
           disabled={isProcessingBackup}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>تصدير نسخة الخزنة (<bdi dir="ltr">.dat</bdi>)</span>
+          <span>{t("services.contextMenu.exportVault")} (<bdi dir="ltr">.dat</bdi>)</span>
           <Download className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuItem
@@ -3639,7 +3667,7 @@ export default function App() {
           disabled={isProcessingBackup}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>استيراد نسخة خزنة (<bdi dir="ltr">.dat</bdi>)</span>
+          <span>{t("services.contextMenu.importVault")} (<bdi dir="ltr">.dat</bdi>)</span>
           <Upload className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuSeparator className="my-1 bg-border/60" />
@@ -3647,14 +3675,14 @@ export default function App() {
           onClick={() => setSelectionMode(true)}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>تحديد وحذف خدمات متعددة</span>
+          <span>{t("services.contextMenu.selectMultiple")}</span>
           <CheckSquare className="w-4 h-4 text-white" />
         </ContextMenuItem>
         <ContextMenuItem
           onClick={handleOpenVaultFolder}
           className="flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-muted transition-colors text-foreground gap-2"
         >
-          <span>فتح مسار ملف الخزنة</span>
+          <span>{t("services.contextMenu.openFolder")}</span>
           <FolderOpen className="w-4 h-4 text-white" />
         </ContextMenuItem>
       </ContextMenuContent>
@@ -3697,7 +3725,7 @@ export default function App() {
                       {selectedService.name}
                     </DialogTitle>
                     <DialogDescription className="text-sm font-semibold text-muted-foreground mt-1 text-start">
-                      {serviceAccounts.length} حساب مسجل
+                      {t("status.registeredAccounts", { count: serviceAccounts.length })}
                     </DialogDescription>
                   </div>
                 </div>
@@ -3711,7 +3739,7 @@ export default function App() {
                     className="h-11 px-4 rounded-xl gap-2 font-bold border-border/80 shadow-sm"
                   >
                     <Pencil className="w-4 h-4 text-primary" />
-                    <span>تعديل الخدمة والصورة</span>
+                    <span>{t("serviceDetail.editServiceAndImage")}</span>
                   </Button>
                   <Button
                     onClick={() => {
@@ -3724,14 +3752,14 @@ export default function App() {
                     className="h-11 px-5 rounded-xl gap-2 font-bold shadow-md"
                   >
                     <Plus className="w-5 h-5" />
-                    <span>إضافة حساب</span>
+                    <span>{t("serviceDetail.addAccount")}</span>
                   </Button>
                   <Button
                     variant="destructive"
                     size="icon"
                     onClick={() => setServiceToDelete(selectedService)}
                     className="h-11 w-11 rounded-xl shadow-sm"
-                    title="حذف الخدمة بالكامل"
+                    title={t("serviceDetail.deleteServiceTooltip")}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -3743,7 +3771,7 @@ export default function App() {
                 {loadingAccounts ? (
                   <div className="py-12 text-center text-muted-foreground flex items-center justify-center gap-2">
                     <RefreshCw className="w-5 h-5 animate-spin text-primary" />
-                    <span>جاري تحميل بيانات الحسابات...</span>
+                    <span>{t("serviceDetail.loadingAccounts")}</span>
                   </div>
                 ) : serviceAccounts.length === 0 ? (
                   <div className="text-center py-14 bg-muted/20 rounded-2xl border-2 border-dashed border-border/60">
@@ -3759,7 +3787,7 @@ export default function App() {
                       className="h-12 px-6 rounded-xl gap-2 font-bold"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>إضافة أول حساب الآن</span>
+                      <span>{t("serviceDetail.addFirstAccount")}</span>
                     </Button>
                   </div>
                 ) : (
@@ -3767,7 +3795,7 @@ export default function App() {
                     const isCard = isAccountCard(acc);
 
                     if (isCard) {
-                      const brand = detectCardBrand(acc.username, selectedService?.name);
+                      const brand = detectCardBrand(acc.username, selectedService?.name, isRtl);
                       const cleanNotes = extractCleanCardNotes(acc.notes);
                       const isCvvRevealed = revealedCardCvvs[acc.id] || false;
                       const isPinRevealed = revealedCardPins[acc.id] || false;
@@ -3809,8 +3837,8 @@ export default function App() {
                                 <path d="M12 19a8.5 8.5 0 0 1 0-12" />
                                 <path d="M15.5 21.5a12 12 0 0 1 0-17" />
                               </svg>
-                              <span className="text-xl font-bold font-thamaniah text-white pr-1 truncate leading-relaxed py-0.5">
-                                {acc.label || "بطاقة دفع"}
+                              <span className="text-xl font-bold font-thamaniah text-white pe-1 truncate leading-relaxed py-0.5">
+                                {acc.label || t("card.defaultLabel")}
                               </span>
                             </div>
 
@@ -3823,20 +3851,20 @@ export default function App() {
                                 size="sm"
                                 onClick={() => handleDuplicateAccount(acc)}
                                 className="h-9 px-3 rounded-xl gap-1.5 text-xs font-bold bg-white/5 border-white/20 text-white hover:bg-white/15 transition-colors"
-                                title="تكرار هذه البطاقة"
+                                title={t("card.duplicateTooltip")}
                               >
                                 <CopyPlus className="w-3.5 h-3.5" />
-                                <span>تكرار</span>
+                                <span>{t("common.duplicate")}</span>
                               </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => openEditAccountModal(acc)}
                                 className="h-9 px-3 rounded-xl gap-1.5 text-xs font-bold bg-white/5 border-white/20 text-white hover:bg-white/15"
-                                title="تعديل بيانات البطاقة"
+                                title={t("card.editTooltip")}
                               >
                                 <Pencil className="w-3.5 h-3.5 text-primary" />
-                                <span>تعديل</span>
+                                <span>{t("common.edit")}</span>
                               </Button>
                               <Button
                                 variant="ghost"
@@ -3845,12 +3873,12 @@ export default function App() {
                                   setAccountToDelete({
                                     serviceId: selectedService.id,
                                     accountId: acc.id,
-                                    label: acc.label || acc.username || "هذه البطاقة",
+                                    label: acc.label || acc.username || t("card.copyTargetFallback"),
                                     isCard: true,
                                   })
                                 }
                                 className="h-9 w-9 rounded-xl text-rose-400 hover:bg-rose-500/20"
-                                title="حذف البطاقة"
+                                title={t("card.deleteTooltip")}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
@@ -3861,11 +3889,17 @@ export default function App() {
                           <div className="relative z-10 my-4 bg-black/45 p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-4">
                             <div className="flex-1 min-w-0 text-start">
                               <span className="text-[11px] tracking-normal text-slate-400 font-bold block mb-1">
-                                رقم البطاقة (<bdi dir="ltr">Card Number</bdi>)
+                                {isRtl ? (
+                                  <>
+                                    {t("card.numberLabel")} (<bdi dir="ltr">Card Number</bdi>)
+                                  </>
+                                ) : (
+                                  t("card.numberLabel")
+                                )}
                               </span>
                               <div className="font-mono text-xl sm:text-2xl font-bold tracking-[0.22em] text-white text-start" dir="ltr">
                                 {!acc.has_password
-                                  ? "—"
+                                  ? t("common.dash")
                                   : revealedAccountPasswords[acc.id] && acc.password
                                   ? acc.password.replace(/(.{4})/g, "$1 ").trim()
                                   : "•••• •••• •••• ••••"}
@@ -3879,7 +3913,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => toggleRevealAccountPassword(selectedService.id, acc)}
                                   className="h-10 w-10 p-0 rounded-xl text-slate-400 hover:text-white hover:bg-white/10"
-                                  title={revealedAccountPasswords[acc.id] ? "إخفاء رقم البطاقة" : "إظهار رقم البطاقة"}
+                                  title={revealedAccountPasswords[acc.id] ? t("card.hideNumber") : t("card.showNumber")}
                                 >
                                   {revealedAccountPasswords[acc.id] ? (
                                     <EyeOff className="w-4 h-4" />
@@ -3896,12 +3930,12 @@ export default function App() {
                                   {copiedKey === `${acc.id}_password` ? (
                                     <>
                                       <Check className="w-4 h-4 text-emerald-300" />
-                                      <span>تم نسخ الرقم!</span>
+                                      <span>{t("card.copiedNumber")}</span>
                                     </>
                                   ) : (
                                     <>
                                       <Copy className="w-4 h-4" />
-                                      <span>نسخ رقم البطاقة</span>
+                                      <span>{t("card.copyNumber")}</span>
                                     </>
                                   )}
                                 </Button>
@@ -3915,10 +3949,10 @@ export default function App() {
                             <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
                               <div className="min-w-0 pe-1 flex-1 text-start">
                                 <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
-                                  حامل البطاقة
+                                  {t("card.holderLabel")}
                                 </span>
                                 <span dir="auto" className="font-sans font-bold text-white tracking-normal block truncate uppercase leading-relaxed py-0.5">
-                                  {acc.username || "—"}
+                                  {acc.username || t("common.dash")}
                                 </span>
                               </div>
                               {acc.username && (
@@ -3927,7 +3961,7 @@ export default function App() {
                                   size="sm"
                                   onClick={() => copyFieldValue(acc.id, "holder", acc.username)}
                                   className="h-7 w-7 p-0 text-slate-400 hover:text-white shrink-0"
-                                  title="نسخ اسم حامل البطاقة"
+                                  title={t("card.copyHolderTooltip")}
                                 >
                                   {copiedKey === `${acc.id}_holder` ? (
                                     <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -3942,7 +3976,7 @@ export default function App() {
                             <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
                               <div className="text-start">
                                 <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
-                                  تنتهي في
+                                  {t("card.expiryLabel")}
                                 </span>
                                 <span dir="ltr" className="font-mono font-bold text-white block">
                                   {acc.url || "MM/YY"}
@@ -3954,7 +3988,7 @@ export default function App() {
                                   size="sm"
                                   onClick={() => copyFieldValue(acc.id, "url", acc.url)}
                                   className="h-7 w-7 p-0 text-slate-400 hover:text-white"
-                                  title="نسخ تاريخ الانتهاء"
+                                  title={t("card.copyExpiryTooltip")}
                                 >
                                   {copiedKey === `${acc.id}_url` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                                 </Button>
@@ -3965,10 +3999,10 @@ export default function App() {
                             <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
                               <div className="text-start">
                                 <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
-                                  رمز الأمان <bdi dir="ltr">CVV</bdi>
+                                  {t("card.cvvLabel")} <bdi dir="ltr">CVV</bdi>
                                 </span>
                                 <span dir="ltr" className="font-mono font-bold text-amber-300 block">
-                                  {isCvvRevealed ? (acc.recovery_key || "•••") : (acc.has_recovery_key ? "•••" : "—")}
+                                  {isCvvRevealed ? (acc.recovery_key || "•••") : (acc.has_recovery_key ? "•••" : t("common.dash"))}
                                 </span>
                               </div>
                               {acc.has_recovery_key && (
@@ -3978,7 +4012,7 @@ export default function App() {
                                     size="sm"
                                     onClick={() => toggleRevealCardCvv(selectedService.id, acc)}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
-                                    title={isCvvRevealed ? "إخفاء" : "إظهار"}
+                                    title={isCvvRevealed ? t("common.hide") : t("common.show")}
                                   >
                                     {isCvvRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                                   </Button>
@@ -3987,7 +4021,7 @@ export default function App() {
                                     size="sm"
                                     onClick={() => copyFieldValue(acc.id, "cvv")}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
-                                    title="نسخ CVV"
+                                    title={t("card.copyCvvTooltip")}
                                   >
                                     {copiedKey === `${acc.id}_cvv` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                                   </Button>
@@ -4000,7 +4034,7 @@ export default function App() {
                               <div className="bg-black/30 p-3 rounded-xl border border-white/10 flex items-center justify-between">
                                 <div className="text-start">
                                   <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
-                                    الرمز السري <bdi dir="ltr">PIN</bdi>
+                                    {t("card.pinLabel")} <bdi dir="ltr">PIN</bdi>
                                   </span>
                                   <span dir="ltr" className="font-mono font-bold text-emerald-400 block">
                                     {isPinRevealed ? (revealedCardPinValues[acc.id] || "••••") : "••••"}
@@ -4012,7 +4046,7 @@ export default function App() {
                                     size="sm"
                                     onClick={() => toggleRevealCardPin(selectedService.id, acc)}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
-                                    title={isPinRevealed ? "إخفاء" : "إظهار"}
+                                    title={isPinRevealed ? t("common.hide") : t("common.show")}
                                   >
                                     {isPinRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                                   </Button>
@@ -4021,7 +4055,7 @@ export default function App() {
                                     size="sm"
                                     onClick={() => copyFieldValue(acc.id, "pin")}
                                     className="h-7 w-7 p-0 text-slate-400 hover:text-white"
-                                    title="نسخ PIN"
+                                    title={t("card.copyPinTooltip")}
                                   >
                                     {copiedKey === `${acc.id}_pin` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                                   </Button>
@@ -4030,10 +4064,10 @@ export default function App() {
                             ) : (
                               <div className="bg-black/30 p-3 rounded-xl border border-white/10 text-start">
                                 <span className="text-[10px] tracking-normal text-slate-400 font-bold block mb-0.5">
-                                  حالة الحماية
+                                  {t("card.securityStatusLabel")}
                                 </span>
                                 <span className="font-sans font-bold text-emerald-400 text-xs block">
-                                  مشفرة ومؤمنة
+                                  {t("card.encryptedSecured")}
                                 </span>
                               </div>
                             )}
@@ -4042,14 +4076,14 @@ export default function App() {
                           {/* Extra Notes */}
                           {cleanNotes && (
                             <div className="relative z-10 pt-3 border-t border-white/10 text-xs text-slate-300 flex items-center justify-between">
-                              <span dir="auto" className="truncate pe-2 text-start leading-relaxed py-0.5"><strong className="text-slate-400">ملاحظات:</strong> {cleanNotes}</span>
+                              <span dir="auto" className="truncate pe-2 text-start leading-relaxed py-0.5"><strong className="text-slate-400">{t("card.notesPrefix")}</strong> {cleanNotes}</span>
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => copyFieldValue(acc.id, "notes", cleanNotes)}
                                 className="h-6 px-2 text-[11px] text-slate-400 hover:text-white shrink-0"
                               >
-                                نسخ
+                                {t("common.copy")}
                               </Button>
                             </div>
                           )}
@@ -4069,7 +4103,7 @@ export default function App() {
                             <KeyRound className="w-4 h-4" />
                           </div>
                           <span className="text-xl font-bold font-thamaniah text-foreground">
-                            {acc.label || "الحساب الرئيسي"}
+                            {acc.label || t("account.defaultLabel")}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -4079,20 +4113,20 @@ export default function App() {
                             size="sm"
                             onClick={() => handleDuplicateAccount(acc)}
                             className="h-9 px-3 rounded-xl gap-1.5 text-xs font-bold border-border/80 hover:bg-primary/10 hover:text-primary transition-colors"
-                            title="تكرار هذا الحساب لإنشاء حساب مشابه بسهولة"
+                            title={t("account.duplicateTooltip")}
                           >
                             <CopyPlus className="w-3.5 h-3.5" />
-                            <span>تكرار</span>
+                            <span>{t("common.duplicate")}</span>
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => openEditAccountModal(acc)}
                             className="h-9 px-3 rounded-xl gap-1.5 text-xs font-bold border-border/80"
-                            title="تعديل بيانات الحساب"
+                            title={t("account.editTooltip")}
                           >
                             <Pencil className="w-3.5 h-3.5 text-primary" />
-                            <span>تعديل</span>
+                            <span>{t("common.edit")}</span>
                           </Button>
                           <Button
                             variant="ghost"
@@ -4101,12 +4135,12 @@ export default function App() {
                               setAccountToDelete({
                                 serviceId: selectedService.id,
                                 accountId: acc.id,
-                                label: acc.label || acc.username || "هذا الحساب",
+                                label: acc.label || acc.username || t("account.copyTargetFallback"),
                                 isCard: false,
                               })
                             }
                             className="h-9 w-9 rounded-xl text-destructive hover:bg-destructive/15"
-                            title="حذف الحساب"
+                            title={t("account.deleteTooltip")}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -4118,9 +4152,9 @@ export default function App() {
                         {/* Username */}
                         {acc.username && (
                           <div className="flex items-center justify-between bg-muted/40 p-3.5 rounded-xl border border-border/50">
-                            <div className="min-w-0 pr-1 flex-1">
+                            <div className="min-w-0 pe-1 flex-1">
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
-                                اسم المستخدم
+                                {t("account.usernameLabel")}
                               </span>
                               <span className="font-sans font-bold text-base text-foreground truncate block select-all leading-relaxed py-0.5">
                                 {acc.username}
@@ -4135,12 +4169,12 @@ export default function App() {
                               {copiedKey === `${acc.id}_username` ? (
                                 <>
                                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>تم</span>
+                                  <span>{t("common.done")}</span>
                                 </>
                               ) : (
                                 <>
                                   <Copy className="w-3.5 h-3.5" />
-                                  <span>نسخ</span>
+                                  <span>{t("common.copy")}</span>
                                 </>
                               )}
                             </Button>
@@ -4150,9 +4184,9 @@ export default function App() {
                         {/* Email */}
                         {acc.email && (
                           <div className="flex items-center justify-between bg-muted/40 p-3.5 rounded-xl border border-border/50">
-                            <div className="min-w-0 pr-1 flex-1">
+                            <div className="min-w-0 pe-1 flex-1">
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
-                                البريد الإلكتروني
+                                {t("account.emailLabel")}
                               </span>
                               <span className="font-sans font-bold text-base text-foreground truncate block select-all leading-relaxed py-0.5">
                                 {acc.email}
@@ -4167,12 +4201,12 @@ export default function App() {
                               {copiedKey === `${acc.id}_email` ? (
                                 <>
                                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>تم</span>
+                                  <span>{t("common.done")}</span>
                                 </>
                               ) : (
                                 <>
                                   <Copy className="w-3.5 h-3.5" />
-                                  <span>نسخ</span>
+                                  <span>{t("common.copy")}</span>
                                 </>
                               )}
                             </Button>
@@ -4182,9 +4216,9 @@ export default function App() {
                         {/* Password */}
                         {acc.has_password && (
                           <div className="flex items-center justify-between bg-muted/40 p-3.5 rounded-xl border border-border/50 md:col-span-2">
-                            <div className="min-w-0 pr-1 flex-1">
+                            <div className="min-w-0 pe-1 flex-1">
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
-                                كلمة المرور
+                                {t("account.passwordLabel")}
                               </span>
                               <span
                                 className={`block font-bold select-all ${
@@ -4207,8 +4241,8 @@ export default function App() {
                                 className="h-9 w-9 p-0 rounded-lg text-muted-foreground hover:text-foreground"
                                 title={
                                   revealedAccountPasswords[acc.id]
-                                    ? "إخفاء كلمة المرور"
-                                    : "إظهار كلمة المرور"
+                                    ? t("account.hidePassword")
+                                    : t("account.showPassword")
                                 }
                               >
                                 {revealedAccountPasswords[acc.id] ? (
@@ -4226,12 +4260,12 @@ export default function App() {
                                 {copiedKey === `${acc.id}_password` ? (
                                   <>
                                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span>تم النسخ!</span>
+                                    <span>{t("account.copiedPassword")}</span>
                                   </>
                                 ) : (
                                   <>
                                     <Copy className="w-3.5 h-3.5" />
-                                    <span>نسخ كلمة المرور</span>
+                                    <span>{t("account.copyPassword")}</span>
                                   </>
                                 )}
                               </Button>
@@ -4242,9 +4276,15 @@ export default function App() {
                         {/* Recovery Key */}
                         {acc.has_recovery_key && (
                           <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl md:col-span-2">
-                            <div className="min-w-0 pr-1 flex-1">
+                            <div className="min-w-0 pe-1 flex-1">
                               <span className="text-xs font-bold text-amber-400 block mb-0.5">
-                                مفتاح استرداد الحساب للطوارئ (Recovery Key)
+                                {isRtl ? (
+                                  <>
+                                    {t("account.recoveryKeyLabel")} (Recovery Key)
+                                  </>
+                                ) : (
+                                  t("account.recoveryKeyLabel")
+                                )}
                               </span>
                               <span
                                 className={`block font-bold select-all ${
@@ -4267,8 +4307,8 @@ export default function App() {
                                 className="h-8 w-8 p-0 rounded-lg text-amber-300 hover:text-amber-100 hover:bg-amber-500/20"
                                 title={
                                   revealedAccountRecoveryKeys[acc.id]
-                                    ? "إخفاء مفتاح الاسترداد"
-                                    : "إظهار مفتاح الاسترداد"
+                                    ? t("account.hideRecoveryKey")
+                                    : t("account.showRecoveryKey")
                                 }
                               >
                                 {revealedAccountRecoveryKeys[acc.id] ? (
@@ -4286,12 +4326,12 @@ export default function App() {
                                 {copiedKey === `${acc.id}_recovery_key` ? (
                                   <>
                                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span>تم</span>
+                                    <span>{t("common.done")}</span>
                                   </>
                                 ) : (
                                   <>
                                     <Copy className="w-3.5 h-3.5" />
-                                    <span>نسخ المفتاح</span>
+                                    <span>{t("account.copyRecoveryKey")}</span>
                                   </>
                                 )}
                               </Button>
@@ -4304,14 +4344,20 @@ export default function App() {
                           <div className="flex items-center justify-between bg-muted/40 p-3.5 rounded-xl border border-border/50 md:col-span-2">
                             <div className="min-w-0 pe-2 flex-1 text-start">
                               <span className="text-xs font-bold text-muted-foreground block mb-0.5">
-                                رابط تسجيل الدخول (<bdi dir="ltr">URL</bdi>)
+                                {isRtl ? (
+                                  <>
+                                    {t("account.urlLabel")} (<bdi dir="ltr">URL</bdi>)
+                                  </>
+                                ) : (
+                                  t("account.urlLabel")
+                                )}
                               </span>
                               <button
                                 type="button"
                                 dir="ltr"
                                 onClick={() => handleOpenUrl(acc.url)}
                                 className="text-primary hover:underline text-sm font-semibold truncate block max-w-full text-start cursor-pointer bg-transparent border-0 p-0"
-                                title="فتح الرابط في المتصفح الافتراضي"
+                                title={t("account.openUrlTooltip")}
                               >
                                 {acc.url}
                               </button>
@@ -4326,12 +4372,12 @@ export default function App() {
                                 {copiedKey === `${acc.id}_url` ? (
                                   <>
                                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span>تم</span>
+                                    <span>{t("common.done")}</span>
                                   </>
                                 ) : (
                                   <>
                                     <Copy className="w-3.5 h-3.5" />
-                                    <span>نسخ</span>
+                                    <span>{t("common.copy")}</span>
                                   </>
                                 )}
                               </Button>
@@ -4341,7 +4387,7 @@ export default function App() {
                                 size="sm"
                                 onClick={() => handleOpenUrl(acc.url)}
                                 className="h-8 w-8 p-0 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer"
-                                title="فتح الرابط في المتصفح الافتراضي"
+                                title={t("account.openUrlTooltip")}
                               >
                                 <ExternalLink className="w-4 h-4" />
                               </Button>
@@ -4354,7 +4400,7 @@ export default function App() {
                           <div className="bg-muted/40 p-3.5 rounded-xl border border-border/50 md:col-span-2 flex items-start justify-between gap-3">
                             <div className="min-w-0 pe-2 flex-1 text-start">
                               <span className="text-xs font-bold text-muted-foreground block mb-1">
-                                ملاحظات
+                                {t("account.notesLabel")}
                               </span>
                               <p
                                 dir="auto"
@@ -4372,12 +4418,12 @@ export default function App() {
                               {copiedKey === `${acc.id}_notes` ? (
                                 <>
                                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>تم</span>
+                                  <span>{t("common.done")}</span>
                                 </>
                               ) : (
                                 <>
                                   <Copy className="w-3.5 h-3.5" />
-                                  <span>نسخ</span>
+                                  <span>{t("common.copy")}</span>
                                 </>
                               )}
                             </Button>
@@ -4400,10 +4446,10 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
               <Plus className="w-7 h-7 text-primary" />
-              <span>إضافة تطبيق أو موقع جديد</span>
+              <span>{t("serviceForm.addTitle")}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">
-              إضافة تطبيق أو موقع جديد
+              {t("serviceForm.addDescription")}
             </DialogDescription>
           </DialogHeader>
 
@@ -4430,7 +4476,7 @@ export default function App() {
             <div className="space-y-3 p-4 rounded-2xl bg-muted/30 border border-border/60">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-bold text-foreground">
-                  اختر من التطبيقات والمواقع الشائعة ({POPULAR_SERVICES.length} خدمة جاهزة):
+                  {t("serviceForm.addPresetHeading", { count: POPULAR_SERVICES.length })}
                 </label>
                 <div className="flex items-center gap-1 bg-card/80 p-1 rounded-xl border border-border/60">
                   <button
@@ -4441,7 +4487,7 @@ export default function App() {
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
-                    title="عرض الشبكة (4 أعمدة)"
+                    title={t("serviceForm.presetGridTooltip")}
                   >
                     <LayoutGrid className="w-4 h-4" />
                   </button>
@@ -4453,7 +4499,7 @@ export default function App() {
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
-                    title="عرض القائمة (List)"
+                    title={t("serviceForm.presetListTooltip")}
                   >
                     <List className="w-4 h-4" />
                   </button>
@@ -4463,18 +4509,18 @@ export default function App() {
               {/* Search & Categories Filter */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Search className="w-3.5 h-3.5 absolute rtl:right-3 ltr:left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   <Input
-                    placeholder="ابحث بالاسم العربي أو الإنجليزي (مثل: Steam, Disney, Claude...)"
+                    placeholder={t("serviceForm.presetSearchPlaceholder")}
                     value={presetSearch}
                     onChange={(e) => setPresetSearch(e.target.value)}
-                    className="min-h-10 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
+                    className="min-h-10 text-xs rtl:pr-9 rtl:pl-8 ltr:pl-9 ltr:pr-8 rounded-xl bg-card/80 border-border/70"
                   />
                   {presetSearch && (
                     <button
                       type="button"
                       onClick={() => setPresetSearch("")}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm font-bold"
+                      className="absolute rtl:left-2.5 ltr:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm font-bold"
                     >
                       ×
                     </button>
@@ -4483,13 +4529,13 @@ export default function App() {
 
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
                   {[
-                    { id: "all", label: "الكل" },
-                    { id: "finance", label: "بنوك وبطاقات" },
-                    { id: "work", label: "تسوق وحكومي وعمل" },
-                    { id: "social", label: "تواصل" },
-                    { id: "entertainment", label: "ترفيه" },
-                    { id: "gaming", label: "ألعاب" },
-                    { id: "tech", label: "تقنية" },
+                    { id: "all", label: t("serviceForm.categories.all") },
+                    { id: "finance", label: t("serviceForm.categories.finance") },
+                    { id: "work", label: t("serviceForm.categories.work") },
+                    { id: "social", label: t("serviceForm.categories.social") },
+                    { id: "entertainment", label: t("serviceForm.categories.entertainment") },
+                    { id: "gaming", label: t("serviceForm.categories.gaming") },
+                    { id: "tech", label: t("serviceForm.categories.tech") },
                   ].map((cat) => (
                     <button
                       key={cat.id}
@@ -4523,12 +4569,12 @@ export default function App() {
                           const cover = await getServiceCoverAsync(preset.id);
                           if (cover) setNewServiceIcon(cover);
                         }}
-                        className={`h-12 flex items-center gap-3 px-4 rounded-xl text-sm font-bold transition-all border text-right cursor-pointer ${
+                        className={`h-12 flex items-center gap-3 px-4 rounded-xl text-sm font-bold transition-all border text-start cursor-pointer ${
                           isSelected
                             ? "bg-primary text-primary-foreground border-primary shadow-sm"
                             : "bg-card hover:bg-muted/80 border-border/60 text-foreground hover:border-primary/50"
                         }`}
-                        title={`${preset.name} (${preset.arabicName})`}
+                        title={isRtl ? `${preset.name} (${preset.arabicName})` : preset.name}
                       >
                         <span
                           className="w-4 h-4 rounded-full inline-block shrink-0 shadow-sm"
@@ -4540,7 +4586,7 @@ export default function App() {
                   })}
                   {filteredPresets.length === 0 && (
                     <div className="col-span-full py-8 text-center text-xs text-muted-foreground">
-                      لم يتم العثور على خدمة تطابق بحثك. يمكنك كتابة الاسم الذي تريده في الحقل أدناه!
+                      {t("serviceForm.noPresetMatchAdd")}
                     </div>
                   )}
                 </div>
@@ -4564,7 +4610,7 @@ export default function App() {
                             ? "bg-primary text-primary-foreground border-primary shadow-sm"
                             : "bg-card hover:bg-muted/80 border-border/60 text-foreground hover:border-primary/50"
                         }`}
-                        title={`${preset.name} (${preset.arabicName})`}
+                        title={isRtl ? `${preset.name} (${preset.arabicName})` : preset.name}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span
@@ -4580,14 +4626,14 @@ export default function App() {
                               : "bg-muted/70 text-muted-foreground border-border/50"
                           }`}
                         >
-                          {PRESET_CATEGORY_LABELS[preset.category] || preset.category}
+                          {PRESET_CATEGORY_KEYS[preset.category] ? t(PRESET_CATEGORY_KEYS[preset.category]) : preset.category}
                         </span>
                       </button>
                     );
                   })}
                   {filteredPresets.length === 0 && (
                     <div className="py-8 text-center text-xs text-muted-foreground">
-                      لم يتم العثور على خدمة تطابق بحثك. يمكنك كتابة الاسم الذي تريده في الحقل أدناه!
+                      {t("serviceForm.noPresetMatchAdd")}
                     </div>
                   )}
                 </div>
@@ -4596,11 +4642,11 @@ export default function App() {
 
             <div>
               <FormLabel htmlFor="add-service-name" required className="mb-2">
-                اسم الخدمة
+                {t("serviceForm.serviceNameLabel")}
               </FormLabel>
               <Input
                 id="add-service-name"
-                placeholder="مثال: Google, Netflix, Steam, منصة أبشر..."
+                placeholder={t("serviceForm.serviceNamePlaceholder")}
                 value={newServiceName}
                 onChange={(e) => setNewServiceName(e.target.value)}
                 className="min-h-14 text-lg px-4 font-sans font-bold rounded-xl border-2"
@@ -4612,7 +4658,7 @@ export default function App() {
 
             <div>
               <label className="block text-base font-bold text-foreground mb-2">
-                غلاف أو صورة الخدمة (يتم اختياره تلقائياً من القائمة أعلاه أو رفعه يدوياً):
+                {t("serviceForm.coverLabelAdd")}
               </label>
 
               {newServiceIcon ? (
@@ -4626,10 +4672,10 @@ export default function App() {
                     />
                     <img
                       src={newServiceIcon}
-                      alt="معاينة الغلاف"
+                      alt={t("serviceForm.coverPreviewAlt")}
                       className="relative z-0 w-full h-full object-contain p-3 drop-shadow-md"
                     />
-                    <div className="absolute top-2 left-2 flex gap-2">
+                    <div className="absolute top-2 rtl:left-2 ltr:right-2 flex gap-2">
                       <Button
                         type="button"
                         variant="destructive"
@@ -4638,7 +4684,7 @@ export default function App() {
                         className="h-8 px-3 rounded-xl text-xs font-bold gap-1 shadow-md"
                       >
                         <X className="w-3.5 h-3.5" />
-                        <span>إزالة الغلاف</span>
+                        <span>{t("serviceForm.removeCover")}</span>
                       </Button>
                     </div>
                   </div>
@@ -4646,7 +4692,7 @@ export default function App() {
                   <div className="text-center">
                     <label className="text-xs font-bold text-muted-foreground hover:text-primary cursor-pointer transition-colors inline-flex items-center gap-1.5">
                       <ImageIcon className="w-3.5 h-3.5" />
-                      <span>أو اختر صورة أخرى مخصصة من جهازك</span>
+                      <span>{t("serviceForm.uploadCustomAdd")}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -4662,7 +4708,7 @@ export default function App() {
                     type="file"
                     accept="image/*"
                     onChange={(e) => onImageFileSelected(e, setNewServiceIcon, setAddServiceError)}
-                    className="h-14 text-sm file:h-full file:bg-secondary file:text-secondary-foreground file:border-0 file:px-4 file:rounded-lg file:mr-2 cursor-pointer border-2 rounded-xl pt-3"
+                    className="h-14 text-sm file:h-full file:bg-secondary file:text-secondary-foreground file:border-0 file:px-4 file:rounded-lg file:me-2 cursor-pointer border-2 rounded-xl pt-3"
                   />
                 </div>
               )}
@@ -4675,10 +4721,10 @@ export default function App() {
                 onClick={() => setShowAddService(false)}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
-                حفظ الخدمة
+                {t("serviceForm.saveService")}
               </Button>
             </div>
           </form>
@@ -4691,10 +4737,10 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3">
               <Pencil className="w-7 h-7 text-primary" />
-              <span>تعديل بيانات وأيقونة الخدمة</span>
+              <span>{t("serviceForm.editTitle")}</span>
             </DialogTitle>
             <DialogDescription className="text-base text-muted-foreground pt-1">
-              يمكنك تغيير اسم الخدمة أو تحديث صورتها أو حذفها.
+              {t("serviceForm.editDescription")}
             </DialogDescription>
           </DialogHeader>
 
@@ -4721,7 +4767,7 @@ export default function App() {
             <div className="space-y-3 p-4 rounded-2xl bg-muted/30 border border-border/60">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-bold text-foreground">
-                  أو اختر تطبيقاً / شعاراً جاهزاً ({POPULAR_SERVICES.length} خدمة):
+                  {t("serviceForm.editPresetHeading", { count: POPULAR_SERVICES.length })}
                 </label>
                 <div className="flex items-center gap-1 bg-card/80 p-1 rounded-xl border border-border/60">
                   <button
@@ -4732,7 +4778,7 @@ export default function App() {
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
-                    title="عرض الشبكة (4 أعمدة)"
+                    title={t("serviceForm.presetGridTooltip")}
                   >
                     <LayoutGrid className="w-4 h-4" />
                   </button>
@@ -4744,7 +4790,7 @@ export default function App() {
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
-                    title="عرض القائمة (List)"
+                    title={t("serviceForm.presetListTooltip")}
                   >
                     <List className="w-4 h-4" />
                   </button>
@@ -4754,18 +4800,18 @@ export default function App() {
               {/* Search & Categories Filter */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Search className="w-3.5 h-3.5 absolute rtl:right-3 ltr:left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   <Input
-                    placeholder="ابحث بالاسم العربي أو الإنجليزي (مثل: Steam, Disney, Claude...)"
+                    placeholder={t("serviceForm.presetSearchPlaceholder")}
                     value={presetSearch}
                     onChange={(e) => setPresetSearch(e.target.value)}
-                    className="min-h-10 text-xs pr-9 pl-8 rounded-xl bg-card/80 border-border/70"
+                    className="min-h-10 text-xs rtl:pr-9 rtl:pl-8 ltr:pl-9 ltr:pr-8 rounded-xl bg-card/80 border-border/70"
                   />
                   {presetSearch && (
                     <button
                       type="button"
                       onClick={() => setPresetSearch("")}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm font-bold"
+                      className="absolute rtl:left-2.5 ltr:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm font-bold"
                     >
                       ×
                     </button>
@@ -4774,13 +4820,13 @@ export default function App() {
 
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
                   {[
-                    { id: "all", label: "الكل" },
-                    { id: "finance", label: "بنوك وبطاقات" },
-                    { id: "work", label: "تسوق وحكومي وعمل" },
-                    { id: "social", label: "تواصل" },
-                    { id: "entertainment", label: "ترفيه" },
-                    { id: "gaming", label: "ألعاب" },
-                    { id: "tech", label: "تقنية" },
+                    { id: "all", label: t("serviceForm.categories.all") },
+                    { id: "finance", label: t("serviceForm.categories.finance") },
+                    { id: "work", label: t("serviceForm.categories.work") },
+                    { id: "social", label: t("serviceForm.categories.social") },
+                    { id: "entertainment", label: t("serviceForm.categories.entertainment") },
+                    { id: "gaming", label: t("serviceForm.categories.gaming") },
+                    { id: "tech", label: t("serviceForm.categories.tech") },
                   ].map((cat) => (
                     <button
                       key={cat.id}
@@ -4814,12 +4860,12 @@ export default function App() {
                           const cover = await getServiceCoverAsync(preset.id);
                           if (cover) setEditServiceIcon(cover);
                         }}
-                        className={`h-12 flex items-center gap-3 px-4 rounded-xl text-sm font-bold transition-all border text-right cursor-pointer ${
+                        className={`h-12 flex items-center gap-3 px-4 rounded-xl text-sm font-bold transition-all border text-start cursor-pointer ${
                           isSelected
                             ? "bg-primary text-primary-foreground border-primary shadow-sm"
                             : "bg-card hover:bg-muted/80 border-border/60 text-foreground hover:border-primary/50"
                         }`}
-                        title={`${preset.name} (${preset.arabicName})`}
+                        title={isRtl ? `${preset.name} (${preset.arabicName})` : preset.name}
                       >
                         <span
                           className="w-4 h-4 rounded-full inline-block shrink-0 shadow-sm"
@@ -4831,7 +4877,7 @@ export default function App() {
                   })}
                   {filteredPresets.length === 0 && (
                     <div className="col-span-full py-8 text-center text-xs text-muted-foreground">
-                      لم يتم العثور على خدمة تطابق بحثك.
+                      {t("serviceForm.noPresetMatchEdit")}
                     </div>
                   )}
                 </div>
@@ -4855,7 +4901,7 @@ export default function App() {
                             ? "bg-primary text-primary-foreground border-primary shadow-sm"
                             : "bg-card hover:bg-muted/80 border-border/60 text-foreground hover:border-primary/50"
                         }`}
-                        title={`${preset.name} (${preset.arabicName})`}
+                        title={isRtl ? `${preset.name} (${preset.arabicName})` : preset.name}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span
@@ -4871,14 +4917,14 @@ export default function App() {
                               : "bg-muted/70 text-muted-foreground border-border/50"
                           }`}
                         >
-                          {PRESET_CATEGORY_LABELS[preset.category] || preset.category}
+                          {PRESET_CATEGORY_KEYS[preset.category] ? t(PRESET_CATEGORY_KEYS[preset.category]) : preset.category}
                         </span>
                       </button>
                     );
                   })}
                   {filteredPresets.length === 0 && (
                     <div className="py-8 text-center text-xs text-muted-foreground">
-                      لم يتم العثور على خدمة تطابق بحثك.
+                      {t("serviceForm.noPresetMatchEdit")}
                     </div>
                   )}
                 </div>
@@ -4887,7 +4933,7 @@ export default function App() {
 
             <div>
               <FormLabel htmlFor="edit-service-name" required className="mb-2">
-                اسم الخدمة
+                {t("serviceForm.serviceNameLabel")}
               </FormLabel>
               <Input
                 id="edit-service-name"
@@ -4901,7 +4947,7 @@ export default function App() {
 
             <div>
               <label className="block text-base font-bold text-foreground mb-2">
-                صورة أو غلاف الخدمة
+                {t("serviceForm.coverLabelEdit")}
               </label>
 
               {editServiceIcon ? (
@@ -4915,10 +4961,10 @@ export default function App() {
                     />
                     <img
                       src={editServiceIcon}
-                      alt="معاينة الغلاف"
+                      alt={t("serviceForm.coverPreviewAlt")}
                       className="relative z-0 w-full h-full object-contain p-3 drop-shadow-md"
                     />
-                    <div className="absolute top-2 left-2 flex gap-2">
+                    <div className="absolute top-2 rtl:left-2 ltr:right-2 flex gap-2">
                       <Button
                         type="button"
                         variant="destructive"
@@ -4927,7 +4973,7 @@ export default function App() {
                         className="h-8 px-3 rounded-xl text-xs font-bold gap-1 shadow-md"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>إزالة الغلاف</span>
+                        <span>{t("serviceForm.removeCover")}</span>
                       </Button>
                     </div>
                   </div>
@@ -4935,7 +4981,7 @@ export default function App() {
                   <div className="text-center">
                     <label className="text-xs font-bold text-muted-foreground hover:text-primary cursor-pointer transition-colors inline-flex items-center gap-1.5">
                       <ImageIcon className="w-3.5 h-3.5" />
-                      <span>تغيير الغلاف واختيار صورة من جهازك</span>
+                      <span>{t("serviceForm.uploadCustomEdit")}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -4951,7 +4997,7 @@ export default function App() {
                     type="file"
                     accept="image/*"
                     onChange={(e) => onImageFileSelected(e, setEditServiceIcon, setEditServiceError)}
-                    className="h-14 text-sm file:h-full file:bg-secondary file:text-secondary-foreground file:border-0 file:px-4 file:rounded-lg file:mr-2 cursor-pointer border-2 rounded-xl pt-3"
+                    className="h-14 text-sm file:h-full file:bg-secondary file:text-secondary-foreground file:border-0 file:px-4 file:rounded-lg file:me-2 cursor-pointer border-2 rounded-xl pt-3"
                   />
                 </div>
               )}
@@ -4964,10 +5010,10 @@ export default function App() {
                 onClick={() => setShowEditService(false)}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button type="submit" className="h-12 px-8 rounded-xl text-base font-bold shadow-lg">
-                حفظ التعديلات
+                {t("serviceForm.saveChanges")}
               </Button>
             </div>
           </form>
@@ -4990,13 +5036,13 @@ export default function App() {
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
               <Plus className="w-7 h-7 text-primary shrink-0" />
               <span>
-                {accountFormMode === "card"
-                  ? `إضافة بطاقة جديدة إلى ${selectedService?.name}`
-                  : `إضافة حساب جديد إلى ${selectedService?.name}`}
+                {t(accountFormMode === "card" ? "accountForm.addTitleCard" : "accountForm.addTitleLogin", {
+                  service: selectedService?.name,
+                })}
               </span>
             </DialogTitle>
             <DialogDescription className="sr-only">
-              نموذج إضافة حساب أو بطاقة جديدة
+              {t("accountForm.addDescription")}
             </DialogDescription>
           </DialogHeader>
 
@@ -5012,7 +5058,7 @@ export default function App() {
               }`}
             >
               <User className="w-4 h-4" />
-              <span>حساب تسجيل دخول</span>
+              <span>{t("accountForm.modeLogin")}</span>
             </button>
             <button
               type="button"
@@ -5024,7 +5070,7 @@ export default function App() {
               }`}
             >
               <CreditCard className="w-4 h-4" />
-              <span>بطاقة بنكية / دفع</span>
+              <span>{t("accountForm.modeCard")}</span>
             </button>
           </div>
 
@@ -5051,7 +5097,7 @@ export default function App() {
               mode={accountFormMode}
               isEdit={false}
               idPrefix="add"
-              cardPreviewBadge={detectCardBrand(cardNumber, selectedService?.name).badge}
+              cardPreviewBadge={detectCardBrand(cardNumber, selectedService?.name, isRtl).badge}
               label={accLabel}
               onLabelChange={setAccLabel}
               notes={accNotes}
@@ -5107,14 +5153,14 @@ export default function App() {
                 onClick={closeAddAccountModal}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
                 disabled={isSavingAccount}
                 className="h-12 px-8 rounded-xl text-base font-bold shadow-lg"
               >
-                حفظ الحساب
+                {t("accountForm.saveAccount")}
               </Button>
             </div>
           </form>
@@ -5134,10 +5180,10 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
               <Pencil className="w-7 h-7 text-primary shrink-0" />
-              <span>{accountFormMode === "card" ? "تعديل بيانات البطاقة" : "تعديل الحساب"}</span>
+              <span>{t(accountFormMode === "card" ? "accountForm.editTitleCard" : "accountForm.editTitleLogin")}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">
-              نموذج تعديل بيانات الحساب أو البطاقة
+              {t("accountForm.editDescription")}
             </DialogDescription>
           </DialogHeader>
 
@@ -5156,7 +5202,7 @@ export default function App() {
               }`}
             >
               <User className="w-4 h-4" />
-              <span>حساب تسجيل دخول</span>
+              <span>{t("accountForm.modeLogin")}</span>
             </button>
             <button
               type="button"
@@ -5171,7 +5217,7 @@ export default function App() {
               }`}
             >
               <CreditCard className="w-4 h-4" />
-              <span>بطاقة بنكية / دفع</span>
+              <span>{t("accountForm.modeCard")}</span>
             </button>
           </div>
 
@@ -5198,7 +5244,7 @@ export default function App() {
               mode={accountFormMode}
               isEdit
               idPrefix="edit"
-              cardPreviewBadge={detectCardBrand(cardNumber, selectedService?.name).badge}
+              cardPreviewBadge={detectCardBrand(cardNumber, selectedService?.name, isRtl).badge}
               label={editLabel}
               onLabelChange={setEditLabel}
               notes={editNotes}
@@ -5312,21 +5358,21 @@ export default function App() {
                 onClick={closeEditAccountModal}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
                 disabled={isSavingAccount}
                 className="h-12 px-8 rounded-xl text-base font-bold shadow-lg"
               >
-                حفظ التعديلات
+                {t("accountForm.saveChanges")}
               </Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* ================= MODAL: DELETE CONFIRMATION (STANDARDIZED RTL DESTRUCTIVE DIALOG) ================= */}
+      {/* ================= MODAL: DELETE CONFIRMATION (STANDARDIZED DESTRUCTIVE DIALOG) ================= */}
       <DestructiveConfirmDialog
         open={Boolean(serviceToDelete || accountToDelete)}
         onOpenChange={(open) => {
@@ -5337,41 +5383,50 @@ export default function App() {
         }}
         title={
           serviceToDelete
-            ? "تأكيد حذف الخدمة"
+            ? t("confirmDelete.serviceTitle")
             : accountToDelete?.isCard
-            ? "تأكيد حذف البطاقة"
-            : "تأكيد حذف الحساب"
+            ? t("confirmDelete.cardTitle")
+            : t("confirmDelete.accountTitle")
         }
         description={
           serviceToDelete ? (
             <>
-              هل أنت متأكد من حذف خدمة{" "}
-              <span className="font-bold text-foreground">«{serviceToDelete.name}»</span>؟
+              {t("confirmDelete.serviceDescLead")}{" "}
+              <span className="font-bold text-foreground">
+                {isRtl ? `«${serviceToDelete.name}»` : `"${serviceToDelete.name}"`}
+              </span>
+              {isRtl ? "؟" : "?"}
               <br />
-              سيتم حذف هذه الخدمة نهائياً مع كافة الحسابات وكلمات المرور التابعة لها، ولا يمكن التراجع عن هذا الإجراء.
+              {t("confirmDelete.serviceDescTail")}
             </>
           ) : accountToDelete?.isCard ? (
             <>
-              هل أنت متأكد من حذف بطاقة{" "}
-              <span className="font-bold text-foreground">«{accountToDelete.label}»</span>؟
+              {t("confirmDelete.cardDescLead")}{" "}
+              <span className="font-bold text-foreground">
+                {isRtl ? `«${accountToDelete.label}»` : `"${accountToDelete.label}"`}
+              </span>
+              {isRtl ? "؟" : "?"}
               <br />
-              سيتم مسح بيانات البطاقة وأرقامها السرية نهائياً من الخزنة.
+              {t("confirmDelete.cardDescTail")}
             </>
           ) : (
             <>
-              هل أنت متأكد من حذف حساب{" "}
-              <span className="font-bold text-foreground">«{accountToDelete?.label}»</span>؟
+              {t("confirmDelete.accountDescLead")}{" "}
+              <span className="font-bold text-foreground">
+                {isRtl ? `«${accountToDelete?.label}»` : `"${accountToDelete?.label}"`}
+              </span>
+              {isRtl ? "؟" : "?"}
               <br />
-              سيتم مسح بيانات الحساب وكلمة المرور الخاصة به نهائياً من الخزنة.
+              {t("confirmDelete.accountDescTail")}
             </>
           )
         }
         confirmLabel={
           serviceToDelete
-            ? "حذف الخدمة"
+            ? t("confirmDelete.serviceConfirm")
             : accountToDelete?.isCard
-            ? "حذف البطاقة"
-            : "حذف الحساب"
+            ? t("confirmDelete.cardConfirm")
+            : t("confirmDelete.accountConfirm")
         }
         isSubmitting={isDeleting}
         onCancel={() => {
@@ -5413,10 +5468,10 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
               <Settings className="w-8 h-8 text-white shrink-0" />
-              <span>إعدادات الأمان واستعادة الخزنة</span>
+              <span>{t("settings.title")}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">
-              إعدادات الأمان واستعادة الخزنة
+              {t("settings.descriptionSr")}
             </DialogDescription>
           </DialogHeader>
 
@@ -5478,6 +5533,9 @@ export default function App() {
               </div>
             )}
 
+            {/* Section 0: Language */}
+            <LanguageSwitcher variant="settings" />
+
             {/* Section 1: Auto-Unlock Toggle (Supported on Windows and Linux) */}
             {isAutoUnlockSupported && (
               <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
@@ -5486,12 +5544,14 @@ export default function App() {
                     <Shield className="w-6 h-6 text-white shrink-0" />
                     <div>
                       <h4 className="text-lg font-bold text-foreground">
-                        الفتح التلقائي (Passwordless by default)
+                        {t("settings.autoUnlock.title")}
                       </h4>
                       <p className="text-sm text-muted-foreground mt-0.5">
                         {autoUnlockActive
-                          ? `مفعّل: يتم فتح Kinana تلقائياً عبر مخزن الاعتمادات الآمن (${autoUnlockStatus.platform_name}).`
-                          : "معطّل: سيُطلب منك إدخال كلمة المرور الرئيسية في كل مرة تشغّل فيها التطبيق."}
+                          ? t("settings.autoUnlock.enabledDesc", {
+                              platform: localizePlatformName(autoUnlockStatus.platform_name, t),
+                            })
+                          : t("settings.autoUnlock.disabledDesc")}
                       </p>
                     </div>
                   </div>
@@ -5502,7 +5562,7 @@ export default function App() {
                     disabled={!autoUnlockStatus.available && !autoUnlockActive}
                     className="rounded-xl font-bold h-11 px-5 shadow-sm shrink-0"
                   >
-                    {autoUnlockActive ? "تعطيل الفتح التلقائي" : "تفعيل الفتح التلقائي"}
+                    {t(autoUnlockActive ? "settings.autoUnlock.disableButton" : "settings.autoUnlock.enableButton")}
                   </Button>
                 </div>
 
@@ -5512,11 +5572,14 @@ export default function App() {
                     <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                     <div className="space-y-1">
                       <p className="font-bold text-amber-300">
-                        مخزن المفاتيح الآمن ({autoUnlockStatus.platform_name}) غير متاح حالياً.
+                        {t("settings.autoUnlock.keyringUnavailable", {
+                          platform: localizePlatformName(autoUnlockStatus.platform_name, t),
+                        })}
                       </p>
                       <p className="text-xs text-amber-200/90 leading-relaxed">
-                        {autoUnlockStatus.unavailable_reason ||
-                          "يرجى التحقق من تشغيل خدمة إدارة المفاتيح (gnome-keyring أو kwallet) في بيئة سطح المكتب الحالية."}
+                        {autoUnlockStatus.unavailable_reason
+                          ? mapBackendErr(autoUnlockStatus.unavailable_reason, "settings.autoUnlock.keyringUnavailableHintDefault")
+                          : t("settings.autoUnlock.keyringUnavailableHintDefault")}
                       </p>
                     </div>
                   </div>
@@ -5542,17 +5605,19 @@ export default function App() {
                           autoUnlockActive ? "text-amber-300" : "text-foreground"
                         }`}
                       >
-                        {autoUnlockActive
-                          ? `تنبيه: يتم حفظ كلمة المرور محلياً في ${autoUnlockStatus.platform_name}.`
-                          : `عند تفعيل الفتح التلقائي، يتم حفظ كلمة المرور في ${autoUnlockStatus.platform_name}.`}
+                        {t(
+                          autoUnlockActive
+                            ? "settings.autoUnlock.warningEnabled"
+                            : "settings.autoUnlock.warningDisabled",
+                          { platform: localizePlatformName(autoUnlockStatus.platform_name, t) }
+                        )}
                       </p>
                       <p
                         className={`text-xs leading-relaxed ${
                           autoUnlockActive ? "text-amber-200/90" : "text-muted-foreground"
                         }`}
                       >
-                        هذا يعني إمكانية قراءة الرمز من أي تطبيق آخر يعمل بنفس حساب المستخدم الحالي على هذا الجهاز.
-                        إذا كنت تفضل أعلى درجات الحماية والعزل، اترك الفتح التلقائي معطلاً.
+                        {t("settings.autoUnlock.warningDetail")}
                       </p>
                     </div>
                   </div>
@@ -5561,7 +5626,7 @@ export default function App() {
                 {/* Reveal current password if available */}
                 {autoUnlockActive && (
                   <div className="pt-3 border-t border-border/40 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">الرمز المحفوظ حالياً في مخزن النظام:</span>
+                    <span className="text-muted-foreground">{t("settings.autoUnlock.savedPasswordLabel")}</span>
                     <div className="flex items-center gap-2">
                       <span className="font-sans font-bold bg-background px-3 py-1 rounded-lg border border-border">
                         {showSavedPassword && savedPasswordHint ? savedPasswordHint : "••••••••••••"}
@@ -5605,10 +5670,10 @@ export default function App() {
                 <Clock className="w-6 h-6 text-white" />
                 <div>
                   <h4 className="text-lg font-bold text-foreground">
-                    القفل التلقائي عند الخمول (Auto-Lock Timeout)
+                    {t("settings.autoLock.title")}
                   </h4>
                   <p className="text-sm text-muted-foreground mt-0.5">
-                    يقفل التطبيق تلقائياً لحماية بياناتك إذا لم يتم تسجيل أي نشاط لفترة محددة. لن يتم الإقفال أثناء تعبئة النماذج.
+                    {t("settings.autoLock.description")}
                   </p>
                 </div>
               </div>
@@ -5616,13 +5681,13 @@ export default function App() {
               {/* Timeout Presets Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                 {[
-                  { label: "دقيقة واحدة", secs: 60 },
-                  { label: "5 دقائق (افتراضي)", secs: 300 },
-                  { label: "10 دقائق", secs: 600 },
-                  { label: "15 دقيقة", secs: 900 },
-                  { label: "30 دقيقة", secs: 1800 },
-                  { label: "ساعة واحدة", secs: 3600 },
-                  { label: "أبداً (تعطيل الإقفال)", secs: null },
+                  { label: t("settings.autoLock.oneMinute"), secs: 60 },
+                  { label: t("settings.autoLock.fiveMinutesDefault"), secs: 300 },
+                  { label: t("settings.autoLock.tenMinutes"), secs: 600 },
+                  { label: t("settings.autoLock.fifteenMinutes"), secs: 900 },
+                  { label: t("settings.autoLock.thirtyMinutes"), secs: 1800 },
+                  { label: t("settings.autoLock.oneHour"), secs: 3600 },
+                  { label: t("settings.autoLock.never"), secs: null },
                 ].map((preset) => {
                   const isSelected = autoLockTimeout === preset.secs;
                   return (
@@ -5647,13 +5712,13 @@ export default function App() {
 
               {/* Custom Minutes Input */}
               <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <span className="text-xs font-bold text-muted-foreground shrink-0">أو حدد مدة مخصصة:</span>
+                <span className="text-xs font-bold text-muted-foreground shrink-0">{t("settings.autoLock.customLabel")}</span>
                 <div className="flex items-center gap-2 flex-1 max-w-xs">
                   <Input
                     type="number"
                     min="1"
                     max="1440"
-                    placeholder="عدد الدقائق (مثال: 45)"
+                    placeholder={t("settings.autoLock.customPlaceholder")}
                     value={customTimeoutMinutes}
                     onChange={(e) => setCustomTimeoutMinutes(e.target.value)}
                     className="min-h-10 text-xs font-bold rounded-xl border-border/70"
@@ -5670,17 +5735,17 @@ export default function App() {
                     }}
                     className="h-10 px-4 rounded-xl text-xs font-bold shrink-0"
                   >
-                    تطبيق
+                    {t("common.apply")}
                   </Button>
                 </div>
                 {autoLockTimeout !== null && (
                   <span className="text-xs font-semibold text-emerald-400 ms-auto">
-                    الحالي: {Math.round(autoLockTimeout / 60)} دقيقة
+                    {t("settings.autoLock.currentPrefix")} {t("status.minutesUnit", { count: Math.round(autoLockTimeout / 60) })}
                   </span>
                 )}
                 {autoLockTimeout === null && (
                   <span className="text-xs font-semibold text-amber-300 ms-auto">
-                    الحالي: معطل بالكامل (أبداً)
+                    {t("settings.autoLock.currentNever")}
                   </span>
                 )}
               </div>
@@ -5689,7 +5754,7 @@ export default function App() {
               <div className="flex items-center gap-3">
                 <Key className="w-6 h-6 text-white shrink-0" />
                 <h4 className="text-lg font-bold text-foreground">
-                  تغيير كلمة المرور الرئيسية
+                  {t("settings.changePassword.title")}
                 </h4>
               </div>
 
@@ -5704,14 +5769,14 @@ export default function App() {
               <form onSubmit={handleChangeMasterPassword} autoComplete="off" className="space-y-4">
                 <div>
                   <FormLabel htmlFor="settings-new-password" required className="text-sm">
-                    كلمة المرور الرئيسية الجديدة
+                    {t("settings.changePassword.newLabel")}
                   </FormLabel>
                   <SecretInput
                     id="settings-new-password"
                     revealed={showNewMasterPassword}
                     onToggleReveal={() => setShowNewMasterPassword((prev) => !prev)}
-                    revealLabel="إظهار كلمة المرور الجديدة"
-                    hideLabel="إخفاء كلمة المرور الجديدة"
+                    revealLabel={t("settings.changePassword.showNew")}
+                    hideLabel={t("settings.changePassword.hideNew")}
                     placeholder=""
                     value={newMasterPassword}
                     onChange={(e) => setNewMasterPassword(e.target.value)}
@@ -5723,14 +5788,14 @@ export default function App() {
 
                 <div>
                   <FormLabel htmlFor="settings-confirm-password" required className="text-sm">
-                    تأكيد كلمة المرور الرئيسية
+                    {t("settings.changePassword.confirmLabel")}
                   </FormLabel>
                   <SecretInput
                     id="settings-confirm-password"
                     revealed={showConfirmMasterPassword}
                     onToggleReveal={() => setShowConfirmMasterPassword((prev) => !prev)}
-                    revealLabel="إظهار تأكيد كلمة المرور"
-                    hideLabel="إخفاء تأكيد كلمة المرور"
+                    revealLabel={t("settings.changePassword.showConfirm")}
+                    hideLabel={t("settings.changePassword.hideConfirm")}
                     placeholder=""
                     value={confirmMasterPassword}
                     onChange={(e) => {
@@ -5742,7 +5807,7 @@ export default function App() {
                   />
                   {settingsPwValidation.showMismatchError && (
                     <p role="alert" className="text-sm font-bold text-rose-400 pt-1.5 text-start">
-                      كلمتا المرور غير متطابقتين
+                      {t("settings.changePassword.mismatchError")}
                     </p>
                   )}
                 </div>
@@ -5753,7 +5818,7 @@ export default function App() {
                     disabled={!settingsPwValidation.canSubmit}
                     className="min-h-12 px-6 rounded-xl font-bold shadow-md"
                   >
-                    <span>حفظ كلمة المرور الجديدة</span>
+                    <span>{t("settings.changePassword.saveButton")}</span>
                   </Button>
                 </div>
               </form>
@@ -5767,10 +5832,16 @@ export default function App() {
                 <KeyRound className="w-6 h-6 text-white shrink-0 mt-0.5" />
                 <div className="min-w-0 text-start">
                   <h4 className="text-lg font-bold text-foreground">
-                    مفتاح استرداد الطوارئ (<bdi dir="ltr">Emergency Recovery Key</bdi>)
+                    {isRtl ? (
+                      <>
+                        {t("settings.recoveryKey.title")} (<bdi dir="ltr">Emergency Recovery Key</bdi>)
+                      </>
+                    ) : (
+                      t("settings.recoveryKey.title")
+                    )}
                   </h4>
                   <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
-                    احفظ هذا المفتاح في مكان آمن. يتيح لك استعادة كامل الخزنة في حال نسيت رمز الدخول. يبقى مخفيًا افتراضيًا ويمكنك إظهاره أو نسخه بأمان.
+                    {t("settings.recoveryKey.description")}
                   </p>
                 </div>
               </div>
@@ -5794,9 +5865,9 @@ export default function App() {
                     type="button"
                     variant="outline"
                     onClick={handleToggleVaultRecoveryKey}
-                    aria-label={showVaultRecoveryKey ? "إخفاء مفتاح الطوارئ" : "إظهار مفتاح الطوارئ"}
+                    aria-label={showVaultRecoveryKey ? t("settings.recoveryKey.hide") : t("settings.recoveryKey.show")}
                     aria-pressed={showVaultRecoveryKey}
-                    title={showVaultRecoveryKey ? "إخفاء مفتاح الطوارئ" : "إظهار مفتاح الطوارئ"}
+                    title={showVaultRecoveryKey ? t("settings.recoveryKey.hide") : t("settings.recoveryKey.show")}
                     className="h-11 w-11 p-0 rounded-xl shrink-0"
                   >
                     {showVaultRecoveryKey ? (
@@ -5814,12 +5885,12 @@ export default function App() {
                     {copiedRecoveryKey ? (
                       <>
                         <Check className="w-4 h-4 text-emerald-400" />
-                        <span>تم النسخ</span>
+                        <span>{t("settings.recoveryKey.copied")}</span>
                       </>
                     ) : (
                       <>
                         <Copy className="w-4 h-4" />
-                        <span>نسخ المفتاح</span>
+                        <span>{t("settings.recoveryKey.copy")}</span>
                       </>
                     )}
                   </Button>
@@ -5833,10 +5904,10 @@ export default function App() {
                 <FolderSync className="w-6 h-6 text-white" />
                 <div>
                   <h4 className="text-lg font-bold text-foreground">
-                    النسخ الاحتياطي ونقل الخزنة (بين البي سي واللابتوب)
+                    {t("settings.backup.title")}
                   </h4>
                   <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
-                    يمكنك تصدير الخزنة المشفرة كملف احتياطي (<bdi dir="ltr">.dat</bdi>) لنقلها إلى لابتوب أو فلاش <bdi dir="ltr">USB</bdi>، أو استيراد نسخة سابقة.
+                    {t("settings.backup.description")}
                   </p>
                 </div>
               </div>
@@ -5878,7 +5949,7 @@ export default function App() {
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <Download className="w-4 h-4 text-white" />
-                  <span>تصدير نسخة احتياطية مشفرة (<bdi dir="ltr">.dat</bdi>)</span>
+                  <span>{t("settings.backup.exportButton")} (<bdi dir="ltr">.dat</bdi>)</span>
                 </Button>
 
                 <Button
@@ -5889,7 +5960,7 @@ export default function App() {
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <Upload className="w-4 h-4 text-white" />
-                  <span>استيراد خزنة من ملف (<bdi dir="ltr">.dat</bdi>)</span>
+                  <span>{t("settings.backup.importButton")} (<bdi dir="ltr">.dat</bdi>)</span>
                 </Button>
 
                 <Button
@@ -5899,7 +5970,7 @@ export default function App() {
                   className="rounded-xl font-bold h-12 px-5 gap-2 border-border shadow-sm hover:bg-muted text-white"
                 >
                   <FolderOpen className="w-4 h-4 text-white" />
-                  <span>فتح مسار مجلد الخزنة</span>
+                  <span>{t("settings.backup.openFolderButton")}</span>
                 </Button>
               </div>
             </div>
@@ -5911,7 +5982,7 @@ export default function App() {
                 onClick={() => setShowSettings(false)}
                 className="h-12 px-8 rounded-xl font-bold"
               >
-                إغلاق
+                {t("common.close")}
               </Button>
             </div>
           </div>
@@ -5936,10 +6007,12 @@ export default function App() {
               <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5" />
               </div>
-              <span>تفعيل الفتح التلقائي</span>
+              <span>{t("autoUnlockModal.title")}</span>
             </DialogTitle>
             <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed text-start">
-              أدخل رمز الدخول (<bdi dir="ltr">PIN</bdi>) أو كلمة المرور الرئيسية ليتم حفظها وتشفيرها في مخزن الاعتمادات الآمن بالنظام (<bdi dir="ltr">{autoUnlockStatus.platform_name}</bdi>).
+              {t("autoUnlockModal.description", {
+                platform: localizePlatformName(autoUnlockStatus.platform_name, t),
+              })}
             </DialogDescription>
           </DialogHeader>
 
@@ -5953,18 +6026,18 @@ export default function App() {
           <form onSubmit={handleConfirmEnableAutoUnlock} autoComplete="off" className="space-y-4 pt-2">
             <div>
               <FormLabel htmlFor="auto-unlock-password" required className="text-xs">
-                أدخل رمز الدخول أو كلمة المرور الحالية
+                {t("autoUnlockModal.label")}
               </FormLabel>
               <SecretInput
                 id="auto-unlock-password"
                 revealed={showAutoUnlockPassword}
                 onToggleReveal={() => setShowAutoUnlockPassword((prev) => !prev)}
-                revealLabel="إظهار الرمز"
-                hideLabel="إخفاء الرمز"
+                revealLabel={t("autoUnlockModal.showPin")}
+                hideLabel={t("autoUnlockModal.hidePin")}
                 centered
                 codeStyleWhenFilled
                 filledTrackingClass="tracking-widest"
-                placeholder="أدخل الرمز..."
+                placeholder={t("autoUnlockModal.placeholder")}
                 value={autoUnlockPassword}
                 onChange={(e) => {
                   setAutoUnlockPassword(e.target.value);
@@ -5989,7 +6062,7 @@ export default function App() {
                 disabled={autoUnlockModalLoading}
                 className="h-11 px-5 rounded-xl font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -5999,12 +6072,12 @@ export default function App() {
                 {autoUnlockModalLoading ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>جاري التحقق...</span>
+                    <span>{t("autoUnlockModal.verifying")}</span>
                   </>
                 ) : (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>تأكيد وتفعيل</span>
+                    <span>{t("autoUnlockModal.confirmAndEnable")}</span>
                   </>
                 )}
               </Button>
@@ -6028,24 +6101,30 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
               <KeyRound className="w-7 h-7 text-primary shrink-0" />
-              <span>استعادة الخزنة عبر مفتاح الطوارئ</span>
+              <span>{t("recoveryModal.title")}</span>
             </DialogTitle>
             <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
-              أدخل مفتاح الاسترداد الخاص بك (مثال: <bdi dir="ltr">KN-XXXX-XXXX-XXXX-XXXX</bdi>) لاستعادة الخزنة فوراً.
+              {t("recoveryModal.description", { example: "KN-XXXX-XXXX-XXXX-XXXX" })}
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleRecoverVault} autoComplete="off" className="space-y-6 pt-4">
             <div>
               <FormLabel htmlFor="recovery-key-input" required className="mb-2">
-                مفتاح الاسترداد (<bdi dir="ltr">Recovery Key</bdi>)
+                {isRtl ? (
+                  <>
+                    {t("recoveryModal.label")} (<bdi dir="ltr">Recovery Key</bdi>)
+                  </>
+                ) : (
+                  t("recoveryModal.label")
+                )}
               </FormLabel>
               <SecretInput
                 id="recovery-key-input"
                 revealed={showInputRecoveryKey}
                 onToggleReveal={() => setShowInputRecoveryKey((prev) => !prev)}
-                revealLabel="إظهار مفتاح الاسترداد"
-                hideLabel="إخفاء مفتاح الاسترداد"
+                revealLabel={t("recoveryModal.showKey")}
+                hideLabel={t("recoveryModal.hideKey")}
                 centered
                 codeStyleWhenFilled
                 filledTrackingClass="tracking-widest"
@@ -6065,14 +6144,14 @@ export default function App() {
                 onClick={() => setShowRecoveryModal(false)}
                 className="h-12 px-6 rounded-xl text-base font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
                 className="h-12 px-8 rounded-xl text-base font-bold shadow-lg gap-2"
               >
                 <Unlock className="w-5 h-5" />
-                <span>استعادة وفتح الخزنة</span>
+                <span>{t("recoveryModal.submit")}</span>
               </Button>
             </div>
           </form>
@@ -6095,10 +6174,10 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-3 text-start">
               <Upload className="w-6 h-6 text-primary shrink-0" />
-              <span>استيراد واستبدال الخزنة</span>
+              <span>{t("importModal.title")}</span>
             </DialogTitle>
             <DialogDescription className="text-sm text-muted-foreground pt-1 text-start">
-              أدخل كلمة مرور ملف الخزنة المستوردة للتحقق التشفيري الكامل من سلامتها وفك تشفيرها قبل استبدال الملفات.
+              {t("importModal.description")}
             </DialogDescription>
           </DialogHeader>
 
@@ -6112,15 +6191,15 @@ export default function App() {
 
             <div>
               <FormLabel htmlFor="import-vault-password" required className="text-sm mb-2">
-                كلمة مرور الخزنة المستوردة
+                {t("importModal.label")}
               </FormLabel>
               <SecretInput
                 id="import-vault-password"
                 revealed={showImportPassword}
                 onToggleReveal={() => setShowImportPassword((prev) => !prev)}
-                revealLabel="إظهار كلمة مرور الخزنة المستوردة"
-                hideLabel="إخفاء كلمة مرور الخزنة المستوردة"
-                placeholder="أدخل كلمة مرور ملف الخزنة..."
+                revealLabel={t("importModal.showPassword")}
+                hideLabel={t("importModal.hidePassword")}
+                placeholder={t("importModal.placeholder")}
                 value={importPassword}
                 onChange={(e) => setImportPassword(e.target.value)}
                 className="text-base rounded-xl border-2"
@@ -6137,7 +6216,7 @@ export default function App() {
                 onClick={() => setShowImportModal(false)}
                 className="h-12 px-6 rounded-xl font-bold"
               >
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
@@ -6147,12 +6226,12 @@ export default function App() {
                 {isProcessingBackup ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>جارٍ التحقق والاستيراد...</span>
+                    <span>{t("importModal.verifying")}</span>
                   </>
                 ) : (
                   <>
                     <Upload className="w-4 h-4" />
-                    <span>اختيار الملف والاستيراد</span>
+                    <span>{t("importModal.submit")}</span>
                   </>
                 )}
               </Button>

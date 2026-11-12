@@ -31,6 +31,30 @@ pub struct AppState {
     pub last_clipboard_seq: Mutex<Option<u32>>,
 }
 
+pub struct TrayMenuState {
+    pub open_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
+    pub quit_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
+}
+
+#[tauri::command]
+fn set_tray_language(language: String, state: State<'_, TrayMenuState>) -> Result<(), String> {
+    let is_english = language.trim().to_ascii_lowercase().starts_with("en");
+    let open_label = if is_english { "Open Kinana" } else { "فتح Kinana" };
+    let quit_label = if is_english { "Quit" } else { "إغلاق" };
+
+    if let Ok(guard) = state.open_item.lock() {
+        if let Some(ref item) = *guard {
+            let _ = item.set_text(open_label);
+        }
+    }
+    if let Ok(guard) = state.quit_item.lock() {
+        if let Some(ref item) = *guard {
+            let _ = item.set_text(quit_label);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VaultOperationResult {
     pub success: bool,
@@ -2044,6 +2068,10 @@ fn main() {
             current_recovery_key: Mutex::new(None),
             last_clipboard_seq: Mutex::new(None),
         })
+        .manage(TrayMenuState {
+            open_item: Mutex::new(None),
+            quit_item: Mutex::new(None),
+        })
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } => {
@@ -2150,6 +2178,15 @@ fn main() {
             let open_item = MenuItem::with_id(app, "open_kinana", "فتح Kinana", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "إغلاق", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+            {
+                let tray_state = app.state::<TrayMenuState>();
+                if let Ok(mut guard) = tray_state.open_item.lock() {
+                    *guard = Some(open_item.clone());
+                }
+                if let Ok(mut guard) = tray_state.quit_item.lock() {
+                    *guard = Some(quit_item.clone());
+                };
+            }
 
             let mut tray_builder = TrayIconBuilder::new()
                 .tooltip("Kinana")
@@ -2291,6 +2328,7 @@ fn main() {
             open_vault_folder,
             open_url,
             trim_app_memory,
+            set_tray_language,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

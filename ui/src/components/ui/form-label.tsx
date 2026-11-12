@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ const FormLabel = React.forwardRef<HTMLLabelElement, FormLabelProps>(
     },
     ref
   ) => {
+    const { t } = useTranslation();
     return (
       <label
         ref={ref}
@@ -44,7 +46,7 @@ const FormLabel = React.forwardRef<HTMLLabelElement, FormLabelProps>(
             >
               *
             </span>
-            <span className="sr-only"> (مطلوب)</span>
+            <span className="sr-only"> {t("formLabel.requiredSr")}</span>
           </>
         )}
       </label>

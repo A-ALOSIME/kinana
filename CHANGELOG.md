@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.12] - 2026-11-12
+
+### Added
+- Built a complete offline bilingual localization foundation (`i18next` + `react-i18next`) supporting Arabic (`ar`, default RTL) and English (`en`, LTR) via locally bundled JSON resources (`ui/src/i18n/index.ts`, `ui/src/i18n/locales/ar.json`, `ui/src/i18n/locales/en.json`) with variable interpolation, CLDR pluralization, and 1-to-1 resource parity tests (`ui/tests/i18n.test.mjs`).
+- Added a shared `<LanguageSwitcher />` component (`ui/src/components/LanguageSwitcher.tsx`) with a full control panel inside Settings (`variant="settings"`) and a minimal compact selector on First-Time Vault Setup and Lock screens (`variant="minimal"`) without exposing security settings before unlock, persisting the selected language in `localStorage` (`kinana_language`) independently of vault state and applying switches live without restarting.
+- Added runtime Rust/Tauri error and OS credential store platform localization (`ui/src/i18n/errorMapper.ts`) plus dynamic system tray menu localization via `set_tray_language` (`Open Kinana` / `Quit` in English; `فتح Kinana` / `إغلاق` in Arabic) in `src-tauri/src/main.rs`.
+
+### Changed
+- Added full RTL/LTR directional synchronization across `document.documentElement` (`dir`, `lang`, `title="Kinana"`), Radix Dialog and ContextMenu portals (`ui/src/components/ui/dialog.tsx`, `ui/src/components/ui/context-menu.tsx`), logical spacing/alignment (`text-start`, `ps-*`, `pe-*`, `start-*`, `end-*`), `<SecretInput />` / `<Input />` / `<PlaceholderOverlay />`, email and URL input directionality, and visual arrow navigation (`getDestructiveDialogArrowTarget` in `ui/src/keyboard.ts`) in `<DestructiveConfirmDialog />`.
+- Localized all password strength labels (`passwordValidation.ts`, `<PasswordStrengthIndicator />`), secret copy action labels (`secretCopy.ts`), account/card forms (`<AccountFormFields />`), modals, validation messages, and notifications while keeping **Kinana** brand identity, vault encryption, secrets, account classification, backup compatibility, Auto-Unlock, clipboard protections, and dark theme unchanged.
+
+---
+
 ## [0.1.11] - 2026-11-12
 
 ### Changed

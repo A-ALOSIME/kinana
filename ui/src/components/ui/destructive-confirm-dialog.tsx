@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -37,11 +38,14 @@ export const DestructiveConfirmDialog: React.FC<DestructiveConfirmDialogProps> =
   title,
   description,
   confirmLabel,
-  cancelLabel = "إلغاء",
+  cancelLabel,
   isSubmitting = false,
   onConfirm,
   onCancel,
 }) => {
+  const { t, i18n } = useTranslation();
+  const activeDir: "rtl" | "ltr" = i18n.dir() === "ltr" ? "ltr" : "rtl";
+  const resolvedCancelLabel = cancelLabel ?? t("common.cancel");
   const deleteButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
@@ -78,7 +82,7 @@ export const DestructiveConfirmDialog: React.FC<DestructiveConfirmDialogProps> =
       }}
     >
       <DialogContent
-        dir="rtl"
+        dir={activeDir}
         onOpenAutoFocus={(e) => {
           previousFocusRef.current =
             document.activeElement instanceof HTMLElement
@@ -114,7 +118,7 @@ export const DestructiveConfirmDialog: React.FC<DestructiveConfirmDialogProps> =
         }}
         onKeyDown={(e) => {
           if (effectiveSubmitting || confirmLockedRef.current) return;
-          const arrowTarget = getDestructiveDialogArrowTarget(e, e.target);
+          const arrowTarget = getDestructiveDialogArrowTarget(e, e.target, activeDir);
           if (!arrowTarget) return;
           const targetButton =
             arrowTarget === "delete"
@@ -154,9 +158,9 @@ export const DestructiveConfirmDialog: React.FC<DestructiveConfirmDialogProps> =
           </div>
         </DialogHeader>
 
-        {/* Explicit RTL row: DOM child 1 (Delete) renders on the right; DOM child 2 (Cancel) renders immediately beside it on the left */}
+        {/* Directional row matching active locale: Delete first on start, Cancel beside it */}
         <div
-          dir="rtl"
+          dir={activeDir}
           className="flex flex-row items-center gap-3 pt-4 border-t border-border/60 w-full"
         >
           <Button
@@ -182,7 +186,7 @@ export const DestructiveConfirmDialog: React.FC<DestructiveConfirmDialogProps> =
             }}
             className="flex-1 min-h-11 px-4 rounded-xl text-sm font-bold border-border/80 ring-offset-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:ring-offset-1"
           >
-            <span>{cancelLabel}</span>
+            <span>{resolvedCancelLabel}</span>
           </Button>
         </div>
       </DialogContent>

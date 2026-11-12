@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import {
@@ -29,7 +30,8 @@ export const PasswordStrengthIndicator: React.FC<PasswordStrengthIndicatorProps>
   password,
   className,
 }) => {
-  const { level, label } = evaluatePasswordStrength(password);
+  const { t } = useTranslation();
+  const { level } = evaluatePasswordStrength(password);
 
   return (
     <div
@@ -55,7 +57,7 @@ export const PasswordStrengthIndicator: React.FC<PasswordStrengthIndicatorProps>
       </div>
 
       <div className="flex items-center justify-between text-xs min-h-[1.25rem] leading-relaxed">
-        <span className="text-muted-foreground">قوة كلمة المرور</span>
+        <span className="text-muted-foreground">{t("passwordStrength.title")}</span>
         <span
           className={cn(
             "font-medium transition-colors duration-200",
@@ -64,7 +66,7 @@ export const PasswordStrengthIndicator: React.FC<PasswordStrengthIndicatorProps>
               : "text-muted-foreground/70"
           )}
         >
-          {level > 0 ? label : "—"}
+          {level > 0 ? t(`passwordStrength.levels.${level}`) : t("common.dash")}
         </span>
       </div>
     </div>
