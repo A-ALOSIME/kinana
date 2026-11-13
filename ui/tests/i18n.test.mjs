@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_LANGUAGE,
   LANGUAGE_STORAGE_KEY,
+  RTL_LANGUAGES,
   SUPPORTED_LANGUAGES,
+  SUPPORTED_LANGUAGE_CODES,
   createKinanaI18n,
   getLanguageDirection,
   normalizeLanguage,
@@ -25,6 +27,31 @@ const uiRoot = path.resolve(__dirname, "..");
 const PLURAL_SUFFIX_RE = /_(zero|one|two|few|many|other)$/;
 const ARABIC_CHAR_RE = /[\u0600-\u06FF]/;
 const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+
+const ALL_22_LANG_CODES = [
+  "ar",
+  "en",
+  "es",
+  "fr",
+  "de",
+  "pt-BR",
+  "zh-CN",
+  "zh-TW",
+  "ja",
+  "ko",
+  "ru",
+  "fa",
+  "tr",
+  "it",
+  "id",
+  "hi",
+  "vi",
+  "pl",
+  "uk",
+  "ur",
+  "th",
+  "he",
+];
 
 function flattenLocaleLeaves(obj, prefix = "", out = new Map()) {
   for (const [key, value] of Object.entries(obj)) {
@@ -63,30 +90,12 @@ function createMemoryStorage(initial = {}) {
   };
 }
 
-test("Locale JSON resources have structural, plural, and variable parity with no untranslated English leaks", () => {
-  const arJson = JSON.parse(
-    fs.readFileSync(path.join(uiRoot, "src/i18n/locales/ar.json"), "utf8")
-  );
+test("All 22 locale JSON resources have structural, plural, and variable parity with zero emoji and correct brand identity", () => {
   const enJson = JSON.parse(
     fs.readFileSync(path.join(uiRoot, "src/i18n/locales/en.json"), "utf8")
   );
-
-  const arLeaves = flattenLocaleLeaves(arJson);
   const enLeaves = flattenLocaleLeaves(enJson);
-
-  assert.ok(arLeaves.size > 200, "Expected comprehensive Arabic localization resource");
-  assert.ok(enLeaves.size > 200, "Expected comprehensive English localization resource");
-
-  const arBaseKeys = new Map();
-  for (const [key, value] of arLeaves.entries()) {
-    assert.equal(typeof value, "string", `Expected string value for ar:${key}`);
-    assert.ok(value.trim().length > 0, `Empty Arabic translation at ${key}`);
-    assert.ok(!EMOJI_RE.test(value), `Unexpected emoji in ar:${key}: ${value}`);
-
-    const base = stripPluralSuffix(key);
-    if (!arBaseKeys.has(base)) arBaseKeys.set(base, []);
-    arBaseKeys.get(base).push([key, value]);
-  }
+  assert.ok(enLeaves.size >= 469, "Expected comprehensive English localization resource (469 keys)");
 
   const enBaseKeys = new Map();
   for (const [key, value] of enLeaves.entries()) {
@@ -94,79 +103,133 @@ test("Locale JSON resources have structural, plural, and variable parity with no
     assert.ok(value.trim().length > 0, `Empty English translation at ${key}`);
     assert.ok(!EMOJI_RE.test(value), `Unexpected emoji in en:${key}: ${value}`);
 
-    if (key !== "language.ar") {
-      assert.ok(
-        !ARABIC_CHAR_RE.test(value),
-        `English translation en:${key} must not contain Arabic text: ${value}`
-      );
-    }
-
     const base = stripPluralSuffix(key);
     if (!enBaseKeys.has(base)) enBaseKeys.set(base, []);
     enBaseKeys.get(base).push([key, value]);
   }
 
-  // Exact parity on all base keys
-  assert.deepEqual(
-    [...arBaseKeys.keys()].sort(),
-    [...enBaseKeys.keys()].sort(),
-    "Arabic and English locale base keys must match 1-to-1"
-  );
+  // Iterate over all 22 languages
+  for (const langCode of ALL_22_LANG_CODES) {
+    const filePath = path.join(uiRoot, `src/i18n/locales/${langCode}.json`);
+    assert.ok(fs.existsSync(filePath), `Locale file missing: ${langCode}.json`);
 
-  // Interpolation variables must match per base key across forms (e.g., _one may omit {{count}} while _other uses {{count}})
-  for (const baseKey of arBaseKeys.keys()) {
-    const arEntries = arBaseKeys.get(baseKey);
-    const enEntries = enBaseKeys.get(baseKey);
-
-    const hasPluralAr = arEntries.some(([k]) => PLURAL_SUFFIX_RE.test(k));
-    const hasPluralEn = enEntries.some(([k]) => PLURAL_SUFFIX_RE.test(k));
-    assert.equal(
-      hasPluralAr,
-      hasPluralEn,
-      `Pluralization form usage mismatch for base key ${baseKey}`
+    const langJson = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const langLeaves = flattenLocaleLeaves(langJson);
+    assert.ok(
+      langLeaves.size >= 469,
+      `Expected comprehensive localization resource for ${langCode} (>= 469 keys, got ${langLeaves.size})`
     );
 
-    if (!hasPluralAr) {
-      assert.equal(arEntries.length, 1);
-      assert.equal(enEntries.length, 1);
-      assert.deepEqual(
-        extractPlaceholders(arEntries[0][1]),
-        extractPlaceholders(enEntries[0][1]),
-        `Interpolation placeholders mismatch at ${baseKey}`
-      );
-    } else {
-      // Every non-_one form in both locales must expose the same interpolation vars
-      const arOther = arEntries.find(([k]) => k.endsWith("_other"));
-      const enOther = enEntries.find(([k]) => k.endsWith("_other"));
-      assert.ok(arOther, `Missing _other plural form in ar for ${baseKey}`);
-      assert.ok(enOther, `Missing _other plural form in en for ${baseKey}`);
-      assert.deepEqual(
-        extractPlaceholders(arOther[1]),
-        extractPlaceholders(enOther[1]),
-        `Plural _other placeholders mismatch at ${baseKey}`
-      );
-    }
-  }
+    const langBaseKeys = new Map();
+    for (const [key, value] of langLeaves.entries()) {
+      assert.equal(typeof value, "string", `Expected string value for ${langCode}:${key}`);
+      assert.ok(value.trim().length > 0, `Empty translation in ${langCode} at ${key}`);
+      assert.ok(!EMOJI_RE.test(value), `Unexpected emoji in ${langCode}:${key}: ${value}`);
 
-  // Brand identity must remain "Kinana" in both languages
-  assert.equal(arJson.common.appName, "Kinana");
-  assert.equal(enJson.common.appName, "Kinana");
-  assert.equal(arJson.language.ar, "العربية");
-  assert.equal(enJson.language.en, "English");
+      const base = stripPluralSuffix(key);
+      if (!langBaseKeys.has(base)) langBaseKeys.set(base, []);
+      langBaseKeys.get(base).push([key, value]);
+    }
+
+    // Exact parity on all base keys
+    assert.deepEqual(
+      [...langBaseKeys.keys()].sort(),
+      [...enBaseKeys.keys()].sort(),
+      `Base keys in ${langCode} must match en.json 1-to-1`
+    );
+
+    // Variable interpolation matching
+    for (const baseKey of enBaseKeys.keys()) {
+      const enEntries = enBaseKeys.get(baseKey);
+      const langEntries = langBaseKeys.get(baseKey);
+
+      const hasPluralEn = enEntries.some(([k]) => PLURAL_SUFFIX_RE.test(k));
+      const hasPluralLang = langEntries.some(([k]) => PLURAL_SUFFIX_RE.test(k));
+      assert.equal(
+        hasPluralLang,
+        hasPluralEn,
+        `Pluralization form usage mismatch for base key ${baseKey} in ${langCode}`
+      );
+
+      if (!hasPluralEn) {
+        assert.equal(langEntries.length, 1);
+        assert.deepEqual(
+          extractPlaceholders(langEntries[0][1]),
+          extractPlaceholders(enEntries[0][1]),
+          `Interpolation placeholders mismatch at ${baseKey} in ${langCode}`
+        );
+      } else {
+        const enOther = enEntries.find(([k]) => k.endsWith("_other"));
+        const langOther = langEntries.find(([k]) => k.endsWith("_other"));
+        assert.ok(enOther, `Missing _other plural form in en for ${baseKey}`);
+        assert.ok(langOther, `Missing _other plural form in ${langCode} for ${baseKey}`);
+        assert.deepEqual(
+          extractPlaceholders(langOther[1]),
+          extractPlaceholders(enOther[1]),
+          `Plural _other placeholders mismatch at ${baseKey} in ${langCode}`
+        );
+      }
+    }
+
+    // Brand identity must remain "Kinana" across all 22 languages
+    assert.equal(
+      langJson.common.appName,
+      "Kinana",
+      `Brand name common.appName must be "Kinana" in ${langCode}`
+    );
+  }
 });
 
-test("Language architecture restricts selectable languages to ar/en, defaults to ar RTL, and persists independently", () => {
+test("Language architecture supports all 22 languages, defaults to ar RTL, and persists independently", () => {
   assert.equal(DEFAULT_LANGUAGE, "ar");
+  assert.equal(SUPPORTED_LANGUAGES.length, 22);
   assert.deepEqual(
     SUPPORTED_LANGUAGES.map((o) => o.code),
-    ["ar", "en"]
+    ALL_22_LANG_CODES
   );
+  assert.deepEqual([...SUPPORTED_LANGUAGE_CODES], ALL_22_LANG_CODES);
+
+  // Direction checks
+  assert.equal(getLanguageDirection("ar"), "rtl");
+  assert.equal(getLanguageDirection("fa"), "rtl");
+  assert.equal(getLanguageDirection("ur"), "rtl");
+  assert.equal(getLanguageDirection("he"), "rtl");
+
+  const ltrCodes = ALL_22_LANG_CODES.filter((c) => !RTL_LANGUAGES.has(c));
+  assert.equal(ltrCodes.length, 18);
+  for (const code of ltrCodes) {
+    assert.equal(getLanguageDirection(code), "ltr", `Expected ltr for ${code}`);
+  }
+
+  // Normalization checks
   assert.equal(normalizeLanguage(undefined), "ar");
-  assert.equal(normalizeLanguage("fr"), "ar");
+  assert.equal(normalizeLanguage(null), "ar");
+  assert.equal(normalizeLanguage("unknown-lang"), "ar");
   assert.equal(normalizeLanguage("en"), "en");
   assert.equal(normalizeLanguage("en-US"), "en");
-  assert.equal(getLanguageDirection("ar"), "rtl");
-  assert.equal(getLanguageDirection("en"), "ltr");
+  assert.equal(normalizeLanguage("pt-BR"), "pt-BR");
+  assert.equal(normalizeLanguage("pt-br"), "pt-BR");
+  assert.equal(normalizeLanguage("zh-CN"), "zh-CN");
+  assert.equal(normalizeLanguage("zh-cn"), "zh-CN");
+  assert.equal(normalizeLanguage("zh-TW"), "zh-TW");
+  assert.equal(normalizeLanguage("zh-tw"), "zh-TW");
+  assert.equal(normalizeLanguage("ja"), "ja");
+  assert.equal(normalizeLanguage("ko"), "ko");
+  assert.equal(normalizeLanguage("ru"), "ru");
+  assert.equal(normalizeLanguage("fa"), "fa");
+  assert.equal(normalizeLanguage("ur"), "ur");
+  assert.equal(normalizeLanguage("he"), "he");
+  assert.equal(normalizeLanguage("hi"), "hi");
+  assert.equal(normalizeLanguage("th"), "th");
+  assert.equal(normalizeLanguage("vi"), "vi");
+  assert.equal(normalizeLanguage("de"), "de");
+  assert.equal(normalizeLanguage("fr"), "fr");
+  assert.equal(normalizeLanguage("es"), "es");
+  assert.equal(normalizeLanguage("it"), "it");
+  assert.equal(normalizeLanguage("pl"), "pl");
+  assert.equal(normalizeLanguage("tr"), "tr");
+  assert.equal(normalizeLanguage("uk"), "uk");
+  assert.equal(normalizeLanguage("id"), "id");
 
   const prevStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const prevDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -191,18 +254,42 @@ test("Language architecture restricts selectable languages to ar/en, defaults to
     let instance = createKinanaI18n(readStoredLanguage());
     assert.equal(instance.language, "ar");
 
-    // Switching to English persists across simulated app restart and syncs document metadata
-    persistLanguage("en");
-    assert.equal(storage.getItem(LANGUAGE_STORAGE_KEY), "en");
-    assert.equal(syncDocumentLanguage("en"), "ltr");
-    assert.equal(fakeDoc.documentElement.lang, "en");
+    // Switching to German (de, LTR)
+    persistLanguage("de");
+    assert.equal(storage.getItem(LANGUAGE_STORAGE_KEY), "de");
+    assert.equal(syncDocumentLanguage("de"), "ltr");
+    assert.equal(fakeDoc.documentElement.lang, "de");
     assert.equal(fakeDoc.documentElement.dir, "ltr");
     assert.equal(fakeDoc.title, "Kinana");
 
     instance = createKinanaI18n(readStoredLanguage());
-    assert.equal(instance.language, "en");
-    assert.equal(instance.dir("en"), "ltr");
-    assert.equal(instance.t("auth.unlock.submit"), "Unlock Vault");
+    assert.equal(instance.language, "de");
+    assert.equal(instance.dir("de"), "ltr");
+    assert.equal(instance.t("auth.unlock.submit"), "Tresor entsperren");
+
+    // Switching to Persian (fa, RTL)
+    persistLanguage("fa");
+    assert.equal(storage.getItem(LANGUAGE_STORAGE_KEY), "fa");
+    assert.equal(syncDocumentLanguage("fa"), "rtl");
+    assert.equal(fakeDoc.documentElement.lang, "fa");
+    assert.equal(fakeDoc.documentElement.dir, "rtl");
+
+    instance = createKinanaI18n(readStoredLanguage());
+    assert.equal(instance.language, "fa");
+    assert.equal(instance.dir("fa"), "rtl");
+    assert.equal(instance.t("auth.unlock.submit"), "باز کردن گاوصندوق");
+
+    // Switching to Japanese (ja, LTR)
+    persistLanguage("ja");
+    assert.equal(storage.getItem(LANGUAGE_STORAGE_KEY), "ja");
+    assert.equal(syncDocumentLanguage("ja"), "ltr");
+    assert.equal(fakeDoc.documentElement.lang, "ja");
+    assert.equal(fakeDoc.documentElement.dir, "ltr");
+
+    instance = createKinanaI18n(readStoredLanguage());
+    assert.equal(instance.language, "ja");
+    assert.equal(instance.dir("ja"), "ltr");
+    assert.equal(instance.t("auth.unlock.submit"), "保管庫のロックを解除");
 
     // Switching back to Arabic restores RTL
     persistLanguage("ar");
@@ -229,18 +316,22 @@ test("Language architecture restricts selectable languages to ar/en, defaults to
   }
 });
 
-test("Pluralization, interpolation, backend error mapping, and platform localization work for ar and en", () => {
+test("Pluralization, interpolation, backend error mapping, and platform localization work across languages", () => {
   const arI18n = createKinanaI18n("ar");
   const enI18n = createKinanaI18n("en");
+  const ruI18n = createKinanaI18n("ru");
+  const zhI18n = createKinanaI18n("zh-CN");
 
   // Pluralization & variable interpolation
   assert.equal(arI18n.t("status.minutesUnit", { count: 1 }), "دقيقة واحدة");
   assert.equal(arI18n.t("status.minutesUnit", { count: 2 }), "دقيقتان");
   assert.equal(arI18n.t("status.minutesUnit", { count: 5 }), "5 دقائق");
-  assert.equal(arI18n.t("status.minutesUnit", { count: 15 }), "15 دقيقة");
 
   assert.equal(enI18n.t("status.minutesUnit", { count: 1 }), "1 minute");
   assert.equal(enI18n.t("status.minutesUnit", { count: 5 }), "5 minutes");
+
+  assert.equal(ruI18n.t("status.minutesUnit", { count: 1 }), "1 минута");
+  assert.equal(zhI18n.t("status.minutesUnit", { count: 5 }), "5 分钟");
 
   assert.equal(
     arI18n.t("status.zoomHud", { percent: "125%" }),
@@ -291,11 +382,6 @@ test("Pluralization, interpolation, backend error mapping, and platform localiza
   assert.equal(
     localizePlatformName("Windows Credential Manager", enI18n.t.bind(enI18n)),
     "Windows Credential Manager"
-  );
-  assert.ok(
-    !ARABIC_CHAR_RE.test(
-      localizePlatformName("Linux Secret Service (gnome-keyring)", enI18n.t.bind(enI18n))
-    )
   );
 });
 

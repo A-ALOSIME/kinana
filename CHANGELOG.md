@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.12] - 2026-11-12
+## [0.1.13] - 2026-11-13
+
+### Added
+- Expanded Kinana offline localization from 2 to 22 languages in a single unified release: Arabic (`ar`, RTL default), English (`en`, LTR), Spanish (`es`, LTR), French (`fr`, LTR), German (`de`, LTR), Portuguese (Brazil) (`pt-BR`, LTR), Simplified Chinese (`zh-CN`, LTR), Traditional Chinese (`zh-TW`, LTR), Japanese (`ja`, LTR), Korean (`ko`, LTR), Russian (`ru`, LTR), Persian (`fa`, RTL), Turkish (`tr`, LTR), Italian (`it`, LTR), Indonesian (`id`, LTR), Hindi (`hi`, LTR), Vietnamese (`vi`, LTR), Polish (`pl`, LTR), Ukrainian (`uk`, LTR), Urdu (`ur`, RTL), Thai (`th`, LTR), and Hebrew (`he`, RTL).
+- Added 20 new comprehensive locale resources (`ui/src/i18n/locales/*.json`) with 100% key parity (469 keys), variable interpolation integrity, zero emojis, and preserved "Kinana" brand identity across all supported languages.
+- Expanded native system tray menu localization in Rust (`src-tauri/src/main.rs`) via `set_tray_language` across all 22 languages.
+- Added comprehensive font fallback stacks for CJK, Devanagari, Thai, Hebrew, and Nastaliq/Urdu scripts in `index.css` and `tailwind.config.js` for seamless cross-platform desktop rendering.
+- Enhanced `<LanguageSwitcher />` (`ui/src/components/LanguageSwitcher.tsx`) with a responsive 4-column native language selection grid in Settings (`variant="settings"`) and an accessible compact dropdown selector on Auth and Lock screens (`variant="minimal"`).
+
+### Fixed
+- Fixed English CVV/CVC field header layout on Linux Mint and other platforms (`AccountFormFields.tsx`) by converting the label container to responsive sub-flex wrapping (`flex items-baseline gap-1.5 flex-wrap`) and applying identical defensive wrapping to PIN, Password, and Recovery Key headers to eliminate text collision and horizontal overflow.
 
 ### Added
 - Built a complete offline bilingual localization foundation (`i18next` + `react-i18next`) supporting Arabic (`ar`, default RTL) and English (`en`, LTR) via locally bundled JSON resources (`ui/src/i18n/index.ts`, `ui/src/i18n/locales/ar.json`, `ui/src/i18n/locales/en.json`) with variable interpolation, CLDR pluralization, and 1-to-1 resource parity tests (`ui/tests/i18n.test.mjs`).

@@ -291,37 +291,37 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           </div>
 
           <div>
-            <div className="flex justify-between items-center mb-1.5">
-              <FormLabel htmlFor={`${idPrefix}-card-cvv`} inline>
-                {t("accountForm.card.cvvLabel")} (<bdi dir="ltr">CVV / CVC</bdi>)
-              </FormLabel>
-              <div className="flex items-center gap-2">
-                {isEdit && hasExistingRecoveryKey && onSetClearRecoveryKey && (
-                  clearRecoveryKey ? (
-                    <button
-                      type="button"
-                      onClick={() => onSetClearRecoveryKey(false)}
-                      className="text-xs text-amber-400 hover:text-amber-300 font-bold"
-                    >
-                      {t("accountForm.card.cvvRemovePending")}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSetClearRecoveryKey(true);
-                        onCardCvvChange("");
-                      }}
-                      className="text-xs text-rose-400 hover:text-rose-300 font-bold"
-                    >
-                      {t("accountForm.card.cvvRemove")} <bdi dir="ltr">CVV</bdi>
-                    </button>
-                  )
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {t("accountForm.card.cvvDigitsHint")}
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 mb-1.5">
+              <div className="flex items-baseline gap-1.5 flex-wrap">
+                <FormLabel htmlFor={`${idPrefix}-card-cvv`} inline className="mb-0">
+                  {t("accountForm.card.cvvLabel")} (<bdi dir="ltr">CVV / CVC</bdi>)
+                </FormLabel>
+                <span className="text-xs text-muted-foreground font-normal">
+                  ({t("accountForm.card.cvvDigitsHint")})
                 </span>
               </div>
+              {isEdit && hasExistingRecoveryKey && onSetClearRecoveryKey && (
+                clearRecoveryKey ? (
+                  <button
+                    type="button"
+                    onClick={() => onSetClearRecoveryKey(false)}
+                    className="text-xs text-amber-400 hover:text-amber-300 font-bold shrink-0 self-center"
+                  >
+                    {t("accountForm.card.cvvRemovePending")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetClearRecoveryKey(true);
+                      onCardCvvChange("");
+                    }}
+                    className="text-xs text-rose-400 hover:text-rose-300 font-bold shrink-0 self-center"
+                  >
+                    {t("accountForm.card.cvvRemove")} <bdi dir="ltr">CVV</bdi>
+                  </button>
+                )
+              )}
             </div>
             <SecretInput
               id={`${idPrefix}-card-cvv`}
@@ -358,8 +358,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
         </div>
 
         <div>
-          <div className="flex justify-between items-center mb-1.5">
-            <FormLabel htmlFor={`${idPrefix}-card-pin`} inline>
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1.5">
+            <FormLabel htmlFor={`${idPrefix}-card-pin`} inline className="mb-0">
               {t("accountForm.card.pinLabel")}
               {isRtl && (
                 <>
@@ -372,7 +372,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                 <button
                   type="button"
                   onClick={() => onSetClearCardPin(false)}
-                  className="text-xs text-amber-400 hover:text-amber-300 font-bold"
+                  className="text-xs text-amber-400 hover:text-amber-300 font-bold shrink-0 self-center"
                 >
                   {t("accountForm.card.pinRemovePending")}
                 </button>
@@ -383,7 +383,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                     onSetClearCardPin(true);
                     onCardPinChange("");
                   }}
-                  className="text-xs text-rose-400 hover:text-rose-300 font-bold"
+                  className="text-xs text-rose-400 hover:text-rose-300 font-bold shrink-0 self-center"
                 >
                   {t("accountForm.card.pinRemove")}
                 </button>
@@ -482,8 +482,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
       </div>
 
       <div>
-        <div className="flex justify-between items-center mb-1.5">
-          <FormLabel htmlFor={`${idPrefix}-acc-password`} inline>
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1.5">
+          <FormLabel htmlFor={`${idPrefix}-acc-password`} inline className="mb-0">
             {isEdit
               ? t("accountForm.login.passwordLabelEdit")
               : t("accountForm.login.passwordLabel")}
@@ -493,7 +493,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             variant="outline"
             size="sm"
             onClick={onGeneratePassword}
-            className="h-9 px-3 text-xs font-bold gap-1.5 rounded-lg border-primary/50 text-primary hover:bg-primary/10"
+            className="h-9 px-3 text-xs font-bold gap-1.5 rounded-lg border-primary/50 text-primary hover:bg-primary/10 shrink-0"
           >
             <Dices className="w-4 h-4" />
             <span>
@@ -536,8 +536,8 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
       </div>
 
       <div>
-        <div className="flex justify-between items-center mb-1.5">
-          <FormLabel htmlFor={`${idPrefix}-acc-recovery`} inline>
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1.5">
+          <FormLabel htmlFor={`${idPrefix}-acc-recovery`} inline className="mb-0">
             {t("accountForm.login.recoveryKeyLabel")}
             {isRtl && (
               <>
@@ -550,7 +550,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
               <button
                 type="button"
                 onClick={() => onSetClearRecoveryKey(false)}
-                className="text-xs text-amber-400 hover:text-amber-300 font-bold"
+                className="text-xs text-amber-400 hover:text-amber-300 font-bold shrink-0 self-center"
               >
                 {t("accountForm.login.recoveryRemovePending")}
               </button>
@@ -561,7 +561,7 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                   onSetClearRecoveryKey(true);
                   onRecoveryKeyChange("");
                 }}
-                className="text-xs text-rose-400 hover:text-rose-300 font-bold"
+                className="text-xs text-rose-400 hover:text-rose-300 font-bold shrink-0 self-center"
               >
                 {t("accountForm.login.recoveryRemove")}
               </button>

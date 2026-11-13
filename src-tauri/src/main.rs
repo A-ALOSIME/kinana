@@ -38,9 +38,75 @@ pub struct TrayMenuState {
 
 #[tauri::command]
 fn set_tray_language(language: String, state: State<'_, TrayMenuState>) -> Result<(), String> {
-    let is_english = language.trim().to_ascii_lowercase().starts_with("en");
-    let open_label = if is_english { "Open Kinana" } else { "فتح Kinana" };
-    let quit_label = if is_english { "Quit" } else { "إغلاق" };
+    let lang = language.trim().to_ascii_lowercase();
+    let (open_label, quit_label) = match lang.as_str() {
+        "ar" => ("فتح Kinana", "إغلاق"),
+        "fa" => ("باز کردن Kinana", "خروج"),
+        "ur" => ("Kinana کھولیں", "بند کریں"),
+        "he" => ("פתח את Kinana", "יציאה"),
+        "es" => ("Abrir Kinana", "Salir"),
+        "fr" => ("Ouvrir Kinana", "Quitter"),
+        "de" => ("Kinana öffnen", "Beenden"),
+        "pt-br" | "pt_br" | "pt" => ("Abrir Kinana", "Sair"),
+        "zh-cn" | "zh_cn" | "zh-hans" => ("打开 Kinana", "退出"),
+        "zh-tw" | "zh_tw" | "zh-hant" | "zh-hk" => ("開啟 Kinana", "結束"),
+        "ja" => ("Kinana を開く", "終了"),
+        "ko" => ("Kinana 열기", "종료"),
+        "ru" => ("Открыть Kinana", "Выход"),
+        "tr" => ("Kinana'yı Aç", "Çıkış"),
+        "it" => ("Apri Kinana", "Esci"),
+        "id" => ("Buka Kinana", "Keluar"),
+        "hi" => ("Kinana खोलें", "बाहर निकलें"),
+        "vi" => ("Mở Kinana", "Thoát"),
+        "pl" => ("Otwórz Kinana", "Zakończ"),
+        "uk" => ("Відкрити Kinana", "Вийти"),
+        "th" => ("เปิด Kinana", "ออก"),
+        _ => {
+            if lang.starts_with("ar") {
+                ("فتح Kinana", "إغلاق")
+            } else if lang.starts_with("fa") {
+                ("باز کردن Kinana", "خروج")
+            } else if lang.starts_with("ur") {
+                ("Kinana کھولیں", "بند کریں")
+            } else if lang.starts_with("he") || lang.starts_with("iw") {
+                ("פתח את Kinana", "יציאה")
+            } else if lang.starts_with("es") {
+                ("Abrir Kinana", "Salir")
+            } else if lang.starts_with("fr") {
+                ("Ouvrir Kinana", "Quitter")
+            } else if lang.starts_with("de") {
+                ("Kinana öffnen", "Beenden")
+            } else if lang.starts_with("pt") {
+                ("Abrir Kinana", "Sair")
+            } else if lang.starts_with("zh") {
+                ("打开 Kinana", "退出")
+            } else if lang.starts_with("ja") {
+                ("Kinana を開く", "終了")
+            } else if lang.starts_with("ko") {
+                ("Kinana 열기", "종료")
+            } else if lang.starts_with("ru") {
+                ("Открыть Kinana", "Выход")
+            } else if lang.starts_with("tr") {
+                ("Kinana'yı Aç", "Çıkış")
+            } else if lang.starts_with("it") {
+                ("Apri Kinana", "Esci")
+            } else if lang.starts_with("id") {
+                ("Buka Kinana", "Keluar")
+            } else if lang.starts_with("hi") {
+                ("Kinana खोलें", "बाहر निकलें")
+            } else if lang.starts_with("vi") {
+                ("Mở Kinana", "Thoát")
+            } else if lang.starts_with("pl") {
+                ("Otwórz Kinana", "Zakończ")
+            } else if lang.starts_with("uk") {
+                ("Відкрити Kinana", "Вийти")
+            } else if lang.starts_with("th") {
+                ("เปิด Kinana", "ออก")
+            } else {
+                ("Open Kinana", "Quit")
+            }
+        }
+    };
 
     if let Ok(guard) = state.open_item.lock() {
         if let Some(ref item) = *guard {
