@@ -271,11 +271,16 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <FormLabel htmlFor={`${idPrefix}-card-expiry`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+          {/* Row 1, Col 1 on sm: Expiration Date Label */}
+          <div className="sm:row-start-1 sm:col-start-1 flex flex-col justify-end">
+            <FormLabel htmlFor={`${idPrefix}-card-expiry`} className="mb-1.5 leading-snug">
               {t("accountForm.card.expiryLabel")} (<bdi dir="ltr">MM/YY</bdi>)
             </FormLabel>
+          </div>
+
+          {/* Row 2, Col 1 on sm: Expiration Date Input */}
+          <div className="sm:row-start-2 sm:col-start-1 mb-2 sm:mb-0">
             <Input
               id={`${idPrefix}-card-expiry`}
               value={cardExpiry}
@@ -290,22 +295,18 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
             />
           </div>
 
-          <div>
+          {/* Row 1, Col 2 on sm: CVV Label */}
+          <div className="sm:row-start-1 sm:col-start-2 flex flex-col justify-end">
             <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 mb-1.5">
-              <div className="flex items-baseline gap-1.5 flex-wrap">
-                <FormLabel htmlFor={`${idPrefix}-card-cvv`} inline className="mb-0">
-                  {t("accountForm.card.cvvLabel")} (<bdi dir="ltr">CVV / CVC</bdi>)
-                </FormLabel>
-                <span className="text-xs text-muted-foreground font-normal">
-                  ({t("accountForm.card.cvvDigitsHint")})
-                </span>
-              </div>
+              <FormLabel htmlFor={`${idPrefix}-card-cvv`} inline className="mb-0 leading-snug">
+                {t("accountForm.card.cvvLabel")} (<bdi dir="ltr">CVV / CVC</bdi>)
+              </FormLabel>
               {isEdit && hasExistingRecoveryKey && onSetClearRecoveryKey && (
                 clearRecoveryKey ? (
                   <button
                     type="button"
                     onClick={() => onSetClearRecoveryKey(false)}
-                    className="text-xs text-amber-400 hover:text-amber-300 font-bold shrink-0 self-center"
+                    className="text-xs text-amber-400 hover:text-amber-300 font-bold shrink-0 self-center cursor-pointer"
                   >
                     {t("accountForm.card.cvvRemovePending")}
                   </button>
@@ -316,13 +317,17 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                       onSetClearRecoveryKey(true);
                       onCardCvvChange("");
                     }}
-                    className="text-xs text-rose-400 hover:text-rose-300 font-bold shrink-0 self-center"
+                    className="text-xs text-rose-400 hover:text-rose-300 font-bold shrink-0 self-center cursor-pointer"
                   >
                     {t("accountForm.card.cvvRemove")} <bdi dir="ltr">CVV</bdi>
                   </button>
                 )
               )}
             </div>
+          </div>
+
+          {/* Row 2, Col 2 on sm: CVV Input and Helper */}
+          <div className="sm:row-start-2 sm:col-start-2">
             <SecretInput
               id={`${idPrefix}-card-cvv`}
               revealed={showCardCvv}
@@ -347,13 +352,16 @@ export const AccountFormFields: React.FC<AccountFormFieldsProps> = ({
                 isEdit && clearRecoveryKey ? "opacity-50 line-through bg-destructive/10" : ""
               }`}
             />
-            {isEdit && (
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                {clearRecoveryKey
-                  ? t("accountForm.card.cvvClearOnSave")
-                  : t("accountForm.card.cvvKeepHint")}
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+              <span>({t("accountForm.card.cvvDigitsHint")})</span>
+              {isEdit && (
+                <span className="ms-1.5">
+                  {clearRecoveryKey
+                    ? t("accountForm.card.cvvClearOnSave")
+                    : t("accountForm.card.cvvKeepHint")}
+                </span>
+              )}
+            </p>
           </div>
         </div>
 

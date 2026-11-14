@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.14] - 2026-11-14
+
+### Changed
+- Replaced the 22-button language selection grid in Settings with a single compact, searchable dropdown (combobox) displaying the active language name and code, with real-time search filtering across native names, language codes, and English names, keyboard navigation (ArrowUp, ArrowDown, Enter, Escape, Tab), and immediate live language switching.
+- Standardized the minimal language switcher position on both Lock and First-Time Vault Creation screens to the physical top-left corner (`top-5 left-6`) across both LTR and RTL document directions.
+- Made the Auto-Unlock settings section responsive with flex wrapping, text break safeguards, and button alignment to prevent text squeezing or truncation on longer localized headings and descriptions.
+- Enhanced the Inactivity Auto-Lock settings section with a responsive preset duration grid (`grid-cols-2 sm:grid-cols-3 md:grid-cols-4`), uniform row button heights (`min-h-[44px] h-full break-words`), and cleanly wrapping custom minute controls.
+
+### Fixed
+- Fixed horizontal and vertical misalignment between Expiration Date and CVV inputs on Add and Edit Card forms across all 22 languages by aligning inputs on a shared CSS Grid row and moving the digits-count hint below the CVV input.
+
+---
+
 ## [0.1.13] - 2026-11-13
 
 ### Added

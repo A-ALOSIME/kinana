@@ -2620,7 +2620,7 @@ export default function App() {
       {!unlocked ? (
         /* ================= AUTHENTICATION VIEW (LOCK SCREEN) ================= */
         <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-background via-card/30 to-background relative">
-          <div className="absolute top-5 end-6 z-20">
+          <div className="absolute top-5 left-6 z-20">
             <LanguageSwitcher variant="minimal" />
           </div>
           <Card className="w-full max-w-2xl border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 p-6 sm:p-8 rounded-3xl">
@@ -5539,14 +5539,14 @@ export default function App() {
             {/* Section 1: Auto-Unlock Toggle (Supported on Windows and Linux) */}
             {isAutoUnlockSupported && (
               <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Shield className="w-6 h-6 text-white shrink-0" />
-                    <div>
-                      <h4 className="text-lg font-bold text-foreground">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <Shield className="w-6 h-6 text-white shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-lg font-bold text-foreground break-words">
                         {t("settings.autoUnlock.title")}
                       </h4>
-                      <p className="text-sm text-muted-foreground mt-0.5">
+                      <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed break-words">
                         {autoUnlockActive
                           ? t("settings.autoUnlock.enabledDesc", {
                               platform: localizePlatformName(autoUnlockStatus.platform_name, t),
@@ -5560,7 +5560,7 @@ export default function App() {
                     variant={autoUnlockActive ? "destructive" : "default"}
                     onClick={handleToggleAutoUnlock}
                     disabled={!autoUnlockStatus.available && !autoUnlockActive}
-                    className="rounded-xl font-bold h-11 px-5 shadow-sm shrink-0"
+                    className="rounded-xl font-bold h-11 px-5 shadow-sm shrink-0 self-start sm:self-center"
                   >
                     {t(autoUnlockActive ? "settings.autoUnlock.disableButton" : "settings.autoUnlock.enableButton")}
                   </Button>
@@ -5570,13 +5570,13 @@ export default function App() {
                 {!autoUnlockStatus.available && (
                   <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm leading-relaxed flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <p className="font-bold text-amber-300">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <p className="font-bold text-amber-300 break-words">
                         {t("settings.autoUnlock.keyringUnavailable", {
                           platform: localizePlatformName(autoUnlockStatus.platform_name, t),
                         })}
                       </p>
-                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                      <p className="text-xs text-amber-200/90 leading-relaxed break-words">
                         {autoUnlockStatus.unavailable_reason
                           ? mapBackendErr(autoUnlockStatus.unavailable_reason, "settings.autoUnlock.keyringUnavailableHintDefault")
                           : t("settings.autoUnlock.keyringUnavailableHintDefault")}
@@ -5599,9 +5599,9 @@ export default function App() {
                         autoUnlockActive ? "text-amber-400" : "text-muted-foreground"
                       }`}
                     />
-                    <div className="space-y-1 text-start">
+                    <div className="space-y-1 text-start min-w-0 flex-1">
                       <p
-                        className={`font-bold ${
+                        className={`font-bold break-words ${
                           autoUnlockActive ? "text-amber-300" : "text-foreground"
                         }`}
                       >
@@ -5613,7 +5613,7 @@ export default function App() {
                         )}
                       </p>
                       <p
-                        className={`text-xs leading-relaxed ${
+                        className={`text-xs leading-relaxed break-words ${
                           autoUnlockActive ? "text-amber-200/90" : "text-muted-foreground"
                         }`}
                       >
@@ -5625,9 +5625,9 @@ export default function App() {
 
                 {/* Reveal current password if available */}
                 {autoUnlockActive && (
-                  <div className="pt-3 border-t border-border/40 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{t("settings.autoUnlock.savedPasswordLabel")}</span>
-                    <div className="flex items-center gap-2">
+                  <div className="pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-3 text-sm">
+                    <span className="text-muted-foreground break-words">{t("settings.autoUnlock.savedPasswordLabel")}</span>
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className="font-sans font-bold bg-background px-3 py-1 rounded-lg border border-border">
                         {showSavedPassword && savedPasswordHint ? savedPasswordHint : "••••••••••••"}
                       </span>
@@ -5667,19 +5667,19 @@ export default function App() {
             {/* Section: Inactivity Auto-Lock Timeout */}
             <div className="p-6 rounded-2xl bg-muted/40 border border-border/60 space-y-4">
               <div className="flex items-center gap-3">
-                <Clock className="w-6 h-6 text-white" />
-                <div>
-                  <h4 className="text-lg font-bold text-foreground">
+                <Clock className="w-6 h-6 text-white shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-lg font-bold text-foreground break-words">
                     {t("settings.autoLock.title")}
                   </h4>
-                  <p className="text-sm text-muted-foreground mt-0.5">
+                  <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed break-words">
                     {t("settings.autoLock.description")}
                   </p>
                 </div>
               </div>
 
               {/* Timeout Presets Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 pt-1">
                 {[
                   { label: t("settings.autoLock.oneMinute"), secs: 60 },
                   { label: t("settings.autoLock.fiveMinutesDefault"), secs: 300 },
@@ -5698,7 +5698,7 @@ export default function App() {
                         setCustomTimeoutMinutes("");
                         handleSetAutoLockTimeout(preset.secs);
                       }}
-                      className={`h-11 px-3 rounded-xl font-bold text-xs transition-all border cursor-pointer flex items-center justify-center text-center ${
+                      className={`min-h-[44px] h-full py-2 px-3 rounded-xl font-bold text-xs leading-snug break-words transition-all border cursor-pointer flex items-center justify-center text-center ${
                         isSelected
                           ? "bg-primary text-primary-foreground border-primary shadow-sm"
                           : "bg-card hover:bg-muted border-border/70 text-foreground"
@@ -5711,40 +5711,42 @@ export default function App() {
               </div>
 
               {/* Custom Minutes Input */}
-              <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <span className="text-xs font-bold text-muted-foreground shrink-0">{t("settings.autoLock.customLabel")}</span>
-                <div className="flex items-center gap-2 flex-1 max-w-xs">
-                  <Input
-                    type="number"
-                    min="1"
-                    max="1440"
-                    placeholder={t("settings.autoLock.customPlaceholder")}
-                    value={customTimeoutMinutes}
-                    onChange={(e) => setCustomTimeoutMinutes(e.target.value)}
-                    className="min-h-10 text-xs font-bold rounded-xl border-border/70"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={!customTimeoutMinutes || parseInt(customTimeoutMinutes, 10) <= 0}
-                    onClick={() => {
-                      const mins = parseInt(customTimeoutMinutes, 10);
-                      if (mins > 0) {
-                        handleSetAutoLockTimeout(mins * 60);
-                      }
-                    }}
-                    className="h-10 px-4 rounded-xl text-xs font-bold shrink-0"
-                  >
-                    {t("common.apply")}
-                  </Button>
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3 min-w-0">
+                  <span className="text-xs font-bold text-muted-foreground shrink-0">{t("settings.autoLock.customLabel")}</span>
+                  <div className="flex items-center gap-2 flex-1 min-w-[180px] max-w-xs">
+                    <Input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      placeholder={t("settings.autoLock.customPlaceholder")}
+                      value={customTimeoutMinutes}
+                      onChange={(e) => setCustomTimeoutMinutes(e.target.value)}
+                      className="min-h-10 text-xs font-bold rounded-xl border-border/70"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!customTimeoutMinutes || parseInt(customTimeoutMinutes, 10) <= 0}
+                      onClick={() => {
+                        const mins = parseInt(customTimeoutMinutes, 10);
+                        if (mins > 0) {
+                          handleSetAutoLockTimeout(mins * 60);
+                        }
+                      }}
+                      className="h-10 px-4 rounded-xl text-xs font-bold shrink-0"
+                    >
+                      {t("common.apply")}
+                    </Button>
+                  </div>
                 </div>
                 {autoLockTimeout !== null && (
-                  <span className="text-xs font-semibold text-emerald-400 ms-auto">
+                  <span className="text-xs font-semibold text-emerald-400">
                     {t("settings.autoLock.currentPrefix")} {t("status.minutesUnit", { count: Math.round(autoLockTimeout / 60) })}
                   </span>
                 )}
                 {autoLockTimeout === null && (
-                  <span className="text-xs font-semibold text-amber-300 ms-auto">
+                  <span className="text-xs font-semibold text-amber-300">
                     {t("settings.autoLock.currentNever")}
                   </span>
                 )}
