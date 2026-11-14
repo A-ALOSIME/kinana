@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.15] - 2026-11-14
+
+### Changed
+- Replaced the custom Auto-Lock duration placeholder with a concise numeric example "45" centered in a compact input field (`w-20 sm:w-24`), preventing text truncation across all 22 supported languages.
+- Added a localized "minutes" unit label beside the custom Auto-Lock duration input (`settings.autoLock.minutesUnit`) across all 22 languages, neatly aligned with the input and Apply button while preserving responsive wrapping on narrow windows.
+- Refined global scrollbar styling in `ui/src/index.css` to a modern subtle aesthetic (4px thin bar, transparent track, subtle `rgba(255, 255, 255, 0.14)` thumb, fully rounded pill radius, and smooth hover/active transitions) matching Kinana's minimalist dark theme across dialogs, service lists, account/card dialogs, and main vault views.
+
+---
+
 ## [0.1.14] - 2026-11-14
 
 ### Changed

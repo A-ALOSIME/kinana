@@ -384,7 +384,8 @@
       "customLabel": "Or set custom duration:",
       "customPlaceholder": "Minutes (e.g., 45)",
       "currentPrefix": "Current:",
-      "currentNever": "Current: Disabled (Never)"
+      "currentNever": "Current: Disabled (Never)",
+      "minutesUnit": "minutes"
     },
     "changePassword": {
       "title": "Change Master Password",

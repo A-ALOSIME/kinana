@@ -384,7 +384,8 @@
       "customLabel": "Oder benutzerdefinierte Dauer festlegen:",
       "customPlaceholder": "Minuten (z. B. 45)",
       "currentPrefix": "Aktuell:",
-      "currentNever": "Aktuell: Deaktiviert (Nie)"
+      "currentNever": "Aktuell: Deaktiviert (Nie)",
+      "minutesUnit": "Minuten"
     },
     "changePassword": {
       "title": "Master-Passwort ändern",

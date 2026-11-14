@@ -384,7 +384,8 @@
       "customLabel": "या कस्टम अवधि सेट करें:",
       "customPlaceholder": "मिनट (जैसे 45)",
       "currentPrefix": "वर्तमान:",
-      "currentNever": "वर्तमान: अक्षम (कभी नहीं)"
+      "currentNever": "वर्तमान: अक्षम (कभी नहीं)",
+      "minutesUnit": "मिनट"
     },
     "changePassword": {
       "title": "मास्टर पासवर्ड बदलें",

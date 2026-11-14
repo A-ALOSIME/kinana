@@ -384,7 +384,8 @@
       "customLabel": "Oppure imposta una durata personalizzata:",
       "customPlaceholder": "Minuti (es. 45)",
       "currentPrefix": "Attuale:",
-      "currentNever": "Attuale: Disabilitato (Mai)"
+      "currentNever": "Attuale: Disabilitato (Mai)",
+      "minutesUnit": "minuti"
     },
     "changePassword": {
       "title": "Modifica password principale",

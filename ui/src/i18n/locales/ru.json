@@ -384,7 +384,8 @@
       "customLabel": "Или укажите своё время:",
       "customPlaceholder": "Минуты (напр., 45)",
       "currentPrefix": "Текущее:",
-      "currentNever": "Текущее: Отключено (Никогда)"
+      "currentNever": "Текущее: Отключено (Никогда)",
+      "minutesUnit": "мин."
     },
     "changePassword": {
       "title": "Сменить мастер-пароль",

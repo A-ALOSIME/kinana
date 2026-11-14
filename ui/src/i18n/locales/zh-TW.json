@@ -384,7 +384,8 @@
       "customLabel": "或設定自訂時間:",
       "customPlaceholder": "分鐘 (例如 45)",
       "currentPrefix": "目前:",
-      "currentNever": "目前: 已停用 (永不)"
+      "currentNever": "目前: 已停用 (永不)",
+      "minutesUnit": "分鐘"
     },
     "changePassword": {
       "title": "變更主密碼",

@@ -384,7 +384,8 @@
       "customLabel": "Або встановіть власний час:",
       "customPlaceholder": "Хвилини (напр., 45)",
       "currentPrefix": "Поточне:",
-      "currentNever": "Поточне: Вимкнено (Ніколи)"
+      "currentNever": "Поточне: Вимкнено (Ніколи)",
+      "minutesUnit": "хв."
     },
     "changePassword": {
       "title": "Змінити майстер-пароль",

@@ -384,7 +384,8 @@
       "customLabel": "O configure una duración personalizada:",
       "customPlaceholder": "Minutos (ej., 45)",
       "currentPrefix": "Actual:",
-      "currentNever": "Actual: Desactivado (Nunca)"
+      "currentNever": "Actual: Desactivado (Nunca)",
+      "minutesUnit": "minutos"
     },
     "changePassword": {
       "title": "Cambiar contraseña maestra",

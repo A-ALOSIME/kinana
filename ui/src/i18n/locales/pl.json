@@ -384,7 +384,8 @@
       "customLabel": "Lub ustaw własny czas:",
       "customPlaceholder": "Minuty (np. 45)",
       "currentPrefix": "Obecnie:",
-      "currentNever": "Obecnie: Wyłączone (Nigdy)"
+      "currentNever": "Obecnie: Wyłączone (Nigdy)",
+      "minutesUnit": "min."
     },
     "changePassword": {
       "title": "Zmień hasło główne",

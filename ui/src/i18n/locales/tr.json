@@ -384,7 +384,8 @@
       "customLabel": "Veya özel süre belirleyin:",
       "customPlaceholder": "Dakika (örn., 45)",
       "currentPrefix": "Geçerli:",
-      "currentNever": "Geçerli: Devre Dışı (Hiçbir zaman)"
+      "currentNever": "Geçerli: Devre Dışı (Hiçbir zaman)",
+      "minutesUnit": "dakika"
     },
     "changePassword": {
       "title": "Ana Parolayı Değiştir",

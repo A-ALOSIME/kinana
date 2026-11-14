@@ -384,7 +384,8 @@
       "customLabel": "או הגדרת משך מותאם אישית:",
       "customPlaceholder": "דקות (למשל 45)",
       "currentPrefix": "נוכחי:",
-      "currentNever": "נוכחי: מושבת (לעולם לא)"
+      "currentNever": "נוכחי: מושבת (לעולם לא)",
+      "minutesUnit": "דקות"
     },
     "changePassword": {
       "title": "שינוי סיסמת מאסטר",

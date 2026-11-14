@@ -384,7 +384,8 @@
       "customLabel": "หรือกำหนดระยะเวลาเอง:",
       "customPlaceholder": "นาที (เช่น 45)",
       "currentPrefix": "ปัจจุบัน:",
-      "currentNever": "ปัจจุบัน: ปิดใช้งาน (ไม่เลย)"
+      "currentNever": "ปัจจุบัน: ปิดใช้งาน (ไม่เลย)",
+      "minutesUnit": "นาที"
     },
     "changePassword": {
       "title": "เปลี่ยนรหัสผ่านหลัก",

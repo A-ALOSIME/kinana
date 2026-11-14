@@ -384,7 +384,8 @@
       "customLabel": "یا تنظیم مدت زمان سفارشی:",
       "customPlaceholder": "دقیقه (مانند ۴۵)",
       "currentPrefix": "فعلی:",
-      "currentNever": "فعلی: غیرفعال (هرگز)"
+      "currentNever": "فعلی: غیرفعال (هرگز)",
+      "minutesUnit": "دقیقه"
     },
     "changePassword": {
       "title": "تغییر گذرواژه اصلی",

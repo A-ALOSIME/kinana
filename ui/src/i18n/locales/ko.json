@@ -384,7 +384,8 @@
       "customLabel": "또는 직접 시간 설정:",
       "customPlaceholder": "분 (예: 45)",
       "currentPrefix": "현재:",
-      "currentNever": "현재: 비활성화됨 (사용 안 함)"
+      "currentNever": "현재: 비활성화됨 (사용 안 함)",
+      "minutesUnit": "분"
     },
     "changePassword": {
       "title": "마스터 비밀번호 변경",

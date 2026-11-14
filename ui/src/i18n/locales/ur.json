@@ -384,7 +384,8 @@
       "customLabel": "یا مخصوص مدت مقرر کریں:",
       "customPlaceholder": "منٹ (جیسے ۴۵)",
       "currentPrefix": "موجودہ:",
-      "currentNever": "موجودہ: غیر فعال (کبھی نہیں)"
+      "currentNever": "موجودہ: غیر فعال (کبھی نہیں)",
+      "minutesUnit": "منٹ"
     },
     "changePassword": {
       "title": "ماسٹر پاس ورڈ تبدیل کریں",

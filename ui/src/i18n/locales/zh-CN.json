@@ -384,7 +384,8 @@
       "customLabel": "或设置自定义时长:",
       "customPlaceholder": "分钟数 (例如 45)",
       "currentPrefix": "当前:",
-      "currentNever": "当前: 已禁用 (从不)"
+      "currentNever": "当前: 已禁用 (从不)",
+      "minutesUnit": "分钟"
     },
     "changePassword": {
       "title": "更改主密码",

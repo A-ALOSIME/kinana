@@ -384,7 +384,8 @@
       "customLabel": "Hoặc thiết lập thời gian tùy chỉnh:",
       "customPlaceholder": "Phút (ví dụ: 45)",
       "currentPrefix": "Hiện tại:",
-      "currentNever": "Hiện tại: Đã tắt (Không bao giờ)"
+      "currentNever": "Hiện tại: Đã tắt (Không bao giờ)",
+      "minutesUnit": "phút"
     },
     "changePassword": {
       "title": "Đổi mật khẩu chính",

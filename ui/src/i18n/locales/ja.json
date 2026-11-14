@@ -384,7 +384,8 @@
       "customLabel": "またはカスタム時間を設定:",
       "customPlaceholder": "分単位 (例: 45)",
       "currentPrefix": "現在:",
-      "currentNever": "現在: 無効 (なし)"
+      "currentNever": "現在: 無効 (なし)",
+      "minutesUnit": "分"
     },
     "changePassword": {
       "title": "マスターパスワードを変更",

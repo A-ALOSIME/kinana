@@ -5714,16 +5714,21 @@ export default function App() {
               <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3 min-w-0">
                   <span className="text-xs font-bold text-muted-foreground shrink-0">{t("settings.autoLock.customLabel")}</span>
-                  <div className="flex items-center gap-2 flex-1 min-w-[180px] max-w-xs">
-                    <Input
-                      type="number"
-                      min="1"
-                      max="1440"
-                      placeholder={t("settings.autoLock.customPlaceholder")}
-                      value={customTimeoutMinutes}
-                      onChange={(e) => setCustomTimeoutMinutes(e.target.value)}
-                      className="min-h-10 text-xs font-bold rounded-xl border-border/70"
-                    />
+                  <div className="flex items-center gap-2">
+                    <div className="w-20 sm:w-24 shrink-0">
+                      <Input
+                        type="number"
+                        min="1"
+                        max="1440"
+                        placeholder="45"
+                        value={customTimeoutMinutes}
+                        onChange={(e) => setCustomTimeoutMinutes(e.target.value)}
+                        className="text-center min-h-10 text-xs font-bold rounded-xl border-border/70 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                    </div>
+                    <span className="text-xs font-bold text-muted-foreground shrink-0">
+                      {t("settings.autoLock.minutesUnit")}
+                    </span>
                     <Button
                       type="button"
                       size="sm"

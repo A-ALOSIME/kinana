@@ -384,7 +384,8 @@
       "customLabel": "Atau atur durasi kustom:",
       "customPlaceholder": "Menit (misalnya 45)",
       "currentPrefix": "Saat ini:",
-      "currentNever": "Saat ini: Dinonaktifkan (Jangan Pernah)"
+      "currentNever": "Saat ini: Dinonaktifkan (Jangan Pernah)",
+      "minutesUnit": "menit"
     },
     "changePassword": {
       "title": "Ubah Kata Sandi Utama",

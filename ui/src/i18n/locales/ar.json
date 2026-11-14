@@ -406,7 +406,8 @@
       "customLabel": "أو حدد مدة مخصصة:",
       "customPlaceholder": "عدد الدقائق (مثال: 45)",
       "currentPrefix": "الحالي:",
-      "currentNever": "الحالي: معطل بالكامل (أبداً)"
+      "currentNever": "الحالي: معطل بالكامل (أبداً)",
+      "minutesUnit": "دقيقة"
     },
     "changePassword": {
       "title": "تغيير كلمة المرور الرئيسية",

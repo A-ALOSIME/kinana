@@ -86,26 +86,35 @@
     @apply bg-background text-foreground;
   }
 
-  /* Sleek modern minimalist scrollbar */
+  /* Subtle modern minimalist scrollbars */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.14);
     border-radius: 9999px;
     transition: background 0.2s ease;
   }
   ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+  ::-webkit-scrollbar-thumb:active {
     background: rgba(255, 255, 255, 0.35);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  }
+  *:hover {
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
   }
 }
 

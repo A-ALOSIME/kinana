@@ -384,7 +384,8 @@
       "customLabel": "Ou définir une durée personnalisée :",
       "customPlaceholder": "Minutes (ex. 45)",
       "currentPrefix": "Actuel :",
-      "currentNever": "Actuel : Désactivé (Jamais)"
+      "currentNever": "Actuel : Désactivé (Jamais)",
+      "minutesUnit": "minutes"
     },
     "changePassword": {
       "title": "Changer le mot de passe maître",

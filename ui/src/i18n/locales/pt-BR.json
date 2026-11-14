@@ -384,7 +384,8 @@
       "customLabel": "Ou defina uma duração personalizada:",
       "customPlaceholder": "Minutos (ex.: 45)",
       "currentPrefix": "Atual:",
-      "currentNever": "Atual: Desativado (Nunca)"
+      "currentNever": "Atual: Desativado (Nunca)",
+      "minutesUnit": "minutos"
     },
     "changePassword": {
       "title": "Alterar senha mestra",
