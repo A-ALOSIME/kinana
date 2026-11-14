@@ -2660,7 +2660,7 @@ export default function App() {
 
       {!unlocked ? (
         /* ================= AUTHENTICATION VIEW (LOCK / CREATE SCREEN) ================= */
-        <main className="flex-1 min-h-screen flex flex-col items-center justify-center p-6 sm:p-8 bg-gradient-to-b from-background via-card/30 to-background relative overflow-y-auto">
+        <main className="flex-1 min-h-screen flex flex-col items-center justify-center p-4 sm:p-8 bg-gradient-to-b from-background via-card/30 to-background relative overflow-y-auto">
           <div className="fixed top-5 left-6 z-20">
             <LanguageSwitcher variant="minimal" />
           </div>
@@ -2682,7 +2682,7 @@ export default function App() {
             <div className="h-10 sm:h-16 shrink-0" aria-hidden="true" />
 
             {/* Form Card (Only authentication content inside) */}
-            <Card className="w-full border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 rounded-3xl p-6 sm:p-8">
+            <Card className="w-full max-w-[440px] border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 rounded-3xl p-6 sm:px-7 sm:py-8">
               {!exists ? (() => {
                 const createValidation = validateMasterPasswordForm({
                   password,
@@ -2750,9 +2750,9 @@ export default function App() {
                   <Button
                     type="submit"
                     disabled={!createValidation.canSubmit}
-                    className="w-full min-h-14 text-lg font-bold shadow-xl rounded-2xl"
+                    className="w-full min-h-14 h-auto py-3 px-4 text-base sm:text-lg font-bold shadow-xl rounded-2xl whitespace-normal leading-snug flex items-center justify-center text-center"
                   >
-                    <span>{t("auth.create.submit")}</span>
+                    <span className="min-w-0 text-center">{t("auth.create.submit")}</span>
                   </Button>
 
                   <p className="text-xs text-muted-foreground text-center pt-0.5 leading-relaxed">
@@ -2764,10 +2764,10 @@ export default function App() {
                       type="button"
                       variant="outline"
                       onClick={handleOpenImportModal}
-                      className="w-full min-h-12 text-sm font-semibold rounded-2xl gap-2 border-border/70"
+                      className="w-full min-h-12 h-auto py-2.5 px-4 text-xs sm:text-sm font-semibold rounded-2xl gap-2 border-border/70 whitespace-normal leading-snug flex items-center justify-center text-center"
                     >
                       <Upload className="w-4 h-4 shrink-0" />
-                      <span>
+                      <span className="min-w-0 text-center">
                         {t("auth.create.importExistingPrompt")} (<bdi dir="ltr">.dat</bdi>)
                       </span>
                     </Button>
@@ -2801,17 +2801,17 @@ export default function App() {
                   <div className="space-y-3.5 pt-2">
                     <Button
                       type="submit"
-                      className="w-full h-16 text-xl font-bold shadow-xl rounded-2xl gap-2.5"
+                      className="w-full min-h-14 sm:min-h-16 h-auto py-3 px-4 text-lg sm:text-xl font-bold shadow-xl rounded-2xl gap-2.5 whitespace-normal leading-snug flex items-center justify-center text-center"
                     >
-                      <Unlock className="w-6 h-6" />
-                      <span>{t("auth.unlock.submit")}</span>
+                      <Unlock className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+                      <span className="min-w-0 text-center">{t("auth.unlock.submit")}</span>
                     </Button>
 
                     {autoUnlockActive && isAutoUnlockSupported && (
                       <Button
                         type="button"
                         variant="secondary"
-                        className="w-full h-14 text-base font-semibold rounded-2xl gap-2 border border-border/60"
+                        className="w-full min-h-12 sm:min-h-14 h-auto py-2.5 px-4 text-sm sm:text-base font-semibold rounded-2xl gap-2.5 border border-border/60 whitespace-normal leading-snug flex items-center justify-center text-center"
                         onClick={async () => {
                           try {
                             const ok = await unlockWithAutoUnlock(
@@ -2834,30 +2834,34 @@ export default function App() {
                           }
                         }}
                       >
-                        <Shield className="w-5 h-5 text-primary" />
-                        <span>{t("auth.unlock.autoUnlockButton")}</span>
+                        <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+                        <span className="min-w-0 text-center">{t("auth.unlock.autoUnlockButton")}</span>
                       </Button>
                     )}
                   </div>
 
                   {/* Recovery and Import links */}
-                  <div className="pt-4 flex flex-col items-center gap-2.5 border-t border-border/40">
+                  <div className="pt-4 flex flex-col items-center gap-2 border-t border-border/40 w-full text-center">
                     <button
                       type="button"
                       onClick={() => setShowRecoveryModal(true)}
-                      className="text-sm font-semibold text-muted-foreground hover:text-foreground underline underline-offset-4 inline-flex items-center gap-1.5 transition-colors"
+                      className="max-w-full text-xs sm:text-sm font-semibold text-muted-foreground hover:text-foreground py-1 transition-colors text-center leading-relaxed group cursor-pointer"
                     >
-                      <KeyRound className="w-4 h-4 text-primary" />
-                      <span>{t("auth.unlock.forgotPassword")}</span>
+                      <span className="underline underline-offset-4 inline-block text-center break-words">
+                        <KeyRound className="inline w-4 h-4 text-primary shrink-0 align-text-bottom me-1.5 transition-transform group-hover:scale-110" />
+                        {t("auth.unlock.forgotPassword")}
+                      </span>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleOpenImportModal}
-                      className="text-xs font-semibold text-muted-foreground hover:text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="max-w-full text-xs font-semibold text-muted-foreground hover:text-primary py-1 transition-colors cursor-pointer text-center leading-relaxed group"
                     >
-                      <Upload className="w-3.5 h-3.5 text-primary" />
-                      <span>{t("auth.unlock.importOrSwitchVault")} (<bdi dir="ltr">.dat</bdi>)</span>
+                      <span className="inline-block text-center break-words">
+                        <Upload className="inline w-3.5 h-3.5 text-primary shrink-0 align-text-bottom me-1.5 transition-transform group-hover:scale-110" />
+                        {t("auth.unlock.importOrSwitchVault")} (<bdi dir="ltr">.dat</bdi>)
+                      </span>
                     </button>
                   </div>
                 </form>
@@ -6149,13 +6153,13 @@ export default function App() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-3xl font-black font-thamaniah flex items-center gap-3 text-start">
-              <KeyRound className="w-7 h-7 text-primary shrink-0" />
-              <span>{t("recoveryModal.title")}</span>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl p-6 sm:p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
+          <DialogHeader className="text-start pe-6 space-y-2">
+            <DialogTitle className="text-2xl sm:text-3xl font-black font-thamaniah flex items-start gap-3.5 text-start leading-tight">
+              <KeyRound className="w-7 h-7 text-primary shrink-0 mt-0.5" />
+              <span className="min-w-0 flex-1">{t("recoveryModal.title")}</span>
             </DialogTitle>
-            <DialogDescription className="text-base text-muted-foreground pt-1 text-start">
+            <DialogDescription className="text-sm sm:text-base text-muted-foreground pt-1.5 text-start leading-relaxed">
               {t("recoveryModal.description", { example: "KN-XXXX-XXXX-XXXX-XXXX" })}
             </DialogDescription>
           </DialogHeader>
@@ -6189,21 +6193,21 @@ export default function App() {
               />
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setShowRecoveryModal(false)}
-                className="h-12 px-6 rounded-xl text-base font-bold"
+                className="min-h-12 h-auto py-2.5 px-5 sm:px-6 rounded-xl text-sm sm:text-base font-bold whitespace-normal leading-snug"
               >
-                {t("common.cancel")}
+                <span>{t("common.cancel")}</span>
               </Button>
               <Button
                 type="submit"
-                className="h-12 px-8 rounded-xl text-base font-bold shadow-lg gap-2"
+                className="min-h-12 h-auto py-2.5 px-6 sm:px-8 rounded-xl text-sm sm:text-base font-bold shadow-lg gap-2 whitespace-normal flex items-center justify-center leading-snug"
               >
-                <Unlock className="w-5 h-5" />
-                <span>{t("recoveryModal.submit")}</span>
+                <Unlock className="w-5 h-5 shrink-0" />
+                <span className="min-w-0 text-center">{t("recoveryModal.submit")}</span>
               </Button>
             </div>
           </form>
@@ -6211,9 +6215,9 @@ export default function App() {
           {/* Forgotten Password / Reset Vault Option */}
           <div className="mt-8 pt-6 border-t border-border/50 text-start">
             <div className="p-4 rounded-2xl bg-muted/30 border border-border/50 space-y-2.5">
-              <div className="flex items-center gap-2 text-sm font-bold text-foreground">
-                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>{t("resetVault.recoveryNoticeTitle")}</span>
+              <div className="flex items-start gap-2.5 text-sm font-bold text-foreground leading-snug">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span className="min-w-0 flex-1">{t("resetVault.recoveryNoticeTitle")}</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 {t("resetVault.recoveryNoticeDesc")}
@@ -6228,10 +6232,10 @@ export default function App() {
                     setResetConfirmationInput("");
                     setShowResetConfirmModal(true);
                   }}
-                  className="text-xs font-semibold text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-1.5"
+                  className="min-h-9 h-auto py-2 px-3 text-xs font-semibold text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-2 whitespace-normal leading-snug inline-flex items-center text-start"
                 >
                   <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t("resetVault.startNewVaultButton")}</span>
+                  <span className="min-w-0">{t("resetVault.startNewVaultButton")}</span>
                 </Button>
               </div>
             </div>
@@ -6269,10 +6273,10 @@ export default function App() {
           <DialogHeader className="text-start pe-6 space-y-2.5">
             <div className="flex items-start gap-3.5">
               <div className="w-11 h-11 rounded-2xl bg-destructive/15 border border-destructive/35 flex items-center justify-center text-destructive shrink-0 mt-0.5">
-                <Trash2 className="w-5 h-5" />
+                <Trash2 className="w-5 h-5 shrink-0" />
               </div>
               <div className="min-w-0 flex-1 space-y-1.5">
-                <DialogTitle className="text-xl font-black font-thamaniah text-foreground leading-normal py-0.5">
+                <DialogTitle className="text-xl font-black font-thamaniah text-foreground leading-tight py-0.5">
                   {t("resetVault.confirmTitle")}
                 </DialogTitle>
                 <DialogDescription className="text-sm font-medium text-muted-foreground leading-relaxed">
@@ -6324,17 +6328,17 @@ export default function App() {
               variant="destructive"
               disabled={resetConfirmationInput.trim() !== "RESET" || isResetting}
               onClick={handleConfirmResetVault}
-              className="flex-1 min-h-11 px-4 rounded-xl text-sm font-bold gap-2 shadow-md disabled:opacity-40"
+              className="flex-1 min-h-11 h-auto py-2.5 px-3 rounded-xl text-sm font-bold gap-2 shadow-md disabled:opacity-40 whitespace-normal leading-snug flex items-center justify-center text-center"
             >
               {isResetting ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                  <span className="truncate">{t("resetVault.resetting")}</span>
+                  <span className="min-w-0 text-center">{t("resetVault.resetting")}</span>
                 </>
               ) : (
                 <>
                   <Trash2 className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{t("resetVault.confirmButton")}</span>
+                  <span className="min-w-0 text-center">{t("resetVault.confirmButton")}</span>
                 </>
               )}
             </Button>
@@ -6348,9 +6352,9 @@ export default function App() {
                 setResetConfirmationInput("");
                 setShowRecoveryModal(true);
               }}
-              className="flex-1 min-h-11 px-4 rounded-xl text-sm font-bold border-border/80"
+              className="flex-1 min-h-11 h-auto py-2.5 px-3 rounded-xl text-sm font-bold border-border/80 whitespace-normal leading-snug flex items-center justify-center text-center"
             >
-              <span>{t("common.cancel")}</span>
+              <span className="min-w-0 text-center">{t("common.cancel")}</span>
             </Button>
           </div>
         </DialogContent>
@@ -6368,13 +6372,13 @@ export default function App() {
           }
         }}
       >
-        <DialogContent className="max-w-xl p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black font-thamaniah flex items-center gap-3 text-start">
-              <Upload className="w-6 h-6 text-primary shrink-0" />
-              <span>{t("importModal.title")}</span>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl p-6 sm:p-8 rounded-3xl bg-card border-2 border-border/80 shadow-2xl">
+          <DialogHeader className="text-start pe-6 space-y-2">
+            <DialogTitle className="text-xl sm:text-2xl font-black font-thamaniah flex items-start gap-3 text-start leading-tight">
+              <Upload className="w-6 h-6 text-primary shrink-0 mt-0.5" />
+              <span className="min-w-0 flex-1">{t("importModal.title")}</span>
             </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground pt-1 text-start">
+            <DialogDescription className="text-xs sm:text-sm text-muted-foreground pt-1 text-start leading-relaxed">
               {t("importModal.description")}
             </DialogDescription>
           </DialogHeader>
@@ -6406,30 +6410,30 @@ export default function App() {
               />
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
               <Button
                 type="button"
                 variant="outline"
                 disabled={isProcessingBackup}
                 onClick={() => setShowImportModal(false)}
-                className="h-12 px-6 rounded-xl font-bold"
+                className="min-h-12 h-auto py-2.5 px-5 sm:px-6 rounded-xl font-bold whitespace-normal leading-snug"
               >
-                {t("common.cancel")}
+                <span>{t("common.cancel")}</span>
               </Button>
               <Button
                 type="submit"
                 disabled={isProcessingBackup}
-                className="h-12 px-8 rounded-xl font-bold shadow-lg gap-2"
+                className="min-h-12 h-auto py-2.5 px-6 sm:px-8 rounded-xl font-bold shadow-lg gap-2 whitespace-normal flex items-center justify-center leading-snug"
               >
                 {isProcessingBackup ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>{t("importModal.verifying")}</span>
+                    <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                    <span className="min-w-0 text-center">{t("importModal.verifying")}</span>
                   </>
                 ) : (
                   <>
-                    <Upload className="w-4 h-4" />
-                    <span>{t("importModal.submit")}</span>
+                    <Upload className="w-4 h-4 shrink-0" />
+                    <span className="min-w-0 text-center">{t("importModal.submit")}</span>
                   </>
                 )}
               </Button>
