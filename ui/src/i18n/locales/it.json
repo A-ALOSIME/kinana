@@ -540,5 +540,20 @@
     "openBrowserFailed": "Apertura del collegamento nel browser non riuscita: {{detail}}",
     "credentialWriteFailed": "Salvataggio del codice nell'archivio credenziali del sistema operativo non riuscito (codice di errore {{code}}).",
     "credentialDeleteFailed": "Rimozione del codice dall'archivio credenziali del sistema operativo non riuscita (codice di errore {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Hai perso sia la password che la chiave di ripristino?",
+    "recoveryNoticeDesc": "Creare una nuova cassaforte non recupera la vecchia password. Elimina definitivamente i dati della cassaforte locale corrente su questo dispositivo. Consigliamo di provare la chiave di ripristino, lo Sblocco Automatico o un backup prima di procedere.",
+    "startNewVaultButton": "Crea una nuova cassaforte...",
+    "confirmTitle": "Crea una nuova cassaforte",
+    "confirmWarning1": "Tutti gli account, le carte, le password e i dati in questa cassaforte locale diventeranno definitivamente inaccessibili.",
+    "confirmWarning2": "Questa azione non reimposta né recupera la vecchia password. Elimina definitivamente i file della cassaforte locale corrente da questo dispositivo per consentire la creazione di una nuova cassaforte vuota.",
+    "confirmRecommendation": "Se possiedi un file di backup crittografato (.dat) o la chiave di ripristino, annulla e prova prima quelli.",
+    "typeResetPrompt": "Per confermare l'eliminazione e ricominciare da capo, digita {{word}} qui sotto:",
+    "confirmButton": "Elimina cassaforte e ricomincia",
+    "resetting": "Eliminazione cassaforte in corso...",
+    "resetSuccessTitle": "Cassaforte reimpostata con successo",
+    "resetSuccessDetail": "La precedente cassaforte locale è stata rimossa. Ora puoi creare una nuova cassaforte con una nuova password principale e chiave di ripristino.",
+    "resetFailed": "Impossibile reimpostare la cassaforte locale: {{detail}}"
   }
 }

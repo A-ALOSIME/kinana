@@ -46,4 +46,7 @@ pub enum VaultError {
 
     #[error("Transaction journal error: {0}")]
     TransactionJournalError(String),
+
+    #[error("Vault reset failed: {0}")]
+    VaultResetFailed(String),
 }

@@ -16,7 +16,7 @@ use kinana_core::{
     },
     journal::{create_pre_import_archive, TransactionJournal},
     models::{Account, AccountKind, SecretString, Service, VaultSummary},
-    storage::{VaultSession, VaultStorage},
+    storage::{purge_local_vault_artifacts, VaultSession, VaultStorage},
 };
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -392,6 +392,47 @@ async fn lock_vault(state: State<'_, AppState>) -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+#[tauri::command]
+async fn reset_vault(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // 1. Strict guard: ensure vault is in locked state
+    {
+        let lock = state.session.lock().map_err(|e| e.to_string())?;
+        if lock.is_some() {
+            return Err("Cannot reset vault while vault is unlocked. Vault must be locked first.".to_string());
+        }
+    }
+
+    // 2. Clear any in-memory session, recovery keys, and clipboard
+    if let Ok(mut lock) = state.session.lock() {
+        *lock = None;
+    }
+    if let Ok(mut rec_lock) = state.current_recovery_key.lock() {
+        *rec_lock = None;
+    }
+    if let Ok(mut seq_lock) = state.last_clipboard_seq.lock() {
+        if let Some(expected_seq) = seq_lock.take() {
+            unsafe {
+                clipboard::clear_clipboard_if_sequence_matches(expected_seq);
+            }
+        }
+    }
+
+    // 3. Remove Auto-Unlock credentials from OS credential store
+    if let Err(e) = credential_store::delete_credential() {
+        return Err(format!("Failed to delete Auto-Unlock credential: {}", e));
+    }
+    credential_store::delete_recovery_credential();
+
+    // 4. Resolve paths and safely purge local vault artifacts
+    let vault_path = get_vault_path(&app)?;
+    let recovery_path = get_recovery_file_path(&app)?;
+
+    purge_local_vault_artifacts(&vault_path, &recovery_path)
+        .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
@@ -2360,6 +2401,7 @@ fn main() {
             create_vault,
             unlock_vault,
             lock_vault,
+            reset_vault,
             get_vault_summary,
             copy_password,
             get_account_password,

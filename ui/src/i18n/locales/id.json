@@ -540,5 +540,20 @@
     "openBrowserFailed": "Gagal membuka tautan di browser: {{detail}}",
     "credentialWriteFailed": "Gagal menyimpan kode sandi ke penyimpanan kredensial OS (kode kesalahan {{code}}).",
     "credentialDeleteFailed": "Gagal menghapus kode sandi dari penyimpanan kredensial OS (kode kesalahan {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Kehilangan kata sandi dan kunci pemulihan sekaligus?",
+    "recoveryNoticeDesc": "Membuat brankas baru tidak memulihkan kata sandi lama Anda. Tindakan ini menghapus data brankas lokal saat ini secara permanen di perangkat ini. Kami menyarankan untuk mencoba kunci pemulihan, Buka Kunci Otomatis, atau cadangan sebelum melanjutkan.",
+    "startNewVaultButton": "Mulai Brankas Baru...",
+    "confirmTitle": "Mulai Brankas Baru",
+    "confirmWarning1": "Semua akun, kartu, kata sandi, dan data di brankas lokal ini akan menjadi tidak dapat diakses secara permanen.",
+    "confirmWarning2": "Tindakan ini tidak mengatur ulang atau memulihkan kata sandi lama Anda. Tindakan ini menghapus berkas brankas lokal saat ini secara permanen agar Anda dapat membuat brankas baru yang kosong.",
+    "confirmRecommendation": "Jika Anda memiliki berkas cadangan terenkripsi (.dat) atau kunci pemulihan, silakan batalkan dan coba terlebih dahulu.",
+    "typeResetPrompt": "Untuk mengonfirmasi penghapusan dan memulai dari awal, ketik {{word}} di bawah ini:",
+    "confirmButton": "Hapus Brankas & Mulai Ulang",
+    "resetting": "Menghapus brankas...",
+    "resetSuccessTitle": "Brankas Berhasil Direset",
+    "resetSuccessDetail": "Brankas lokal sebelumnya telah dihapus. Sekarang Anda dapat membuat brankas baru dengan kata sandi utama dan kunci pemulihan baru.",
+    "resetFailed": "Gagal mereset brankas lokal: {{detail}}"
   }
 }

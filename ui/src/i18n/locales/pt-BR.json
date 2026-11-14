@@ -540,5 +540,20 @@
     "openBrowserFailed": "Falha ao abrir o link no navegador: {{detail}}",
     "credentialWriteFailed": "Falha ao salvar o código no gerenciador de credenciais do sistema operacional (código de erro {{code}}).",
     "credentialDeleteFailed": "Falha ao remover o código do gerenciador de credenciais do sistema operacional (código de error {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Perdeu a senha e a chave de recuperação?",
+    "recoveryNoticeDesc": "Iniciar um novo cofre não recupera sua senha antiga. Isso descarta permanentemente os dados do cofre local atual neste dispositivo. Recomendamos tentar sua chave de recuperação, Desbloqueio Automático ou um backup antes de continuar.",
+    "startNewVaultButton": "Iniciar um novo cofre...",
+    "confirmTitle": "Iniciar um novo cofre",
+    "confirmWarning1": "Todas as contas, cartões, senhas e dados neste cofre local ficarão permanentemente inacessíveis.",
+    "confirmWarning2": "Esta ação não redefine nem recupera sua senha antiga. Ela exclui permanentemente os arquivos do cofre local deste dispositivo para que você possa criar um novo cofre vazio.",
+    "confirmRecommendation": "Se você possui um backup criptografado (.dat) ou sua chave de recuperação, cancele e tente usá-los primeiro.",
+    "typeResetPrompt": "Para confirmar a exclusão e começar de novo, digite {{word}} abaixo:",
+    "confirmButton": "Excluir cofre e recomeçar",
+    "resetting": "Excluindo cofre...",
+    "resetSuccessTitle": "Cofre redefinido com sucesso",
+    "resetSuccessDetail": "O cofre local anterior foi removido. Agora você pode criar um novo cofre com uma nova senha mestra e chave de recuperação.",
+    "resetFailed": "Falha ao redefinir o cofre local: {{detail}}"
   }
 }

@@ -540,5 +540,20 @@
     "openBrowserFailed": "Failed to open link in browser: {{detail}}",
     "credentialWriteFailed": "Failed to save passcode to OS credential store (error code {{code}}).",
     "credentialDeleteFailed": "Failed to remove passcode from OS credential store (error code {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Lost both your password and recovery key?",
+    "recoveryNoticeDesc": "Starting a new vault does not recover your old password. It permanently discards the current local vault data on this device. We recommend trying your recovery key, Auto-Unlock, or a previous encrypted backup before proceeding.",
+    "startNewVaultButton": "Start a New Vault...",
+    "confirmTitle": "Start a New Vault",
+    "confirmWarning1": "All accounts, cards, passwords, and data in this local vault will become permanently inaccessible.",
+    "confirmWarning2": "This action does not reset or recover your old password. It permanently deletes the current local vault files from this device so you can create a fresh empty vault.",
+    "confirmRecommendation": "If you have an encrypted backup file (.dat) or your recovery key, please cancel and try them first.",
+    "typeResetPrompt": "To confirm deletion and start fresh, type {{word}} below:",
+    "confirmButton": "Delete Vault & Start Over",
+    "resetting": "Deleting vault...",
+    "resetSuccessTitle": "Vault Reset Successful",
+    "resetSuccessDetail": "The previous local vault has been removed. You can now create a brand new vault with a new master password and recovery key.",
+    "resetFailed": "Failed to reset local vault: {{detail}}"
   }
 }

@@ -540,5 +540,20 @@
     "openBrowserFailed": "Không thể mở liên kết trong trình duyệt: {{detail}}",
     "credentialWriteFailed": "Không thể lưu mật mã vào trình quản lý thông tin xác thực OS (mã lỗi {{code}}).",
     "credentialDeleteFailed": "Không thể xóa mật mã khỏi trình quản lý thông tin xác thực OS (mã lỗi {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Mất cả mật khẩu và khóa khôi phục?",
+    "recoveryNoticeDesc": "Bắt đầu một kho lưu trữ mới không khôi phục mật khẩu cũ của bạn. Thao tác này sẽ xóa vĩnh viễn dữ liệu kho cục bộ hiện tại trên thiết bị này. Bạn nên thử khóa khôi phục, Tự động mở khóa hoặc bản sao lưu trước khi tiếp tục.",
+    "startNewVaultButton": "Bắt đầu kho lưu trữ mới...",
+    "confirmTitle": "Bắt đầu kho lưu trữ mới",
+    "confirmWarning1": "Tất cả tài khoản, thẻ, mật khẩu và dữ liệu trong kho cục bộ này sẽ vĩnh viễn không thể truy cập được.",
+    "confirmWarning2": "Thao tác này không đặt lại hoặc khôi phục mật khẩu cũ của bạn. Nó xóa vĩnh viễn các tệp kho cục bộ hiện tại khỏi thiết bị này để bạn có thể tạo một kho trống mới.",
+    "confirmRecommendation": "Nếu bạn có tệp sao lưu được mã hóa (.dat) hoặc khóa khôi phục, vui lòng hủy và thử chúng trước.",
+    "typeResetPrompt": "Để xác nhận xóa và bắt đầu lại từ đầu, hãy nhập {{word}} vào bên dưới:",
+    "confirmButton": "Xóa kho lưu trữ và bắt đầu lại",
+    "resetting": "Đang xóa kho lưu trữ...",
+    "resetSuccessTitle": "Đặt lại kho lưu trữ thành công",
+    "resetSuccessDetail": "Kho lưu trữ cục bộ trước đó đã được gỡ bỏ. Bây giờ bạn có thể tạo một kho lưu trữ mới với mật khẩu chính và khóa khôi phục mới.",
+    "resetFailed": "Không thể đặt lại kho lưu trữ cục bộ: {{detail}}"
   }
 }

@@ -540,5 +540,20 @@
     "openBrowserFailed": "Bağlantı tarayıcıda açılamadı: {{detail}}",
     "credentialWriteFailed": "Parola işletim sistemi kimlik bilgisi deposuna kaydedilemedi (hata kodu {{code}}).",
     "credentialDeleteFailed": "Parola işletim sistemi kimlik bilgisi deposundan silinemedi (hata kodu {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Hem şifrenizi hem de kurtarma anahtarınızı mı kaybettiniz?",
+    "recoveryNoticeDesc": "Yeni bir kasa başlatmak eski şifrenizi kurtarmaz. Bu cihazdaki mevcut yerel kasa verilerini kalıcı olarak siler. Devam etmeden önce kurtarma anahtarınızı, Otomatik Kilit Açmayı veya bir yedeği denemenizi öneririz.",
+    "startNewVaultButton": "Yeni Bir Kasa Başlat...",
+    "confirmTitle": "Yeni Bir Kasa Başlat",
+    "confirmWarning1": "Bu yerel kasadaki tüm hesaplar, kartlar, şifreler ve veriler kalıcı olarak erişilemez hale gelecektir.",
+    "confirmWarning2": "Bu işlem eski şifrenizi sıfırlamaz veya kurtarmaz. Yeni ve boş bir kasa oluşturabilmeniz için mevcut yerel kasa dosyalarını bu cihazdan kalıcı olarak siler.",
+    "confirmRecommendation": "Şifreli bir yedek dosyanız (.dat) veya kurtarma anahtarınız varsa lütfen iptal edip önce onları deneyin.",
+    "typeResetPrompt": "Silme işlemini onaylamak ve yeniden başlamak için aşağıya {{word}} yazın:",
+    "confirmButton": "Kasayı Sil ve Yeniden Başla",
+    "resetting": "Kasa siliniyor...",
+    "resetSuccessTitle": "Kasa Başarıyla Sıfırlandı",
+    "resetSuccessDetail": "Önceki yerel kasa kaldırıldı. Artık yeni bir ana şifre ve kurtarma anahtarı ile yeni bir kasa oluşturabilirsiniz.",
+    "resetFailed": "Yerel kasa sıfırlanamadı: {{detail}}"
   }
 }

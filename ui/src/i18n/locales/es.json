@@ -540,5 +540,20 @@
     "openBrowserFailed": "Error al abrir el enlace en el navegador: {{detail}}",
     "credentialWriteFailed": "Error al guardar el código en el almacén de credenciales del sistema (código de error {{code}}).",
     "credentialDeleteFailed": "Error al eliminar el código del almacén de credenciales del sistema (código de error {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "¿Ha perdido tanto la contraseña como la clave de recuperación?",
+    "recoveryNoticeDesc": "Iniciar una nueva bóveda no recupera su contraseña anterior. Elimina permanentemente los datos de la bóveda local actual en este dispositivo. Recomendamos probar su clave de recuperación, Desbloqueo Automático o una copia de seguridad antes de continuar.",
+    "startNewVaultButton": "Iniciar una nueva bóveda...",
+    "confirmTitle": "Iniciar una nueva bóveda",
+    "confirmWarning1": "Todas las cuentas, tarjetas, contraseñas y datos de esta bóveda local quedarán permanentemente inaccesibles.",
+    "confirmWarning2": "Esta acción no restablece ni recupera su contraseña anterior. Elimina permanentemente los archivos de la bóveda local actual de este dispositivo para que pueda crear una nueva bóveda vacía.",
+    "confirmRecommendation": "Si tiene una copia de seguridad cifrada (.dat) o su clave de recuperación, cancele e inténtelo primero.",
+    "typeResetPrompt": "Para confirmar la eliminación y comenzar de nuevo, escriba {{word}} a continuación:",
+    "confirmButton": "Eliminar bóveda y comenzar de nuevo",
+    "resetting": "Eliminando bóveda...",
+    "resetSuccessTitle": "Bóveda restablecida con éxito",
+    "resetSuccessDetail": "Se ha eliminado la bóveda local anterior. Ahora puede crear una nueva bóveda con una nueva contraseña maestra y clave de recuperación.",
+    "resetFailed": "Error al restablecer la bóveda local: {{detail}}"
   }
 }

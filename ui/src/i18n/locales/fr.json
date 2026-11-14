@@ -540,5 +540,20 @@
     "openBrowserFailed": "Échec de l'ouverture du lien dans le navigateur : {{detail}}",
     "credentialWriteFailed": "Échec de l'enregistrement du code dans le gestionnaire d'identifiants (code d'erreur {{code}}).",
     "credentialDeleteFailed": "Échec de la suppression du code du gestionnaire d'identifiants (code d'erreur {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Vous avez perdu à la fois le mot de passe et la clé de récupération ?",
+    "recoveryNoticeDesc": "Créer un nouveau coffre-fort ne récupère pas votre ancien mot de passe. Cela supprime définitivement les données du coffre-fort local actuel sur cet appareil. Nous vous recommandons d'essayer votre clé de récupération, le déverrouillage automatique ou une sauvegarde avant de continuer.",
+    "startNewVaultButton": "Créer un nouveau coffre-fort...",
+    "confirmTitle": "Créer un nouveau coffre-fort",
+    "confirmWarning1": "Tous les comptes, cartes, mots de passe et données de ce coffre-fort local deviendront définitivement inaccessibles.",
+    "confirmWarning2": "Cette action ne réinitialise ni ne récupère votre ancien mot de passe. Elle supprime définitivement les fichiers du coffre-fort local de cet appareil afin de vous permettre de créer un nouveau coffre-fort vide.",
+    "confirmRecommendation": "Si vous disposez d'un fichier de sauvegarde chiffré (.dat) ou de votre clé de récupération, veuillez annuler et les essayer d'abord.",
+    "typeResetPrompt": "Pour confirmer la suppression et recommencer, tapez {{word}} ci-dessous :",
+    "confirmButton": "Supprimer le coffre-fort et recommencer",
+    "resetting": "Suppression du coffre-fort...",
+    "resetSuccessTitle": "Coffre-fort réinitialisé avec succès",
+    "resetSuccessDetail": "Le coffre-fort local précédent a été supprimé. Vous pouvez désormais créer un nouveau coffre-fort avec un nouveau mot de passe maître et une nouvelle clé de récupération.",
+    "resetFailed": "Échec de la réinitialisation du coffre-fort local : {{detail}}"
   }
 }

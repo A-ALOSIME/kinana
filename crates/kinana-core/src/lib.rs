@@ -20,4 +20,4 @@ pub use crypto::{
 pub use error::VaultError;
 pub use journal::{atomic_replace, create_pre_import_archive, TransactionJournal, TransactionState};
 pub use models::{Account, AccountSummary, SecretString, Service, ServiceSummary, VaultData, VaultSummary};
-pub use storage::{VaultSession, VaultStorage};
+pub use storage::{purge_local_vault_artifacts, VaultSession, VaultStorage};

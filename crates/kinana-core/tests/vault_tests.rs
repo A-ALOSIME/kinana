@@ -2393,3 +2393,110 @@ fn test_account_kind_persistence_across_unlock_restart_and_legacy_migration() {
     assert_eq!(legacy_summary.services[0].accounts[0].account_kind, AccountKind::Card);
     assert_eq!(legacy_summary.services[0].accounts[1].account_kind, AccountKind::Login);
 }
+
+#[test]
+fn test_purge_local_vault_artifacts_removes_vault_and_preserves_unrelated_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let recovery_path = dir.path().join("recovery.dat");
+
+    // 1. Create active vault
+    let storage = VaultStorage::new(&vault_path);
+    let mut session = storage.create_new_vault("OldMasterPassword123!", None).unwrap();
+    storage.save(&mut session).unwrap();
+    assert!(vault_path.exists());
+
+    // 2. Create associated vault artifacts
+    let journal_path = dir.path().join("vault.tx.journal");
+    let vault_safety = dir.path().join("vault.dat.safety");
+    let rec_safety = dir.path().join("recovery.dat.safety");
+    let vault_tmp = dir.path().join("vault.dat.tmp");
+    let rec_tmp = dir.path().join("recovery.dat.tmp");
+    let pre_import_vault = dir.path().join("vault.dat.pre_import_1710000_123456.bak");
+    let pre_import_rec = dir.path().join("recovery.dat.pre_import_1710000_123456.bak");
+    let latest_vault_bak = dir.path().join("vault.dat.pre_import_latest.bak");
+
+    fs::write(&recovery_path, b"dummy recovery payload").unwrap();
+    fs::write(&journal_path, b"dummy journal content").unwrap();
+    fs::write(&vault_safety, b"dummy vault safety").unwrap();
+    fs::write(&rec_safety, b"dummy rec safety").unwrap();
+    fs::write(&vault_tmp, b"dummy vault tmp").unwrap();
+    fs::write(&rec_tmp, b"dummy rec tmp").unwrap();
+    fs::write(&pre_import_vault, b"dummy pre import vault").unwrap();
+    fs::write(&pre_import_rec, b"dummy pre import rec").unwrap();
+    fs::write(&latest_vault_bak, b"dummy latest bak").unwrap();
+
+    // 3. Create UNRELATED files and external backup in the same directory
+    let user_prefs = dir.path().join("user_preferences.json");
+    let external_backup = dir.path().join("my_external_export_backup.dat");
+    let other_file = dir.path().join("notes.txt");
+    fs::write(&user_prefs, b"{\"language\": \"ar\", \"theme\": \"dark\"}").unwrap();
+    fs::write(&external_backup, b"encrypted external backup").unwrap();
+    fs::write(&other_file, b"important user notes").unwrap();
+
+    // 4. Execute purge
+    let purge_res = kinana_core::purge_local_vault_artifacts(&vault_path, &recovery_path);
+    assert!(purge_res.is_ok(), "purge_local_vault_artifacts must succeed");
+
+    // 5. Verify all vault artifacts were removed
+    assert!(!vault_path.exists(), "vault.dat must be removed");
+    assert!(!recovery_path.exists(), "recovery.dat must be removed");
+    assert!(!journal_path.exists(), "vault.tx.journal must be removed");
+    assert!(!vault_safety.exists(), "vault.dat.safety must be removed");
+    assert!(!rec_safety.exists(), "recovery.dat.safety must be removed");
+    assert!(!vault_tmp.exists(), "vault.dat.tmp must be removed");
+    assert!(!rec_tmp.exists(), "recovery.dat.tmp must be removed");
+    assert!(!pre_import_vault.exists(), "pre_import vault backup must be removed");
+    assert!(!pre_import_rec.exists(), "pre_import recovery backup must be removed");
+    assert!(!latest_vault_bak.exists(), "latest backup must be removed");
+
+    // 6. Verify unrelated files are STRICTLY preserved intact
+    assert!(user_prefs.exists(), "user_preferences.json must be preserved");
+    assert_eq!(fs::read(&user_prefs).unwrap(), b"{\"language\": \"ar\", \"theme\": \"dark\"}");
+    assert!(external_backup.exists(), "External backup must be preserved");
+    assert_eq!(fs::read(&external_backup).unwrap(), b"encrypted external backup");
+    assert!(other_file.exists(), "notes.txt must be preserved");
+    assert_eq!(fs::read(&other_file).unwrap(), b"important user notes");
+}
+
+#[test]
+fn test_create_new_vault_succeeds_after_purge_and_persists_across_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault_path = dir.path().join("vault.dat");
+    let recovery_path = dir.path().join("recovery.dat");
+
+    // 1. Create first vault
+    let storage = VaultStorage::new(&vault_path);
+    let mut session1 = storage.create_new_vault("OldPassword!1", None).unwrap();
+    session1.data.services.push(Service {
+        id: "srv1".to_string(),
+        name: "Old Service".to_string(),
+        icon_data: None,
+        accounts: vec![],
+    });
+    storage.save(&mut session1).unwrap();
+    assert!(storage.exists());
+
+    // 2. Purge vault
+    kinana_core::purge_local_vault_artifacts(&vault_path, &recovery_path).unwrap();
+    assert!(!storage.exists());
+
+    // 3. Create fresh new vault with different password
+    let mut session2 = storage.create_new_vault("BrandNewPassword!2", None).unwrap();
+    session2.data.services.push(Service {
+        id: "srv2".to_string(),
+        name: "New Service".to_string(),
+        icon_data: None,
+        accounts: vec![],
+    });
+    storage.save(&mut session2).unwrap();
+    assert!(storage.exists());
+
+    // 4. Verify unlock with new password succeeds and has new data
+    let unlocked = storage.unlock("BrandNewPassword!2").unwrap();
+    assert_eq!(unlocked.data.services.len(), 1);
+    assert_eq!(unlocked.data.services[0].name, "New Service");
+
+    // 5. Verify old password fails
+    assert!(storage.unlock("OldPassword!1").is_err(), "Old password must fail to unlock new vault");
+}

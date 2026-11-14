@@ -540,5 +540,20 @@
     "openBrowserFailed": "Öffnen des Links im Browser fehlgeschlagen: {{detail}}",
     "credentialWriteFailed": "Speichern des Codes im Anmeldeinformationsspeicher des Betriebssystems fehlgeschlagen (Fehlercode {{code}}).",
     "credentialDeleteFailed": "Entfernen des Codes aus dem Anmeldeinformationsspeicher des Betriebssystems fehlgeschlagen (Fehlercode {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Sowohl Passwort als auch Wiederherstellungsschlüssel verloren?",
+    "recoveryNoticeDesc": "Das Erstellen eines neuen Tresors stellt Ihr altes Passwort nicht wieder her. Es löscht die aktuellen lokalen Tresordaten auf diesem Gerät dauerhaft. Wir empfehlen, vor dem Fortfahren Ihren Wiederherstellungsschlüssel, Auto-Unlock oder ein Backup auszuprobieren.",
+    "startNewVaultButton": "Neuen Tresor erstellen...",
+    "confirmTitle": "Neuen Tresor erstellen",
+    "confirmWarning1": "Alle Konten, Karten, Passwörter und Daten in diesem lokalen Tresor werden dauerhaft unzugänglich.",
+    "confirmWarning2": "Diese Aktion setzt Ihr altes Passwort nicht zurück und stellt es nicht wieder her. Sie löscht die aktuellen lokalen Tresordateien von diesem Gerät dauerhaft, damit Sie einen neuen leeren Tresor erstellen können.",
+    "confirmRecommendation": "Wenn Sie über ein verschlüsseltes Backup (.dat) oder Ihren Wiederherstellungsschlüssel verfügen, brechen Sie bitte ab und versuchen Sie diese zuerst.",
+    "typeResetPrompt": "Um das Löschen zu bestätigen und neu zu beginnen, geben Sie unten {{word}} ein:",
+    "confirmButton": "Tresor löschen und neu beginnen",
+    "resetting": "Tresor wird gelöscht...",
+    "resetSuccessTitle": "Tresor erfolgreich zurückgesetzt",
+    "resetSuccessDetail": "Der vorherige lokale Tresor wurde entfernt. Sie können nun einen neuen Tresor mit einem neuen Master-Passwort und Wiederherstellungsschlüssel erstellen.",
+    "resetFailed": "Fehler beim Zurücksetzen des lokalen Tresors: {{detail}}"
   }
 }

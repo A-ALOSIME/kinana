@@ -540,5 +540,20 @@
     "openBrowserFailed": "Nie udało się otworzyć łącza w przeglądarce: {{detail}}",
     "credentialWriteFailed": "Nie udało się zapisać kodu w magazynie poświadczeń systemu operacyjnego (kod błędu {{code}}).",
     "credentialDeleteFailed": "Nie udało się usunąć kodu z magazynu poświadczeń systemu operacyjnego (kod błędu {{code}})."
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "Utracono zarówno hasło, jak i klucz odzyskiwania?",
+    "recoveryNoticeDesc": "Utworzenie nowego sejfu nie przywraca starego hasła. Trwale usuwa bieżące dane lokalnego sejfu na tym urządzeniu. Przed kontynuowaniem zalecamy wypróbowanie klucza odzyskiwania, automatycznego odblokowania lub kopii zapasowej.",
+    "startNewVaultButton": "Rozpocznij nowy sejf...",
+    "confirmTitle": "Rozpocznij nowy sejf",
+    "confirmWarning1": "Wszystkie konta, karty, hasła i dane w tym lokalnym sejfie staną się trwale niedostępne.",
+    "confirmWarning2": "Ta operacja nie resetuje ani nie odzyskuje starego hasła. Trwale usuwa pliki bieżącego lokalnego sejfu z tego urządzenia, umożliwiając utworzenie nowego pustego sejfu.",
+    "confirmRecommendation": "Jeśli posiadasz zaszyfrowaną kopię zapasową (.dat) lub klucz odzyskiwania, anuluj i wypróbuj je najpierw.",
+    "typeResetPrompt": "Aby potwierdzić usunięcie i rozpocząć od nowa, wpisz poniżej {{word}}:",
+    "confirmButton": "Usuń sejf i zacznij od nowa",
+    "resetting": "Usuwanie sejfu...",
+    "resetSuccessTitle": "Sejf został pomyślnie zresetowany",
+    "resetSuccessDetail": "Poprzedni lokalny sejf został usunięty. Możesz teraz utworzyć nowy sejf z nowym hasłem głównym i kluczem odzyskiwania.",
+    "resetFailed": "Nie udało się zresetować lokalnego sejfu: {{detail}}"
   }
 }

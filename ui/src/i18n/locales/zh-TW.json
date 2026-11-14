@@ -540,5 +540,20 @@
     "openBrowserFailed": "在瀏覽器中開啟連結失敗: {{detail}}",
     "credentialWriteFailed": "儲存認證至系統認證管理員失敗 (錯誤代碼 {{code}})。",
     "credentialDeleteFailed": "從系統認證管理員刪除認證失敗 (錯誤代碼 {{code}})。"
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "同時遺失了主密碼與復原金鑰？",
+    "recoveryNoticeDesc": "建立新保存庫並不會找回舊密碼，而是會永久刪除此裝置上的目前本機保存庫資料。建議在繼續前先嘗試復原金鑰、自動解鎖或備份檔。",
+    "startNewVaultButton": "建立新保存庫...",
+    "confirmTitle": "建立新保存庫",
+    "confirmWarning1": "此本機保存庫中的所有帳號、卡片、密碼與資料將永久無法存取。",
+    "confirmWarning2": "此操作不會重設或找回您的舊密碼。它會永久刪除此裝置上的目前本機保存庫檔案，以便您建立全新的空白保存庫。",
+    "confirmRecommendation": "若您有加密備份檔 (.dat) 或復原金鑰，請先取消並嘗試使用它們。",
+    "typeResetPrompt": "若要確認刪除並重新開始，請在下方輸入 {{word}}：",
+    "confirmButton": "刪除保存庫並重新開始",
+    "resetting": "正在刪除保存庫...",
+    "resetSuccessTitle": "保存庫重設成功",
+    "resetSuccessDetail": "已成功移除先前的本機保存庫。您現在可以使用新的主密碼與復原金鑰建立新保存庫。",
+    "resetFailed": "重設本機保存庫失敗：{{detail}}"
   }
 }

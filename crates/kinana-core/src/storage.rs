@@ -303,3 +303,81 @@ impl VaultStorage {
         Ok(())
     }
 }
+
+/// Safely purges an active local vault and all associated local artifacts (recovery data,
+/// journals, safety backups, and pre-import backups) from disk.
+/// Never removes files outside verified Kinana vault naming patterns, and never touches parent directories.
+pub fn purge_local_vault_artifacts(
+    vault_path: &Path,
+    recovery_path: &Path,
+) -> Result<(), VaultError> {
+    let mut failures = Vec::new();
+
+    // 1. Target known exact vault artifact paths
+    let candidate_paths = [
+        vault_path.to_path_buf(),
+        recovery_path.to_path_buf(),
+        vault_path.with_extension("tx.journal"),
+        recovery_path.with_extension("tx.journal"),
+        vault_path.with_extension("dat.safety"),
+        recovery_path.with_extension("dat.safety"),
+        vault_path.with_extension("dat.tmp"),
+        recovery_path.with_extension("dat.tmp"),
+        vault_path.with_extension("tmp"),
+        recovery_path.with_extension("tmp"),
+        vault_path.with_extension("dat.bak"),
+        recovery_path.with_extension("dat.bak"),
+        vault_path.with_extension("dat.pre_import_latest.bak"),
+        recovery_path.with_extension("dat.pre_import_latest.bak"),
+    ];
+
+    for path in &candidate_paths {
+        if path.exists() {
+            if let Err(e) = fs::remove_file(path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    failures.push(format!("{}: {}", path.display(), e));
+                }
+            }
+        }
+    }
+
+    // 2. Safely scan parent directory for timestamped pre-import backups strictly belonging to this vault
+    if let Some(parent) = vault_path.parent() {
+        if parent.exists() {
+            if let Ok(entries) = fs::read_dir(parent) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            let is_vault_pre_import = file_name.starts_with("vault.dat.pre_import_") && file_name.ends_with(".bak");
+                            let is_rec_pre_import = file_name.starts_with("recovery.dat.pre_import_") && file_name.ends_with(".bak");
+                            if is_vault_pre_import || is_rec_pre_import {
+                                if let Err(e) = fs::remove_file(&path) {
+                                    if e.kind() != std::io::ErrorKind::NotFound {
+                                        failures.push(format!("{}: {}", file_name, e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        return Err(VaultError::VaultResetFailed(format!(
+            "Could not remove all vault files during reset: {}",
+            failures.join("; ")
+        )));
+    }
+
+    if vault_path.exists() {
+        return Err(VaultError::VaultResetFailed(format!(
+            "Active vault file still exists at {}",
+            vault_path.display()
+        )));
+    }
+
+    Ok(())
+}

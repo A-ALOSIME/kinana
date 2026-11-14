@@ -540,5 +540,20 @@
     "openBrowserFailed": "在浏览器中打开链接失败: {{detail}}",
     "credentialWriteFailed": "保存凭据至系统凭据管理器失败 (错误代码 {{code}})。",
     "credentialDeleteFailed": "从系统凭据管理器删除凭据失败 (错误代码 {{code}})。"
+  },
+  "resetVault": {
+    "recoveryNoticeTitle": "同时遗失了主密码和恢复密钥？",
+    "recoveryNoticeDesc": "创建新保管库不会找回旧密码，而是会永久删除此设备上的当前本地保管库数据。我们建议在继续之前先尝试恢复密钥、自动解锁或备份文件。",
+    "startNewVaultButton": "创建新保管库...",
+    "confirmTitle": "创建新保管库",
+    "confirmWarning1": "此本地保管库中的所有账户、卡片、密码和数据将永久无法访问。",
+    "confirmWarning2": "此操作无法重置或找回您的旧密码。它将永久删除此设备上的当前本地保管库文件，以便您创建全新的空保管库。",
+    "confirmRecommendation": "如果您有加密备份文件 (.dat) 或恢复密钥，请先取消并尝试使用它们。",
+    "typeResetPrompt": "若要确认删除并重新开始，请在下方输入 {{word}}：",
+    "confirmButton": "删除保管库并重新开始",
+    "resetting": "正在删除保管库...",
+    "resetSuccessTitle": "保管库重置成功",
+    "resetSuccessDetail": "已成功移除先前的本地保管库。您现在可以使用新的主密码和恢复密钥创建新保管库。",
+    "resetFailed": "重置本地保管库失败：{{detail}}"
   }
 }

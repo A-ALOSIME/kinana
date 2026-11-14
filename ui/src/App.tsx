@@ -89,6 +89,7 @@ import {
   Pin,
   PinOff,
   Info,
+  RotateCcw,
 } from "lucide-react";
 import { PasswordStrengthIndicator } from "@/components/ui/password-strength-indicator";
 import { AccountFormFields } from "@/components/AccountFormFields";
@@ -531,6 +532,12 @@ export default function App() {
   const [inputRecoveryKey, setInputRecoveryKey] = useState<string>("");
   const [showInputRecoveryKey, setShowInputRecoveryKey] = useState<boolean>(false);
 
+  // Vault Reset state (Destructive Start-New-Vault modal)
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState<boolean>(false);
+  const [resetConfirmationInput, setResetConfirmationInput] = useState<string>("");
+  const [isResetting, setIsResetting] = useState<boolean>(false);
+  const resetCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+
   // Zoom level state & HUD indicator
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const zoomMetrics = useMemo(() => computeZoomMetrics(zoomLevel), [zoomLevel]);
@@ -870,6 +877,7 @@ export default function App() {
     showBatchDeleteModal ||
     showSettings ||
     showRecoveryModal ||
+    showResetConfirmModal ||
     showImportModal ||
     showAutoUnlockModal;
   useEffect(() => {
@@ -1316,6 +1324,7 @@ export default function App() {
     showEditService ||
     showSettings ||
     showRecoveryModal ||
+    showResetConfirmModal ||
     showImportModal;
 
   useEffect(() => {
@@ -1919,6 +1928,38 @@ export default function App() {
       });
     } catch (err: any) {
       setError(mapBackendErr(err, "recoveryModal.failed"));
+    }
+  };
+
+  // Start a New Vault (Destructive local vault reset)
+  const handleConfirmResetVault = async () => {
+    if (resetConfirmationInput.trim() !== "RESET" || isResetting) return;
+    try {
+      setIsResetting(true);
+      setError(null);
+      await invoke("reset_vault");
+      // Successful reset
+      setExists(false);
+      setPassword("");
+      setConfirmCreatePassword("");
+      setCreateConfirmTouched(false);
+      setShowCreatePassword(false);
+      setShowConfirmCreatePassword(false);
+      setShowUnlockPassword(false);
+      setInputRecoveryKey("");
+      setShowInputRecoveryKey(false);
+      setResetConfirmationInput("");
+      setShowResetConfirmModal(false);
+      setShowRecoveryModal(false);
+      setAutoUnlockActive(false);
+      setSuccess(
+        t("resetVault.resetSuccessTitle"),
+        t("resetVault.resetSuccessDetail")
+      );
+    } catch (err: any) {
+      setError(mapBackendErr(err, "resetVault.resetFailed"));
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -2618,26 +2659,30 @@ export default function App() {
       )}
 
       {!unlocked ? (
-        /* ================= AUTHENTICATION VIEW (LOCK SCREEN) ================= */
-        <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-b from-background via-card/30 to-background relative">
-          <div className="absolute top-5 left-6 z-20">
+        /* ================= AUTHENTICATION VIEW (LOCK / CREATE SCREEN) ================= */
+        <main className="flex-1 min-h-screen flex flex-col items-center justify-center p-6 sm:p-8 bg-gradient-to-b from-background via-card/30 to-background relative overflow-y-auto">
+          <div className="fixed top-5 left-6 z-20">
             <LanguageSwitcher variant="minimal" />
           </div>
-          <Card className="w-full max-w-2xl border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 p-6 sm:p-8 rounded-3xl">
-            <CardHeader className="text-center pb-6 pt-6">
-              <div className="flex justify-center mb-5">
-                <img
-                  src={kinanaLogo}
-                  alt="Kinana"
-                  className="h-28 sm:h-32 w-auto object-contain drop-shadow-xl"
-                />
-              </div>
-              <CardDescription className="text-lg text-muted-foreground font-medium pt-3 font-sans leading-relaxed">
-                {t("auth.tagline")}
-              </CardDescription>
-            </CardHeader>
 
-            <CardContent className="px-6 sm:px-10 pb-8 pt-2">
+          <div className="w-full max-w-[440px] flex flex-col items-center my-auto py-8">
+            {/* Logo and Tagline (Completely outside the form card) */}
+            <div className="flex flex-col items-center text-center select-none">
+              <img
+                src={kinanaLogo}
+                alt="Kinana"
+                className="h-36 sm:h-40 w-auto object-contain drop-shadow-xl"
+              />
+              <p className="text-base sm:text-lg text-muted-foreground font-medium pt-3 sm:pt-4 font-sans leading-relaxed max-w-sm">
+                {t("auth.tagline")}
+              </p>
+            </div>
+
+            {/* 64px responsive spacing */}
+            <div className="h-10 sm:h-16 shrink-0" aria-hidden="true" />
+
+            {/* Form Card (Only authentication content inside) */}
+            <Card className="w-full border-border/80 shadow-2xl backdrop-blur-xl bg-card/95 rounded-3xl p-6 sm:p-8">
               {!exists ? (() => {
                 const createValidation = validateMasterPasswordForm({
                   password,
@@ -2817,8 +2862,8 @@ export default function App() {
                   </div>
                 </form>
               )}
-            </CardContent>
-          </Card>
+            </Card>
+          </div>
         </main>
       ) : (
         /* ================= UNLOCKED MAIN VAULT VIEW ================= */
@@ -6162,6 +6207,152 @@ export default function App() {
               </Button>
             </div>
           </form>
+
+          {/* Forgotten Password / Reset Vault Option */}
+          <div className="mt-8 pt-6 border-t border-border/50 text-start">
+            <div className="p-4 rounded-2xl bg-muted/30 border border-border/50 space-y-2.5">
+              <div className="flex items-center gap-2 text-sm font-bold text-foreground">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>{t("resetVault.recoveryNoticeTitle")}</span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {t("resetVault.recoveryNoticeDesc")}
+              </p>
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowRecoveryModal(false);
+                    setResetConfirmationInput("");
+                    setShowResetConfirmModal(true);
+                  }}
+                  className="text-xs font-semibold text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t("resetVault.startNewVaultButton")}</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ================= MODAL: START A NEW VAULT (DESTRUCTIVE VAULT RESET) ================= */}
+      <Dialog
+        open={showResetConfirmModal}
+        onOpenChange={(open) => {
+          if (isResetting) return;
+          setShowResetConfirmModal(open);
+          if (!open) {
+            setResetConfirmationInput("");
+            setShowRecoveryModal(true);
+          }
+        }}
+      >
+        <DialogContent
+          dir={isRtl ? "rtl" : "ltr"}
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            // Safe default: Focus Cancel initially, never auto-focusing the destructive button
+            resetCancelButtonRef.current?.focus();
+          }}
+          onKeyDown={(e) => {
+            // Prevent accidental submission via Enter key
+            if (e.key === "Enter") {
+              e.preventDefault();
+            }
+          }}
+          className="w-[calc(100vw-2rem)] max-w-lg p-6 sm:p-7 rounded-3xl bg-card border-2 border-border/80 shadow-2xl text-start gap-5"
+        >
+          <DialogHeader className="text-start pe-6 space-y-2.5">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-destructive/15 border border-destructive/35 flex items-center justify-center text-destructive shrink-0 mt-0.5">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <DialogTitle className="text-xl font-black font-thamaniah text-foreground leading-normal py-0.5">
+                  {t("resetVault.confirmTitle")}
+                </DialogTitle>
+                <DialogDescription className="text-sm font-medium text-muted-foreground leading-relaxed">
+                  {t("resetVault.confirmWarning1")}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 text-xs text-muted-foreground">
+            <div className="p-3.5 rounded-xl bg-destructive/10 border border-destructive/25 text-rose-300/90 leading-relaxed space-y-1.5">
+              <p className="font-semibold text-rose-200">
+                {t("resetVault.confirmWarning2")}
+              </p>
+              <p>
+                {t("resetVault.confirmRecommendation")}
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <label htmlFor="reset-vault-confirmation-input" className="block text-xs font-semibold text-foreground">
+                {t("resetVault.typeResetPrompt", { word: "RESET" })}
+              </label>
+              <Input
+                id="reset-vault-confirmation-input"
+                type="text"
+                value={resetConfirmationInput}
+                onChange={(e) => setResetConfirmationInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                  }
+                }}
+                placeholder="RESET"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+                className="h-11 rounded-xl text-center font-mono font-bold tracking-widest uppercase bg-background border-border/80 focus-visible:ring-rose-500/50"
+              />
+            </div>
+          </div>
+
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className="flex flex-row items-center gap-3 pt-4 border-t border-border/60 w-full"
+          >
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={resetConfirmationInput.trim() !== "RESET" || isResetting}
+              onClick={handleConfirmResetVault}
+              className="flex-1 min-h-11 px-4 rounded-xl text-sm font-bold gap-2 shadow-md disabled:opacity-40"
+            >
+              {isResetting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                  <span className="truncate">{t("resetVault.resetting")}</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{t("resetVault.confirmButton")}</span>
+                </>
+              )}
+            </Button>
+            <Button
+              ref={resetCancelButtonRef}
+              type="button"
+              variant="outline"
+              disabled={isResetting}
+              onClick={() => {
+                setShowResetConfirmModal(false);
+                setResetConfirmationInput("");
+                setShowRecoveryModal(true);
+              }}
+              className="flex-1 min-h-11 px-4 rounded-xl text-sm font-bold border-border/80"
+            >
+              <span>{t("common.cancel")}</span>
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
