@@ -91,12 +91,22 @@
     width: 4px;
     height: 4px;
   }
+  ::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
   ::-webkit-scrollbar-track {
+    background: transparent;
+    border: none;
+  }
+  ::-webkit-scrollbar-track-piece {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.14);
     border-radius: 9999px;
+    border: none;
     transition: background 0.2s ease;
   }
   ::-webkit-scrollbar-thumb:hover {
@@ -115,6 +125,25 @@
   }
   *:hover {
     scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  }
+
+  /* Dedicated utility to visually hide scrollbars while preserving full scrollability */
+  .kinana-scrollbar-hidden,
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .kinana-scrollbar-hidden::-webkit-scrollbar,
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .kinana-scrollbar-hidden::-webkit-scrollbar-button,
+  .scrollbar-none::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
   }
 }
 

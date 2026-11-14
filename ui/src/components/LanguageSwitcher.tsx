@@ -191,7 +191,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
         ref={listboxRef}
         role="listbox"
         aria-label={t("language.switchAriaLabel")}
-        className="overflow-y-auto max-h-56 space-y-0.5 pe-0.5"
+        className="overflow-y-auto max-h-56 space-y-0.5 pe-0.5 kinana-scrollbar-hidden"
       >
         {filteredLanguages.length === 0 ? (
           <div className="py-4 text-center text-xs text-muted-foreground">

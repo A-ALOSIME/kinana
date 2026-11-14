@@ -127,10 +127,20 @@ test("Minimalist subtle scrollbar styles in index.css enforce thin dimensions, t
     "Expected webkit scrollbar height: 4px"
   );
 
-  // Transparent track
+  // Hidden native scrollbar buttons (arrows)
+  assert.ok(
+    cssSrc.includes("::-webkit-scrollbar-button") && cssSrc.includes("display: none;"),
+    "Expected native scrollbar arrow buttons to be hidden"
+  );
+
+  // Transparent track without borders
   assert.ok(
     cssSrc.includes("::-webkit-scrollbar-track") && cssSrc.includes("background: transparent;"),
     "Expected transparent scrollbar track"
+  );
+  assert.ok(
+    cssSrc.includes("border: none;"),
+    "Expected scrollbar borders removed"
   );
 
   // Subtle dark-gray thumb (14% white on dark background)
@@ -163,5 +173,46 @@ test("Minimalist subtle scrollbar styles in index.css enforce thin dimensions, t
   assert.ok(
     cssSrc.includes("scrollbar-color: rgba(255, 255, 255, 0.14) transparent;"),
     "Expected standard scrollbar-color property"
+  );
+
+  // Dedicated utility to visually hide scrollbars
+  assert.ok(
+    cssSrc.includes(".kinana-scrollbar-hidden"),
+    "Expected .kinana-scrollbar-hidden utility class"
+  );
+  assert.ok(
+    cssSrc.includes("scrollbar-width: none;"),
+    "Expected scrollbar-width: none in hidden utility"
+  );
+});
+
+test("Language dropdown applies dedicated kinana-scrollbar-hidden utility while preserving options accessibility", () => {
+  const switcherSrc = fs.readFileSync(
+    path.join(uiRoot, "src/components/LanguageSwitcher.tsx"),
+    "utf8"
+  );
+
+  // Options list applies dedicated utility
+  assert.ok(
+    switcherSrc.includes("kinana-scrollbar-hidden"),
+    "Expected language options listbox to use kinana-scrollbar-hidden utility class"
+  );
+  assert.ok(
+    switcherSrc.includes("overflow-y-auto"),
+    "Expected options listbox to remain vertically scrollable via overflow-y-auto"
+  );
+
+  // Keyboard navigation and auto scroll remain wired
+  assert.ok(
+    switcherSrc.includes('scrollIntoView({ block: "nearest" })'),
+    "Expected highlighted option to scroll into view automatically"
+  );
+  assert.ok(
+    switcherSrc.includes('e.key === "ArrowDown"'),
+    "Expected ArrowDown keyboard navigation"
+  );
+  assert.ok(
+    switcherSrc.includes('e.key === "ArrowUp"'),
+    "Expected ArrowUp keyboard navigation"
   );
 });

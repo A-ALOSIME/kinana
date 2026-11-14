@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.16] - 2026-11-14
+
+### Changed
+- Visually hid native scrollbars in the language switcher dropdown options list using dedicated `.kinana-scrollbar-hidden` CSS utility rules while maintaining full mouse-wheel, touchpad, and keyboard scrolling accessibility.
+- Suppressed native scrollbar arrow stepper buttons (`::-webkit-scrollbar-button { display: none; }`) globally across Windows WebView2, Linux WebKitGTK, and macOS WKWebView.
+- Removed all default scrollbar borders and corner decorations from scrollable dialogs, service lists, settings, and vault containers for a consistent, seamless monochrome interface.
+
+---
+
 ## [0.1.15] - 2026-11-14
 
 ### Changed
