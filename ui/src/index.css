@@ -104,27 +104,31 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.16);
     border-radius: 9999px;
     border: none;
     transition: background 0.2s ease;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.28);
   }
   ::-webkit-scrollbar-thumb:active {
-    background: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.38);
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
 
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
-  }
-  *:hover {
-    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  /* Standard scrollbar properties for engines without WebKit scrollbar pseudo-elements (e.g. Firefox)
+     Guarded by @supports to prevent disabling ::-webkit-scrollbar pseudo-elements in Chromium/WebKit engines */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+    }
+    *:hover {
+      scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+    }
   }
 
   /* Dedicated utility to visually hide scrollbars while preserving full scrollability */

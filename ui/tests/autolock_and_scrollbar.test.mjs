@@ -143,10 +143,10 @@ test("Minimalist subtle scrollbar styles in index.css enforce thin dimensions, t
     "Expected scrollbar borders removed"
   );
 
-  // Subtle dark-gray thumb (14% white on dark background)
+  // Subtle dark-gray thumb (16% white on dark background)
   assert.ok(
-    cssSrc.includes("rgba(255, 255, 255, 0.14)"),
-    "Expected subtle thumb color rgba(255, 255, 255, 0.14)"
+    cssSrc.includes("rgba(255, 255, 255, 0.16)"),
+    "Expected subtle thumb color rgba(255, 255, 255, 0.16)"
   );
 
   // Fully rounded thumb
@@ -165,13 +165,18 @@ test("Minimalist subtle scrollbar styles in index.css enforce thin dimensions, t
     "Expected active state for thumb"
   );
 
-  // Cross-browser standard scrollbar styling
+  // Cross-browser standard scrollbar styling wrapped in @supports not selector(::-webkit-scrollbar)
+  // to avoid disabling ::-webkit-scrollbar pseudo-elements in Chromium/WebKit engines
+  assert.ok(
+    cssSrc.includes("@supports not selector(::-webkit-scrollbar)"),
+    "Expected standard scrollbar properties guarded with @supports not selector(::-webkit-scrollbar)"
+  );
   assert.ok(
     cssSrc.includes("scrollbar-width: thin;"),
     "Expected standard scrollbar-width: thin"
   );
   assert.ok(
-    cssSrc.includes("scrollbar-color: rgba(255, 255, 255, 0.14) transparent;"),
+    cssSrc.includes("scrollbar-color: rgba(255, 255, 255, 0.16) transparent;"),
     "Expected standard scrollbar-color property"
   );
 
