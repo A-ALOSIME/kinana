@@ -284,8 +284,9 @@ jobs:
             Kinana is an offline-first, local desktop password manager built with Rust, Tauri 2, and React. All sensitive data is encrypted locally using AES-256-GCM and Argon2id key derivation, with zero external server telemetry or cloud synchronization.
 
             #### What is New in This Release:
-            - Consistent Direct Copy & Independent Reveal Controls: Copying and Eye reveal/hide now operate independently and consistently across Account Details views, Bank Card Details views, and Add/Edit forms for Login passwords, Account Recovery Keys, Bank Card numbers, CVV/CVC, and Card PINs, copying untouched stored secrets directly through the Rust secure clipboard backend (`copy_password`, `copy_account_recovery_key`, `copy_account_pin`) without preloading plaintext into React or altering visibility state, and copying newly entered drafts through `copy_secure_text`.
-            - Missing & Pending-Removal Copy Safety: Suppressed Copy controls on empty, missing, or pending-removal secret fields (including Bank Card numbers when absent in Details view) so missing secrets never expose misleading Copy actions, while keeping Master Password, Vault Unlock, Vault Creation, Master Password Change, Auto-Unlock, and Vault Import fields strictly free of Copy controls.
+            - Start a New Vault (Emergency Reset Flow): Added an explicit, secure local vault reset mechanism for users who have lost both their master password and emergency recovery key. Accessible through the recovery dialog with clear explanatory warnings, requiring exact typed confirmation ("RESET") before purging orphaned vault files to permit creating a fresh vault safely.
+            - Authentication Screen Redesign: Repositioned Kinana's logo and tagline outside the form card with a centered, balanced layout and responsive 64px visual separation.
+            - Multilingual Typography & Icon Alignment Polish: Resolved text wrapping, button height flexing, and icon containment across all 22 supported languages (including long French, German, and Japanese labels). Anchored recovery and import links inline to preserve natural LTR and RTL flow without detached icons.
 
             #### Download Options:
             - Windows (x64): `kinana-windows-x64-setup.exe` (NSIS Installer)

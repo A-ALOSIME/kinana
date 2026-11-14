@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.17] - 2026-11-14
+
+### Added
+- Added an emergency "Start a New Vault" reset option (`reset_local_vault`) inside the recovery dialog for users who lose both master password and recovery key, requiring explicit confirmation typing `RESET` to securely delete orphaned local vault artifacts and create a new vault.
+
+### Changed
+- Redesigned the authentication screen: moved Kinana's logo and tagline outside the form card with a centered, balanced layout and responsive 64px visual separation.
+- Fixed authentication text wrapping and button layout across all 22 supported languages, eliminating text overflow and detached icons in French, German, and Japanese.
+- Replaced fixed button heights with flexible minimum heights and responsive padding, and converted recovery and import links into natural inline text flows with anchored icons.
+- Improved recovery and reset dialog header alignments and removed ellipsis truncation from confirmation modal action buttons.
+
+---
+
 ## [0.1.16] - 2026-11-14
 
 ### Changed
