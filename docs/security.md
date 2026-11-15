@@ -61,7 +61,7 @@ Kinana supports vault recovery using an **Emergency Recovery Key**:
 - Deriving the key from the recovery passphrase uses independent Argon2id salt and parameters.
 - Recovering a vault restores access and immediately prompts the user to configure a new master password, establishing new cryptographic salts and nonces.
 - Starting with v0.1.4, Kinana's Emergency Recovery Key stays hidden/masked by default in Security Settings (`KN-••••-••••-••••-••••`) until explicitly toggled visible, can be copied directly to the clipboard via backend IPC without displaying it on screen, and clears temporary reveal state when closing Settings or locking the vault.
-- Starting with v0.1.17, if a user loses both the master password and the Emergency Recovery Key, the **Start a New Vault** feature allows purging orphaned local vault files, journal, and local backups upon explicit confirmation (`RESET`), allowing the creation of a new vault. This operation permanently discards local files and cannot decrypt or recover previous data.
+- Starting with v0.1.17, if a user loses both the master password and the Emergency Recovery Key, the **Start a New Vault** feature allows purging orphaned local vault files, journal, and local backups upon explicit confirmation (`RESET`), allowing the creation of a new vault. This operation permanently discards local files and cannot decrypt or recover previous data. It performs standard filesystem deletion and does not claim specialized physical disk sanitization, nor does it delete previously exported external `.dat` backups stored outside the application directory.
 
 ---
 
@@ -98,9 +98,9 @@ Kinana provides an optional, opt-in Auto-Unlock convenience feature that stores 
 
 ## 7. Clipboard Security and Platform Nuances
 
-Kinana automatically clears copied credentials after 15 seconds:
+Kinana automatically clears copied credentials after approximately 15 seconds:
 
-- **Windows**: Copies use native Win32 clipboard APIs and register clipboard exclusion formats (`ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`). This instructs the Windows clipboard history buffer (Win+V) and cloud clipboard synchronization not to record copied secrets.
+- **Windows**: Copies use native Win32 clipboard APIs and register clipboard exclusion formats (`ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`). This instructs the Windows clipboard history buffer (Win+V) and cloud clipboard synchronization not to record copied secrets. Note that third-party clipboard utilities, screen recorders, or compromised environments may not respect or recognize these OS flags; universal clipboard-history prevention across all software environments cannot be guaranteed.
 - **Linux (X11 & Wayland)**: Kinana releases its clipboard selection ownership and overwrites the primary system clipboard after 15 seconds.
   - Third-party clipboard history daemons: Modern desktop environments often feature third-party clipboard history managers (e.g., CopyQ, GPaste, Diodon, Klipper) that listen to clipboard change events and record copied text into their own independent database. Standard X11/Wayland clipboard clearing cannot modify or delete entries already captured by these independent third-party background daemons.
   - Recommendation: If you utilize a persistent clipboard manager on Linux, configure it to exclude sensitive applications or disable history tracking while managing passwords.

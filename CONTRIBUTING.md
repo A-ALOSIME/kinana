@@ -48,9 +48,17 @@ To build and test Kinana locally, ensure you have the following installed:
    ```
 
 3. **Run the development application**:
-   ```bash
-   npm --prefix ui run dev
-   ```
+   - **Full Desktop Application (Native Tauri Development)**:
+     Runs both the Vite dev server and the desktop application with complete Rust IPC and crypto:
+     ```bash
+     npx --prefix ui tauri dev
+     ```
+     *(On Windows PowerShell: `.\ui\node_modules\.bin\tauri.cmd dev`; on Linux/macOS: `./ui/node_modules/.bin/tauri dev`; or with `cargo tauri dev`)*
+   - **Frontend Only (Browser Mockup)**:
+     Runs only the Vite development server in the browser at `http://localhost:5173` without desktop Rust backend bindings:
+     ```bash
+     npm --prefix ui run dev
+     ```
 
 ---
 

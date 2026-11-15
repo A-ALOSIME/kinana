@@ -27,47 +27,60 @@ To verify download authenticity, download the checksum file:
 
 ### System Requirements
 - Windows 10 or Windows 11 (64-bit).
-- Microsoft Edge WebView2 Evergreen Runtime (pre-installed on Windows 10/11; installed automatically by the installer if missing).
+- Microsoft Edge WebView2 Evergreen Runtime (pre-installed on modern Windows 10/11; installed automatically by the installer if absent).
 
-### Steps
-1. Download `kinana-windows-x64-setup.exe`.
-2. Double-click the downloaded executable to start the installation wizard.
-3. If Windows SmartScreen displays a blue banner stating "Windows protected your PC":
-   - Click **More info**.
-   - Click **Run anyway**.
-   *(This prompt appears because Kinana is an independent open-source project and does not currently use an expensive commercial EV code-signing certificate.)*
-4. Follow the setup wizard to complete the installation.
-5. Launch Kinana from the Start Menu or desktop shortcut.
+### Installation Steps
+1. **Download**: Download `kinana-windows-x64-setup.exe` directly from the official [GitHub Releases](https://github.com/A-ALOSIME/kinana/releases) page.
+2. **Verify Integrity (Recommended)**: Check the downloaded file's SHA-256 hash using PowerShell:
+   ```powershell
+   Get-FileHash -Algorithm SHA256 .\kinana-windows-x64-setup.exe
+   ```
+   Confirm that the calculated hash matches the value listed in [SHA256SUMS.txt](https://github.com/A-ALOSIME/kinana/releases/latest/download/SHA256SUMS.txt).
+3. **Run the Installer**: Double-click `kinana-windows-x64-setup.exe` to begin installation.
+4. **Microsoft Defender SmartScreen Notice**:
+   Because Kinana is an independent open-source project and its binaries are currently distributed without a commercial digital code-signing certificate, Microsoft Defender SmartScreen may display a warning dialog stating "Windows protected your PC".
+   - **Why this occurs**: SmartScreen evaluates digital signatures and file reputation across Windows installations. Newly released or unsigned binaries may trigger this notice depending on your Windows edition, local security policies, and telemetry settings. This warning does not appear on every Windows machine.
+   - **Verifying authenticity**: An unsigned binary is not inherently malicious, but you should always ensure you obtained the installer directly from the official GitHub repository and verified its SHA-256 hash.
+   - **Proceeding safely**: If Windows displays this prompt and offers the action, click **More info** followed by **Run anyway** to proceed with installation.
+   - **Important**: Never disable Windows Defender, SmartScreen, or system antivirus protection.
+5. **Complete Setup**: Follow the on-screen installer instructions. Once finished, launch Kinana from the Start Menu or desktop shortcut.
 
 ---
 
-## macOS Installation
+## macOS Installation (Preview)
 
 ### System Requirements
 - macOS 10.15 (Catalina) or later.
 - For Apple Silicon Macs (M1, M2, M3, M4): use `kinana-macos-arm64.dmg`.
 - For Intel-based Macs: use `kinana-macos-x64.dmg`.
 
-### Steps
-1. Download the `.dmg` file matching your Mac's processor architecture.
+### Installation Steps
+1. Download the `.dmg` file matching your Mac's processor architecture from the official [GitHub Releases](https://github.com/A-ALOSIME/kinana/releases) page.
 2. Double-click the downloaded `.dmg` file to mount it.
-3. Drag the **Kinana** icon into your **Applications** folder.
+3. Drag the **Kinana** application icon into your **Applications** folder.
 4. Eject the disk image.
 
-### Unsigned Application Notice (Gatekeeper)
-Because Kinana binaries are not yet notarized with an Apple Developer subscription, macOS Gatekeeper may display a dialog stating that the developer cannot be verified when opening the app for the first time.
+### Unsigned Application Notice (Apple Gatekeeper)
+Kinana macOS packages are currently marked as Preview because they have not yet undergone comprehensive manual testing across diverse physical Mac hardware. The binaries are currently unsigned and not notarized with Apple. Consequently, Apple Gatekeeper may block direct opening with a prompt indicating that the developer cannot be verified or that Apple cannot check the app for malicious software.
 
-To open the application safely:
+#### Preferred Graphical Method (Standard macOS Flow)
 1. Open your **Applications** folder in Finder.
-2. Right-click (or Control-click) on **Kinana**.
-3. Select **Open** from the context menu.
-4. In the confirmation dialog, click **Open**.
+2. Right-click (or Control-click) on **Kinana** and select **Open** from the context menu.
+3. In the confirmation dialog, click **Open**.
+4. **On macOS Ventura, Sonoma, and Sequoia**: If direct opening is prevented:
+   - Open **Apple menu -> System Settings -> Privacy & Security**.
+   - Scroll down to the **Security** section.
+   - Look for the notification stating that Kinana was blocked from opening, and click **Open Anyway**.
+   - Confirm by entering your Mac account password or Touch ID when prompted.
 
-Alternatively, you can clear the quarantine attribute via Terminal:
+*(Note: Gatekeeper restrictions cannot always be bypassed if your Mac is enrolled in an enterprise Mobile Device Management (MDM) profile that enforces strict signature requirements).*
+
+#### Advanced Terminal Option
+If preferred by advanced users, you can remove the download quarantine flag assigned specifically to the Kinana application bundle using Terminal:
 ```bash
-xattr -cr /Applications/Kinana.app
+xattr -d com.apple.quarantine /Applications/Kinana.app
 ```
-*(You only need to perform this step once on first launch.)*
+This command removes only the `com.apple.quarantine` extended attribute from the Kinana app bundle without modifying any other applications on your system. Never disable Gatekeeper globally (`spctl --master-disable`).
 
 ---
 

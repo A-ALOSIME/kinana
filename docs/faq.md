@@ -28,28 +28,29 @@ Because the export file is fully encrypted with AES-256-GCM using your master pa
 
 ---
 
-### Why does Windows SmartScreen display a warning when I run the installer?
-Windows SmartScreen displays a warning banner ("Windows protected your PC") for new executable files that lack an expensive commercial Extended Validation (EV) code-signing certificate.
+### Why might Windows SmartScreen display a warning when I run the installer?
+Because Kinana is an independent open-source project and its Windows binaries are currently distributed without a commercial digital code-signing certificate, Microsoft Defender SmartScreen may display a warning dialog stating "Windows protected your PC".
 
-Kinana is an independent, non-profit open-source project. To continue with installation:
-1. Click **More info**.
-2. Click **Run anyway**.
+SmartScreen uses reputation-based analysis that evaluates digital signatures and file telemetry across Windows installations. A warning is expected for newly released or unsigned executables, though whether it appears varies depending on Windows edition, local system configuration, and enterprise policies (it does not appear on every installation).
 
-You can also independently verify the SHA-256 checksum of your downloaded installer against the official release hashes listed in `SHA256SUMS.txt`.
+An unsigned binary is not inherently malicious, but you should always ensure you downloaded it directly from the official [GitHub Releases](https://github.com/A-ALOSIME/kinana/releases) page and verify its SHA-256 hash against `SHA256SUMS.txt`. If Windows presents the option, click **More info** followed by **Run anyway**. Never disable Windows Defender, SmartScreen, or system antivirus protection.
 
 ---
 
 ### Why does macOS show a warning about an unverified developer?
-On macOS, Gatekeeper checks for Apple Developer notarization tickets. Because Kinana binaries are currently distributed as an open-source community release without an active Apple Developer subscription:
-1. Right-click (or Control-click) the **Kinana** app icon in Finder.
-2. Select **Open**.
-3. Confirm by clicking **Open** in the dialog.
+Kinana macOS packages are currently marked as Preview because they have not yet undergone comprehensive manual testing across physical Mac hardware. The binaries are currently unsigned and not notarized with Apple. As a result, Apple Gatekeeper may block direct opening with a message stating that the developer cannot be verified or that Apple cannot check it for malicious software.
 
-Alternatively, open Terminal and run:
+To open the application:
+1. Open your **Applications** folder in Finder.
+2. Right-click (or Control-click) the **Kinana** app icon and select **Open**.
+3. In the confirmation dialog, click **Open**.
+4. On macOS Ventura, Sonoma, and Sequoia: If direct opening is prevented, navigate to **Apple menu -> System Settings -> Privacy & Security**, scroll down to the Security section, and click **Open Anyway**.
+
+Advanced users may alternatively remove the quarantine extended attribute assigned specifically to the Kinana bundle via Terminal:
 ```bash
-xattr -cr /Applications/Kinana.app
+xattr -d com.apple.quarantine /Applications/Kinana.app
 ```
-This is only required once on first launch.
+This clears the download quarantine flag for Kinana.app only; never disable Gatekeeper globally. Note that Gatekeeper warnings cannot always be bypassed if strict enterprise MDM policies are active.
 
 ---
 

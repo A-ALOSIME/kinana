@@ -71,12 +71,13 @@ Kinana is designed around the principle of data minimization and defense in dept
   - On Linux, credentials use the Freedesktop Secret Service standard (`org.freedesktop.secrets` via GNOME Keyring, KWallet, or KeePassXC) over the user D-Bus session bus. Any process running under the same user UID with session bus access could query this service; users on shared or multi-tenant accounts should keep Auto-Unlock disabled.
   - On macOS, Auto-Unlock is currently not supported and remains disabled.
 - **Clipboard Security**:
-  - On Windows, copied credentials register clipboard exclusion formats (`ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`) to prevent capture by Windows Clipboard History (Win+V) and cloud clipboard sync.
+  - On Windows, copied credentials register clipboard exclusion formats (`ExcludeClipboardContentFromMonitorProcessing` and `CanIncludeInClipboardHistory = 0`) to instruct the OS not to record secrets in Windows Clipboard History (Win+V) or cloud clipboard synchronization. Third-party clipboard utilities, screen recorders, or compromised environments may not respect or support these flags, so universal clipboard exclusion cannot be guaranteed across all software environments.
   - On all platforms, copied secrets are automatically scrubbed from the primary system clipboard after approximately 15 seconds.
-  - On Linux, third-party clipboard history daemons (such as CopyQ, GPaste, Diodon, or Klipper) listen independently to clipboard change events and record history into their own external databases. Standard X11/Wayland clipboard clearing cannot modify entries already captured by these independent background daemons. Users running persistent clipboard managers should configure them to exclude sensitive entries or disable clipboard history while managing secrets.
+  - On Linux, third-party clipboard history daemons (such as CopyQ, GPaste, Diodon, or Klipper) listen independently to clipboard change events and record history into their own external databases. Standard X11/Wayland clipboard clearing cannot modify or erase entries already captured by these independent background daemons. Users running persistent clipboard managers should configure them to exclude sensitive entries or disable clipboard tracking while managing secrets.
 - **Threat Model Boundaries**:
   - Kinana protects strongly against offline device theft, disk inspection, file tampering, and brute-force attacks.
-  - Kinana cannot protect against active malware, rootkits, keyloggers, or administrative compromise running on an infected host operating system.
+  - Kinana cannot protect against active malware, rootkits, keyloggers, memory dump tools, or administrative compromise running on an infected host operating system.
+  - Zero Network Activity: Kinana contains zero networking code, opens zero listening sockets, and issues zero outbound network requests. All operations occur strictly locally.
   - The security of your vault relies fundamentally on the entropy of your master password and the safe retention of your Emergency Recovery Key. Kinana holds no backdoor recovery mechanisms.
 
 ---
@@ -90,7 +91,7 @@ During vault creation, Kinana generates a high-entropy Emergency Recovery Key. I
 If you lose both your master password and your Emergency Recovery Key, cryptographic recovery is mathematically impossible. To allow you to continue using the application without manually locating and deleting hidden filesystem directories, Kinana provides a **Start a New Vault** option within the recovery dialog:
 
 - **Not Password Recovery**: This option does not recover or decrypt your forgotten credentials.
-- **Discards Local Vault**: It permanently deletes the local locked vault file, transaction journal, and local safety backups so you can create a fresh empty vault.
+- **Discards Local Vault**: It permanently deletes the local locked vault file, transaction journal, and local safety backups so you can create a fresh empty vault. Standard filesystem deletion is performed; specialized physical storage sanitization is neither performed nor claimed.
 - **Explicit Confirmation**: The operation requires explicit destructive confirmation: you must type `RESET` in uppercase before the action is executed.
 - **External Backups Preserved**: Previously exported external backup files (`.dat`) stored outside the application directory are not deleted.
 - **Irreversible**: Once confirmed, existing local vault data is completely discarded and cannot be decrypted or restored.
@@ -105,9 +106,10 @@ Because Kinana does not synchronize across the cloud, you maintain full control 
 ## Quick Installation
 
 ### Windows (Stable)
-1. Download [kinana-windows-x64-setup.exe](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-windows-x64-setup.exe).
-2. Run the installer. If Windows SmartScreen displays a warning, click **More info** then **Run anyway** (Kinana is an independent open-source project without a commercial EV certificate).
-3. Follow the setup wizard to complete installation.
+1. Download `kinana-windows-x64-setup.exe` directly from the official [GitHub Releases](https://github.com/A-ALOSIME/kinana/releases) page.
+2. (Recommended) Verify the installer SHA-256 hash against [SHA256SUMS.txt](https://github.com/A-ALOSIME/kinana/releases/latest/download/SHA256SUMS.txt).
+3. Run the installer. Because Kinana is an independent open-source project distributed without a commercial digital code-signing certificate, Microsoft Defender SmartScreen may display a warning ("Windows protected your PC") depending on system reputation, policies, and Windows configuration. An unsigned binary is not inherently malicious, but you should confirm you obtained it from the official GitHub repository. If Windows presents the option, click **More info** followed by **Run anyway**. Never disable Windows Defender, SmartScreen, or system antivirus protection.
+4. Follow the setup wizard to complete installation.
 
 ### Linux (Stable)
 - **Debian / Ubuntu / Linux Mint (`.deb`)**:
@@ -123,10 +125,14 @@ Because Kinana does not synchronize across the cloud, you maintain full control 
 ### macOS (Preview)
 1. Download the `.dmg` matching your processor architecture ([Apple Silicon](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-macos-arm64.dmg) or [Intel](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-macos-x64.dmg)).
 2. Open the disk image and drag **Kinana** into your **Applications** folder.
-3. On first launch, right-click **Kinana** in Finder and choose **Open**, or clear the quarantine attribute via Terminal:
-   ```bash
-   xattr -cr /Applications/Kinana.app
-   ```
+3. Because Kinana macOS builds are currently unsigned and not notarized with Apple, macOS Gatekeeper may block direct opening:
+   - **Preferred Graphical Flow**: Open your **Applications** folder in Finder, right-click (or Control-click) **Kinana**, select **Open**, and click **Open** in the confirmation dialog. (On macOS Ventura and newer, you can also navigate to **Apple menu -> System Settings -> Privacy & Security**, scroll down to Security, and click **Open Anyway** if prompted).
+   - **Advanced Terminal Option**: You can remove the download quarantine flag assigned specifically to the Kinana bundle:
+     ```bash
+     xattr -d com.apple.quarantine /Applications/Kinana.app
+     ```
+     *(Note: This strips the macOS quarantine attribute specifically from Kinana.app; never disable Gatekeeper globally).*
+4. Once authorized, Kinana launches normally from Applications or Spotlight.
 
 For comprehensive instructions, see the [Installation Guide](docs/installation.md).
 
@@ -137,7 +143,7 @@ For comprehensive instructions, see the [Installation Guide](docs/installation.m
 ### Prerequisites
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain)
 - [Node.js](https://nodejs.org/) (version 18 or later) with `npm`
-- Platform C++ build tools (Visual Studio Build Tools on Windows, Xcode CLI on macOS, or `build-essential` on Linux)
+- Platform C++ build tools (Visual Studio Build Tools on Windows, Xcode Command Line Tools on macOS, or `build-essential` on Linux)
 
 ### Setup Steps
 
@@ -156,12 +162,21 @@ For comprehensive instructions, see the [Installation Guide](docs/installation.m
 
 ### Running in Development
 
-- **Desktop Application (Full Tauri Development)**:
+- **Desktop Application (Full Native Tauri Development)**:
   Runs both the Vite dev server and the native desktop Tauri application with full Rust IPC, crypto, and OS integration:
   ```bash
+  # Cross-platform (using repository CLI dependency):
   npx --prefix ui tauri dev
+
+  # Windows (direct binary invocation):
+  .\ui\node_modules\.bin\tauri.cmd dev
+
+  # Linux / macOS (direct binary invocation):
+  ./ui/node_modules/.bin/tauri dev
+
+  # If tauri-cli is installed globally via Cargo:
+  cargo tauri dev
   ```
-  *(Alternatively, if `tauri-cli` is installed via Cargo: `cargo tauri dev`)*
 
 - **Frontend Only (Browser Mockup)**:
   Runs only the Vite development server in the browser at `http://localhost:5173` without desktop Rust backend capabilities:
@@ -173,9 +188,18 @@ For comprehensive instructions, see the [Installation Guide](docs/installation.m
 
 Compile the optimized production desktop executable and platform bundle for your current operating system:
 ```bash
+# Cross-platform:
 npx --prefix ui tauri build
+
+# Windows:
+.\ui\node_modules\.bin\tauri.cmd build
+
+# Linux / macOS:
+./ui/node_modules/.bin/tauri build
+
+# Or with cargo-tauri:
+cargo tauri build
 ```
-*(Alternatively: `cargo tauri build`)*
 
 Built installers and packages are generated in `target/release/bundle/`.
 
