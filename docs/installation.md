@@ -11,13 +11,15 @@ Download the appropriate installer for your operating system from the latest rel
 | Platform | Architecture | Package Format | Download Link | Status |
 |---|---|---|---|---|
 | **Windows** | x86_64 (64-bit) | NSIS Installer (`.exe`) | [Download Windows Installer](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-windows-x64-setup.exe) | Stable |
+| **Linux** | x86_64 | Debian / Ubuntu (`.deb`) | [Download Linux DEB](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-linux-x64.deb) | Stable |
+| **Linux** | x86_64 | Universal (`.AppImage`) | [Download Linux AppImage](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-linux-x64.AppImage) | Stable |
 | **macOS** | Apple Silicon (M1/M2/M3/M4) | Apple Disk Image (`.dmg`) | [Download macOS Apple Silicon DMG](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-macos-arm64.dmg) | Preview |
 | **macOS** | Intel (x86_64) | Apple Disk Image (`.dmg`) | [Download macOS Intel DMG](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-macos-x64.dmg) | Preview |
-| **Linux** | x86_64 | Debian / Ubuntu (`.deb`) | [Download Linux DEB](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-linux-x64.deb) | Preview |
-| **Linux** | x86_64 | Universal (`.AppImage`) | [Download Linux AppImage](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-linux-x64.AppImage) | Preview |
 
 To verify download authenticity, download the checksum file:
 [SHA256SUMS.txt](https://github.com/A-ALOSIME/kinana/releases/latest/download/SHA256SUMS.txt)
+
+> Note: Linux packages (DEB and AppImage) are classified as Stable based on development and test distribution verification; compatibility is not claimed across every Linux distribution or hardware configuration. macOS builds remain in Preview pending comprehensive manual hardware testing.
 
 ---
 

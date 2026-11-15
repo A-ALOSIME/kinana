@@ -102,3 +102,13 @@ If you ever forget your master password:
 2. Carefully type or paste your saved Emergency Recovery Key.
 3. Click **Recover Vault**.
 4. Once unlocked, immediately navigate to **Settings** to set a new master password and generate a new recovery key.
+
+### Lost Both Master Password and Recovery Key? (Start a New Vault)
+
+If you lose both your master password and your Emergency Recovery Key, your encrypted vault data cannot be decrypted or recovered.
+
+To allow you to continue using Kinana without manually searching for and deleting application data folders on disk, choose **Start a New Vault** within the recovery dialog:
+- **Discards Local Vault**: This permanently deletes the locked local vault file, transaction journal, and local safety backups so that you can create a fresh empty vault.
+- **Explicit Confirmation**: To prevent accidental loss, you must type `RESET` in uppercase before the operation is executed.
+- **Not Password Recovery**: This does NOT recover or decrypt previous credentials.
+- **Preserves External Backups**: Previously exported `.dat` backups stored outside the application directory remain untouched.

@@ -61,6 +61,7 @@ Kinana supports vault recovery using an **Emergency Recovery Key**:
 - Deriving the key from the recovery passphrase uses independent Argon2id salt and parameters.
 - Recovering a vault restores access and immediately prompts the user to configure a new master password, establishing new cryptographic salts and nonces.
 - Starting with v0.1.4, Kinana's Emergency Recovery Key stays hidden/masked by default in Security Settings (`KN-••••-••••-••••-••••`) until explicitly toggled visible, can be copied directly to the clipboard via backend IPC without displaying it on screen, and clears temporary reveal state when closing Settings or locking the vault.
+- Starting with v0.1.17, if a user loses both the master password and the Emergency Recovery Key, the **Start a New Vault** feature allows purging orphaned local vault files, journal, and local backups upon explicit confirmation (`RESET`), allowing the creation of a new vault. This operation permanently discards local files and cannot decrypt or recover previous data.
 
 ---
 

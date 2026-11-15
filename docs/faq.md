@@ -12,7 +12,9 @@ Yes. Kinana contains zero networking code, zero analytics SDKs, and zero telemet
 ### What happens if I forget my master password?
 Because Kinana does not use cloud servers or central databases, there is no "Forgot Password" email service. 
 
-If you forget your master password, you must use your **Emergency Recovery Key** (which you were prompted to save when creating the vault). If you lose both your master password and your Emergency Recovery Key, your data is cryptographically irrecoverable.
+If you forget your master password, you must use your **Emergency Recovery Key** (which you were prompted to save when creating the vault).
+
+If you lose both your master password and your Emergency Recovery Key, your existing data is cryptographically irrecoverable. In this scenario, you can use the **Start a New Vault** option in the recovery dialog to discard the locked local vault and create a fresh one (requires typing `RESET` in uppercase to confirm). Previously exported external `.dat` backups are not deleted.
 
 ---
 
@@ -53,9 +55,9 @@ This is only required once on first launch.
 
 ### What desktop platforms are supported?
 Kinana officially supports:
-- **Windows**: Windows 10 and Windows 11 (x86_64).
+- **Windows**: Windows 10 and Windows 11 (x86_64) - Stable.
+- **Linux**: Modern 64-bit Linux distributions via `.deb` (Debian/Ubuntu/Mint) and standalone `.AppImage` - Stable (tested on development distributions; compatibility is not claimed across every Linux distribution or hardware configuration).
 - **macOS (Preview)**: macOS 10.15+ on both Apple Silicon (M1/M2/M3/M4, `arm64`) and Intel (`x86_64`).
-- **Linux (Preview)**: Modern 64-bit Linux distributions via `.deb` (Debian/Ubuntu/Mint) and standalone `.AppImage`.
 
 ---
 
