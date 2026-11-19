@@ -60,8 +60,12 @@ To verify download authenticity, download the checksum file:
 3. Drag the **Kinana** application icon into your **Applications** folder.
 4. Eject the disk image.
 
-### Unsigned Application Notice (Apple Gatekeeper)
-Kinana macOS packages are currently marked as Preview because they have not yet undergone comprehensive manual testing across diverse physical Mac hardware. The binaries are currently unsigned and not notarized with Apple. Consequently, Apple Gatekeeper may block direct opening with a prompt indicating that the developer cannot be verified or that Apple cannot check the app for malicious software.
+> **Important — Do Not Run Directly from Disk Image**: Do not double-click or launch Kinana from inside the mounted `.dmg` window. macOS mounts disk images as read-only and triggers App Translocation on quarantined files, which causes macOS to report `"Kinana" is damaged and can't be opened. You should eject the disk image.` Always copy Kinana to `/Applications` first, eject the disk image, and launch the application from `/Applications`.
+
+### Ad-Hoc Code Signing and Gatekeeper Notice
+Kinana macOS packages are currently marked as Preview because they have not yet undergone comprehensive manual testing across diverse physical Mac hardware. 
+
+The application bundles are sealed with ad-hoc code signatures (`codesign -s -`) to ensure internal binary and resource integrity on Apple Silicon and Intel systems, but are distributed without a paid Apple Developer ID certificate and are not notarized by Apple. Consequently, Apple Gatekeeper may block direct opening with a prompt indicating that the developer cannot be verified or that Apple cannot check the app for malicious software.
 
 #### Preferred Graphical Method (Standard macOS Flow)
 1. Open your **Applications** folder in Finder.

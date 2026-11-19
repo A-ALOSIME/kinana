@@ -37,8 +37,24 @@ An unsigned binary is not inherently malicious, but you should always ensure you
 
 ---
 
+### Why does macOS say "Kinana is damaged and can't be opened. You should eject the disk image"?
+This message occurs when you double-click or attempt to launch Kinana directly from inside the mounted `.dmg` disk image window instead of dragging it to your Applications folder first.
+
+macOS mounts disk image files as read-only volumes. When an application downloaded from the internet carries the `com.apple.quarantine` extended attribute and is launched directly from a read-only disk image, macOS attempts to invoke App Translocation. Because Kinana is distributed with an ad-hoc code signature rather than an Apple Developer ID certificate and notarization ticket, App Translocation cannot execute the app from the read-only volume and macOS defaults to displaying the misleading "damaged" dialog with an "Eject Disk Image" button.
+
+The application bundle and disk image are not corrupted. To resolve this:
+1. Click **Eject Disk Image** (or close the error dialog and eject the disk image in Finder).
+2. Double-click `kinana-macos-arm64.dmg` (or `kinana-macos-x64.dmg`) to re-mount the disk image.
+3. Drag the **Kinana** icon into the **Applications** folder shortcut inside the window.
+4. Eject the disk image.
+5. Open your **Applications** folder and launch Kinana from there (see the next question for first-time launch steps).
+
+---
+
 ### Why does macOS show a warning about an unverified developer?
-Kinana macOS packages are currently marked as Preview because they have not yet undergone comprehensive manual testing across physical Mac hardware. The binaries are currently unsigned and not notarized with Apple. As a result, Apple Gatekeeper may block direct opening with a message stating that the developer cannot be verified or that Apple cannot check it for malicious software.
+Kinana macOS packages are currently marked as Preview because they have not yet undergone comprehensive manual testing across physical Mac hardware. 
+
+The application bundle is sealed with an ad-hoc code signature (`codesign -s -`) to ensure internal binary integrity and valid structure on Apple Silicon and Intel systems, but it is not signed with a paid Apple Developer ID certificate or notarized by Apple. As a result, Apple Gatekeeper may block direct double-clicking with a message stating that the developer cannot be verified or that Apple cannot check it for malicious software.
 
 To open the application:
 1. Open your **Applications** folder in Finder.

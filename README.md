@@ -124,15 +124,16 @@ Because Kinana does not synchronize across the cloud, you maintain full control 
 
 ### macOS (Preview)
 1. Download the `.dmg` matching your processor architecture ([Apple Silicon](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-macos-arm64.dmg) or [Intel](https://github.com/A-ALOSIME/kinana/releases/latest/download/kinana-macos-x64.dmg)).
-2. Open the disk image and drag **Kinana** into your **Applications** folder.
-3. Because Kinana macOS builds are currently unsigned and not notarized with Apple, macOS Gatekeeper may block direct opening:
+2. Open the disk image and drag **Kinana** into your **Applications** folder. *(Important: Do not double-click Kinana directly inside the disk image, as macOS read-only DMG translocation triggers a false "damaged" warning; always copy to Applications first).*
+3. Eject the disk image.
+4. Kinana macOS packages are ad-hoc signed (`codesign -s -`) to ensure structural bundle integrity on Apple Silicon and Intel, but are distributed without a commercial Apple Developer ID certificate and are not notarized by Apple. Consequently, macOS Gatekeeper may block direct opening:
    - **Preferred Graphical Flow**: Open your **Applications** folder in Finder, right-click (or Control-click) **Kinana**, select **Open**, and click **Open** in the confirmation dialog. (On macOS Ventura and newer, you can also navigate to **Apple menu -> System Settings -> Privacy & Security**, scroll down to Security, and click **Open Anyway** if prompted).
    - **Advanced Terminal Option**: You can remove the download quarantine flag assigned specifically to the Kinana bundle:
      ```bash
      xattr -d com.apple.quarantine /Applications/Kinana.app
      ```
      *(Note: This strips the macOS quarantine attribute specifically from Kinana.app; never disable Gatekeeper globally).*
-4. Once authorized, Kinana launches normally from Applications or Spotlight.
+5. Once authorized, Kinana launches normally from Applications or Spotlight.
 
 For comprehensive instructions, see the [Installation Guide](docs/installation.md).
 
