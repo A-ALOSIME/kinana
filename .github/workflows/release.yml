@@ -190,52 +190,6 @@ jobs:
           TARGET="${{ matrix.platform.target }}"
           mkdir -p release-assets
 
-          echo "Searching for built Kinana.app bundle..."
-          APP_BUNDLE=$(find target -type d -name "Kinana.app" | head -n 1)
-          if [ -z "$APP_BUNDLE" ] || [ ! -d "$APP_BUNDLE" ]; then
-            echo "ERROR: Kinana.app bundle not found in target"
-            exit 1
-          fi
-          echo "Found bundle: $APP_BUNDLE"
-
-          BINARY="$APP_BUNDLE/Contents/MacOS/kinana"
-          if [ ! -f "$BINARY" ]; then
-            echo "ERROR: Main executable not found at $BINARY"
-            exit 1
-          fi
-
-          echo "Checking binary architecture..."
-          BIN_INFO=$(file "$BINARY")
-          echo "$BIN_INFO"
-          if [ "$ARCH" = "arm64" ]; then
-            if ! echo "$BIN_INFO" | grep -q "arm64"; then
-              echo "ERROR: Expected arm64 architecture, got: $BIN_INFO"
-              exit 1
-            fi
-          elif [ "$ARCH" = "x64" ]; then
-            if ! echo "$BIN_INFO" | grep -qE "(x86_64|x86-64)"; then
-              echo "ERROR: Expected x86_64 architecture, got: $BIN_INFO"
-              exit 1
-            fi
-          fi
-
-          echo "Checking Info.plist bundle identifier..."
-          PLIST="$APP_BUNDLE/Contents/Info.plist"
-          if [ ! -f "$PLIST" ]; then
-            echo "ERROR: Info.plist not found at $PLIST"
-            exit 1
-          fi
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST" 2>/dev/null || defaults read "$(pwd)/$PLIST" CFBundleIdentifier)
-          echo "CFBundleIdentifier: $BUNDLE_ID"
-          if [ "$BUNDLE_ID" != "com.kinana.vault" ]; then
-            echo "ERROR: Unexpected CFBundleIdentifier '$BUNDLE_ID'"
-            exit 1
-          fi
-
-          echo "Verifying code signature of application bundle..."
-          codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
-          codesign -dv --verbose=4 "$APP_BUNDLE"
-
           echo "Locating built DMG file..."
           DMG_FILE=$(find target -name "*.dmg" | head -n 1)
           if [ -z "$DMG_FILE" ] || [ ! -f "$DMG_FILE" ]; then
@@ -260,16 +214,53 @@ jobs:
 
           hdiutil attach "$DMG_FILE" -mountpoint "$MOUNT_DIR" -nobrowse -readonly
 
-          if [ ! -d "$MOUNT_DIR/Kinana.app" ]; then
+          MOUNTED_APP="$MOUNT_DIR/Kinana.app"
+          if [ ! -d "$MOUNTED_APP" ]; then
             echo "ERROR: Kinana.app missing inside mounted DMG"
+            exit 1
+          fi
+          echo "Found application bundle inside mounted DMG: $MOUNTED_APP"
+
+          BINARY="$MOUNTED_APP/Contents/MacOS/kinana"
+          if [ ! -f "$BINARY" ]; then
+            echo "ERROR: Main executable not found at $BINARY"
+            exit 1
+          fi
+
+          echo "Checking binary architecture..."
+          BIN_INFO=$(file "$BINARY")
+          echo "$BIN_INFO"
+          if [ "$ARCH" = "arm64" ]; then
+            if ! echo "$BIN_INFO" | grep -q "arm64"; then
+              echo "ERROR: Expected arm64 architecture, got: $BIN_INFO"
+              exit 1
+            fi
+          elif [ "$ARCH" = "x64" ]; then
+            if ! echo "$BIN_INFO" | grep -qE "(x86_64|x86-64)"; then
+              echo "ERROR: Expected x86_64 architecture, got: $BIN_INFO"
+              exit 1
+            fi
+          fi
+
+          echo "Checking Info.plist bundle identifier..."
+          PLIST="$MOUNTED_APP/Contents/Info.plist"
+          if [ ! -f "$PLIST" ]; then
+            echo "ERROR: Info.plist not found at $PLIST"
+            exit 1
+          fi
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST" 2>/dev/null || defaults read "$PLIST" CFBundleIdentifier)
+          echo "CFBundleIdentifier: $BUNDLE_ID"
+          if [ "$BUNDLE_ID" != "com.kinana.vault" ]; then
+            echo "ERROR: Unexpected CFBundleIdentifier '$BUNDLE_ID'"
             exit 1
           fi
 
           echo "Verifying code signature of mounted Kinana.app..."
-          codesign --verify --deep --strict --verbose=2 "$MOUNT_DIR/Kinana.app"
+          codesign --verify --deep --strict --verbose=2 "$MOUNTED_APP"
+          codesign -dv --verbose=4 "$MOUNTED_APP"
 
           echo "Gatekeeper assessment diagnostic (expected unnotarized for ad-hoc build):"
-          spctl --assess --type execute --verbose=4 "$MOUNT_DIR/Kinana.app" || true
+          spctl --assess --type execute --verbose=4 "$MOUNTED_APP" || true
 
           hdiutil detach "$MOUNT_DIR"
           trap - EXIT
