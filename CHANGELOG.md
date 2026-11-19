@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.18] - 2026-11-19
+
+### Fixed
+- Fixed macOS Apple Silicon DMG launch failure where Gatekeeper reported "Kinana is damaged and can't be opened. You should eject the disk image" by enabling official Tauri 2 ad-hoc code signing (`signingIdentity: "-"`).
+- Sealed the macOS application bundle, `Info.plist`, binary, and internal resources with cryptographically valid ad-hoc signatures (`codesign -s -`), ensuring bundle integrity on both Apple Silicon (`arm64`) and Intel (`x86_64`) Macs.
+- Added comprehensive automated macOS packaging verification to CI and release workflows, verifying Mach-O binary architecture, bundle identifier (`com.kinana.vault`), strict bundle signature verification, and DMG mount integrity checks.
+- Refreshed macOS installation documentation across `README.md`, `README.ar.md`, `docs/installation.md`, and `docs/faq.md` to emphasize copying the app to `/Applications` before launch and detailing standard Apple Gatekeeper approval flows.
+
+---
+
 ## [0.1.17] - 2026-11-14
 
 ### Added

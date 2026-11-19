@@ -361,9 +361,9 @@ jobs:
             Kinana is an offline-first, local desktop password manager built with Rust, Tauri 2, and React. All sensitive data is encrypted locally using AES-256-GCM and Argon2id key derivation, with zero external server telemetry or cloud synchronization.
 
             #### What is New in This Release:
-            - Start a New Vault (Emergency Reset Flow): Added an explicit, secure local vault reset mechanism for users who have lost both their master password and emergency recovery key. Accessible through the recovery dialog with clear explanatory warnings, requiring exact typed confirmation ("RESET") before purging orphaned vault files to permit creating a fresh vault safely.
-            - Authentication Screen Redesign: Repositioned Kinana's logo and tagline outside the form card with a centered, balanced layout and responsive 64px visual separation.
-            - Multilingual Typography & Icon Alignment Polish: Resolved text wrapping, button height flexing, and icon containment across all 22 supported languages (including long French, German, and Japanese labels). Anchored recovery and import links inline to preserve natural LTR and RTL flow without detached icons.
+            - macOS Code Signing & Bundle Integrity Fix: Enabled Tauri 2 ad-hoc code signing (`signingIdentity: "-"`) to seal the application bundle, Info.plist, binary, and internal resources with cryptographically valid ad-hoc signatures (`codesign -s -`), resolving Gatekeeper launch failures ("Kinana is damaged") on Apple Silicon (arm64) and Intel (x64) Macs.
+            - Automated macOS Packaging Verification: Added pre-release verification in CI and release workflows to validate binary architecture, bundle ID (`com.kinana.vault`), codesign seal, and disk image mount integrity.
+            - Documentation & Gatekeeper Guidance Refresh: Clarified macOS installation workflows in English and Arabic documentation, emphasizing copying the application to Applications before launch and providing explicit Apple Gatekeeper approval instructions.
 
             #### Download Options:
             - Windows (x64): `kinana-windows-x64-setup.exe` (NSIS Installer)
